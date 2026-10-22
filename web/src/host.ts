@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Snapshot } from '../../packages/harness-core/src/contracts.ts';
+import { returnPath, returnPathKey } from './routes.ts';
 export class ApiError extends Error {
   constructor(
     public code: string,
@@ -73,6 +74,12 @@ export function webHost(): Host {
         throw new ApiError('NETWORK_ERROR');
       }
       const result = await response.json().catch(() => ({ code: 'SERVER_ERROR' }));
+      if (response.status === 401) {
+        await supabase()
+          .auth.signOut({ scope: 'local' })
+          .catch(() => {});
+        throw new ApiError('UNAUTHENTICATED', result.requestId);
+      }
       if (!response.ok) throw new ApiError(result.code || 'SERVER_ERROR', result.requestId);
       return result.data as T;
     },
@@ -88,6 +95,8 @@ export function webHost(): Host {
       return result.data;
     },
     async signIn() {
+      sessionStorage.setItem(returnPathKey, returnPath(new URLSearchParams(location.search).get('next')));
+      supabase().auth.startAutoRefresh();
       const result = await supabase().auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: location.origin + '/auth/callback', scopes: 'openid email profile' },

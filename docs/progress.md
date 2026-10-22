@@ -21,6 +21,28 @@
   with `OPENROUTER_TRIAL_TENANT_ID`, then real-account authorization and $0 billing
   acceptance. Existing hosting/Google rollout requirements below remain applicable.
 
+## 2026-10-22 · Supabase Auth and protected routes
+
+- Added a public `/login`, PKCE callback handling, and stable URLs for all six workspace screens.
+  Anonymous deep links preserve an allowlisted destination through Google sign-in; reload and
+  browser back/forward follow the URL. The synthetic preview remains a separate Host.
+- Auth.getUser validates restored and refreshed identities before loading workspace data.
+  Account changes and sign-out clear private state; API 401 returns to login. Existing Google
+  identity, invitation, tenant, resource and Storage authorization remain enforced server-side.
+- A single-use callback exchange is shared across React StrictMode initialization effects.
+  Failed/missing callback codes produce sanitized login errors without exposing provider details.
+- Added configured-Auth browser checks with synthetic responses alongside the existing preview
+  checks, plus unit coverage for redirect allowlists, token verification and callback replay.
+- Local verification against main including OpenRouter: TypeScript/Prettier, 27 unit/API/PWA tests,
+  21 PostgreSQL isolation tests, production build, and all 32 Chromium desktop/mobile checks passed.
+  Chromium was installed
+  after an initial missing-browser failure. No real Google identity was used in these checks.
+- Read-only query of the existing hosted project confirmed all 16 public tables have RLS enabled.
+  No hosted Auth settings, database schema, staff records or production deployment changed.
+- Google OAuth credentials, a real Pages origin and real-account acceptance remain required.
+  The Supabase connector has no Auth configuration update tool; the browser Dashboard requires
+  sign-in. Follow [auth-setup.md](auth-setup.md) to complete the controlled setup in the Dashboard.
+
 ## 2026-10-22 · Centralized PWA implementation
 
 - Source baseline: STeP-AI-Harness `90ee71ca667c63284afe4996eddc7e8095b9a059`, Desktop 0.6.20.
