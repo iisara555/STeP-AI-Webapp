@@ -1,0 +1,6 @@
+package-lock.json
+web/dist
+node_modules
+packages/harness-core/vendor
+test-results
+playwright-report

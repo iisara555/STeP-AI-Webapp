@@ -1,0 +1,116 @@
+# Deployment
+
+## Hosting
+
+Use a static Cloudflare Pages project and dedicated Supabase project. The initial
+project is `zwwchjshmxdzhhotacte`, Singapore, created after its quoted monthly cost
+was $0. No Cloudflare provisioning or Google OAuth management connection is
+available in this session; an actual Pages URL has not been created.
+
+Create Pages in the STeP account, connect this repository, and use:
+
+| Setting                         | Value                     |
+| ------------------------------- | ------------------------- |
+| Production branch               | main                      |
+| Root                            | repository root           |
+| Build                           | `npm ci && npm run build` |
+| Output                          | `web/dist`                |
+| Node                            | 24                        |
+| `VITE_SUPABASE_URL`             | Supabase API URL          |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Enabled publishable key   |
+
+Cloudflare assigns the real `*.pages.dev` URL. Alternatively use the manual Pages
+workflow after creating a project: add repository variables `CLOUDFLARE_ACCOUNT_ID`,
+`CLOUDFLARE_PROJECT_NAME`, both `VITE_` values, and secret `CLOUDFLARE_API_TOKEN`
+limited to Pages editing in that account. Choose one deployment route. The
+workflow runs only on main, never on PRs. Vercel Hobby was not selected for
+organizational commercial use. Review [Pages limits](https://developers.cloudflare.com/pages/platform/limits/)
+and [Supabase pricing](https://supabase.com/pricing); AI costs are separate.
+
+## Backend
+
+With the official Supabase CLI installed:
+
+```sh
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase db push
+npx supabase functions deploy api --no-verify-jwt
+npx supabase functions deploy worker --no-verify-jwt
+npx supabase functions deploy google-callback --no-verify-jwt
+```
+
+Schema and functions are already deployed in the initial project; local migration
+versions match its history. Check `supabase migration list` before updates. Do not
+reset the live database. JWT gateway verification is disabled intentionally: API
+code verifies Auth.getUser and membership, worker checks a shared secret, and the
+OAuth callback checks single-use expiring state and PKCE.
+
+Set these **server-only Edge Function secrets** in the dashboard or via an ignored
+local environment file. Never put them in `VITE_` or a committed SQL migration.
+
+| Secret                           | Purpose                                                       |
+| -------------------------------- | ------------------------------------------------------------- |
+| `APP_ORIGIN`                     | Exact HTTPS Pages origin, no trailing slash                   |
+| `GEMINI_API_KEY`                 | Central paid-tier Gemini key owned by STeP                    |
+| `GEMINI_MODEL`                   | Verified available model, default `gemini-3.8-flash`          |
+| `GEMINI_EMBEDDING_MODEL`         | Available 768-dimensional model, default `gemini-embedding-2` |
+| `WORKER_SECRET`                  | At least 32 random bytes, also stored in Vault                |
+| `CREDENTIAL_ENCRYPTION_KEY`      | Base64 of exactly 32 random bytes                             |
+| `GOOGLE_WORKSPACE_CLIENT_ID`     | Web OAuth client for Workspace                                |
+| `GOOGLE_WORKSPACE_CLIENT_SECRET` | Its server-side secret                                        |
+| `GOOGLE_PICKER_API_KEY`          | Picker browser key restricted to actual origin/APIs           |
+| `GOOGLE_PICKER_APP_ID`           | Google Cloud project number, same OAuth project               |
+
+Supabase provides URL, service-role and anon keys to functions automatically.
+Operator scripts read local `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or service
+role key). Staff never enter these keys. No key from a chat transcript is bundled.
+
+## Google
+
+Create a Web OAuth client in the STeP-controlled Google Cloud project with redirect
+`https://YOUR_PROJECT.supabase.co/auth/v1/callback`. Enable Google in Supabase Auth
+and put that client ID/secret there. Set Auth Site URL to the real Pages origin;
+allow its exact `/auth/callback` URL. Disable email/password and anonymous signup,
+while retaining OAuth account creation for invited accounts. Uninvited identities
+can exist in Auth but have no tenant/data access. Login uses openid/email/profile;
+domain suffixes or editable profile metadata never assign membership.
+
+Workspace permissions use a separate Web OAuth client with redirect
+`https://YOUR_PROJECT.supabase.co/functions/v1/google-callback`. Enable Calendar,
+Drive and Picker APIs, and authorize the actual Pages origin. Request Calendar
+read-only and drive.file for selected files, not all Drive access.
+
+For External consent, add pilot accounts in Testing, then follow Google's
+production/verification requirements. Sensitive scopes can require verification;
+Testing refresh grants may expire after 7 days. An organization's policy can
+still block an External app. STeP manages its own accounts; do not assume CMU
+administration is needed. Calendar reads use private conversations to avoid
+sharing personal appointments through a team answer.
+
+## Activation
+
+```sh
+npm run bootstrap -- --owner-email OWNER_GOOGLE_EMAIL --name STeP
+npm run harness:export -- --source /authorized/STeP-AI-Harness
+npm run harness:verify -- --source /authorized/STeP-AI-Harness --pack .exports/harness-pack.json
+npm run harness:import -- --tenant TENANT_UUID --file .exports/harness-pack.json
+```
+
+The first-owner reservation and baseline import are already present in the initial
+project. Verified Google sign-in claims ownership. AI budget remains zero. After
+credentials work, set current input/output token rates and a bounded budget in
+Settings → เชื่อมต่อ AI. Rates must cover generation and embeddings; reconcile
+estimates against Google billing.
+
+Create Vault entries `step_worker_url` (this project's worker URL) and
+`step_worker_secret` (same value as the function's WORKER_SECRET) using Supabase
+Vault. Minute cron dispatch is inert until these exist; API also wakes a worker
+immediately. Never commit a real secret to a migration.
+
+Before inviting staff, test actual Google login, first-owner assignment,
+invitation, suspension, privacy, consent, Google pause/resume/expired grants and a
+bounded paid Gemini call. Measure receipt accuracy with permitted labeled real
+documents, including faint signatures, incorrect tax IDs and addresses. Check
+Word output in installed Word/LibreOffice and complete a backup restore drill.
+Synthetic tests do not certify live OAuth, provider billing or OCR accuracy.

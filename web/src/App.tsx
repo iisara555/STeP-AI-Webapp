@@ -1,0 +1,653 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  ArrowUp,
+  BookOpen,
+  Brain,
+  Check,
+  ChevronDown,
+  CircleHelp,
+  FileText,
+  FolderOpen,
+  LayoutGrid,
+  LogOut,
+  Menu,
+  MessageSquare,
+  Plus,
+  Receipt,
+  Search,
+  Settings,
+  Share2,
+  ShieldCheck,
+  X,
+} from 'lucide-react';
+import type { Snapshot, Workspace, Conversation, Skill } from '../../packages/harness-core/src/contracts.ts';
+import { ApiError, configured, loadSnapshot, supabase, webHost, type Host } from './host.ts';
+import { demoHost } from './demo.ts';
+import { Busy, Empty, ErrorNotice, Modal, Visibility } from './components.tsx';
+import { Chat } from './Chat.tsx';
+import { Documents } from './Documents.tsx';
+import { Memories } from './Memories.tsx';
+import { ReceiptView } from './ReceiptView.tsx';
+import { SettingsView } from './SettingsView.tsx';
+export type Page = 'chat' | 'skills' | 'documents' | 'memory' | 'receipt' | 'settings';
+export interface ViewProps {
+  host: Host;
+  data: Snapshot;
+  tenant: string;
+  workspace: Workspace | null;
+  refresh: () => Promise<void>;
+  fail: (error: unknown) => void;
+}
+const navigation = [
+  { id: 'chat' as const, label: 'งานของฉัน', icon: MessageSquare },
+  { id: 'skills' as const, label: 'Skill', icon: LayoutGrid },
+  { id: 'documents' as const, label: 'เอกสาร', icon: FileText },
+  { id: 'memory' as const, label: 'ความจำ', icon: Brain },
+  { id: 'receipt' as const, label: 'ตรวจใบเสร็จ AFP', icon: Receipt },
+];
+export function App() {
+  const [demo, setDemo] = useState(new URLSearchParams(location.search).get('demo') === '1');
+  const host = useMemo(() => (demo ? demoHost() : webHost()), [demo]);
+  const [settingsTab, setSettingsTab] = useState(
+    new URLSearchParams(location.search).has('google') ? 'google' : 'account',
+  );
+  const [signedIn, setSignedIn] = useState(demo),
+    [authReady, setAuthReady] = useState(demo || !configured());
+  const [data, setData] = useState<Snapshot | null>(null),
+    [tenant, setTenant] = useState(''),
+    [workspaceId, setWorkspaceId] = useState('');
+  const [page, setPage] = useState<Page>(location.pathname === '/settings' ? 'settings' : 'chat'),
+    [session, setSession] = useState<Conversation | null>(null),
+    [skill, setSkill] = useState<Skill | null>(null);
+  const [error, setError] = useState<unknown>(null),
+    [loading, setLoading] = useState(false),
+    [mobile, setMobile] = useState(false),
+    [dialog, setDialog] = useState<'workspace' | 'share' | 'conversation' | null>(null);
+  const [search, setSearch] = useState(''),
+    [update, setUpdate] = useState(false),
+    [online, setOnline] = useState(navigator.onLine);
+  const epoch = useRef(0);
+  const authenticatedUser = useRef('');
+  const [authGeneration, setAuthGeneration] = useState(0);
+  useEffect(() => {
+    if (demo) {
+      setSignedIn(true);
+      setAuthReady(true);
+      return;
+    }
+    if (!configured()) return;
+    let active = true;
+    const db = supabase();
+    const initialize = async () => {
+      try {
+        if (location.pathname === '/settings' && new URLSearchParams(location.search).has('google')) {
+          const result = new URLSearchParams(location.search).get('google') || '';
+          history.replaceState(null, '', '/settings');
+          if (result !== 'connected')
+            throw new ApiError(/^[A-Z_]{3,60}$/.test(result) ? result : 'GOOGLE_LOGIN_FAILED');
+        }
+        if (location.pathname === '/auth/callback') {
+          const code = new URLSearchParams(location.search).get('code');
+          if (code) {
+            const result = await db.auth.exchangeCodeForSession(code);
+            if (result.error) throw new ApiError('GOOGLE_LOGIN_FAILED');
+          }
+          history.replaceState(null, '', '/');
+        }
+        const {
+          data: { session },
+        } = await db.auth.getSession();
+        if (active) setSignedIn(Boolean(session));
+      } catch (e) {
+        if (active) setError(e);
+      } finally {
+        if (active) setAuthReady(true);
+      }
+    };
+    void initialize();
+    const {
+      data: { subscription },
+    } = db.auth.onAuthStateChange((_event, s) => {
+      if (active) {
+        const next = s?.user.id || '';
+        if (next !== authenticatedUser.current) {
+          authenticatedUser.current = next;
+          epoch.current++;
+          setAuthGeneration((v) => v + 1);
+          setData(null);
+          setSession(null);
+          setTenant('');
+          setWorkspaceId('');
+          setDialog(null);
+          setError(null);
+        }
+        setSignedIn(Boolean(s));
+      }
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [demo]);
+  const refresh = useCallback(async () => {
+    const current = epoch.current;
+    const snapshot = await loadSnapshot(host);
+    if (current !== epoch.current) return;
+    setData(snapshot);
+    setTenant((t) => (snapshot.tenants.some((x) => x.id === t) ? t : snapshot.tenants[0]?.id || ''));
+  }, [host]);
+  useEffect(() => {
+    if (!signedIn) return;
+    setLoading(true);
+    void refresh()
+      .catch(setError)
+      .finally(() => setLoading(false));
+  }, [signedIn, refresh, authGeneration]);
+  useEffect(() => {
+    const on = () => setOnline(true),
+      off = () => setOnline(false),
+      ready = () => setUpdate(true);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    window.addEventListener('step-update-ready', ready);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+      window.removeEventListener('step-update-ready', ready);
+    };
+  }, []);
+  useEffect(() => {
+    setSession(null);
+    setSkill(null);
+    setWorkspaceId('');
+    setError(null);
+  }, [tenant]);
+  const workspaces = data?.workspaces.filter((w) => w.tenant_id === tenant) || [];
+  const workspace = workspaces.find((w) => w.id === workspaceId) || null;
+  const changePage = (p: Page) => {
+    setPage(p);
+    setMobile(false);
+    history.replaceState(null, '', p === 'settings' ? '/settings' : '/');
+  };
+  const fail = useCallback((e: unknown) => setError(e), []);
+  const logout = async () => {
+    setSignedIn(false);
+    epoch.current++;
+    setData(null);
+    setSession(null);
+    setError(null);
+    await host.signOut().catch(() => {});
+    setSignedIn(false);
+    setDemo(false);
+    history.replaceState(null, '', '/');
+  };
+  const updateApp = async () => {
+    if (
+      !window.confirm(
+        'บันทึกร่างที่แก้ไขก่อนอัปเดต แอปจะเปิดใหม่ งานที่เริ่มแล้วจะยังอยู่ในระบบ ต้องการอัปเดตตอนนี้หรือไม่?',
+      )
+    )
+      return;
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (registration?.waiting) {
+      navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
+      registration.waiting.postMessage('activate-update');
+    } else location.reload();
+  };
+  if (!authReady)
+    return (
+      <main className="login">
+        <Busy label="กำลังตรวจบัญชี" />
+      </main>
+    );
+  if (!signedIn)
+    return (
+      <main className="login">
+        <div className="login-card">
+          <div className="brand-logo">STeP</div>
+          <p className="eyebrow">MAKE INNOVATION SIMPLE</p>
+          <h1>
+            พื้นที่ทำงานของคุณ
+            <br />
+            พร้อม AI ที่เข้าใจงาน
+          </h1>
+          <p>
+            เก็บงาน เอกสาร และความจำไว้ด้วยกัน
+            <br />
+            เลือกแชร์กับทีมได้เมื่อคุณพร้อม
+          </p>
+          {Boolean(error) && <ErrorNotice error={error} onDismiss={() => setError(null)} />}
+          {configured() ? (
+            <button className="primary login-button" onClick={() => void host.signIn().catch(setError)}>
+              ลงชื่อเข้าใช้ด้วย Google
+            </button>
+          ) : (
+            <div className="setup-note">
+              <ShieldCheck size={20} />
+              <p>
+                ระบบยังไม่เปิดให้เข้าใช้งานจริง
+                <br />
+                ผู้ดูแลกำลังเตรียมการเชื่อมต่อบัญชีองค์กร
+              </p>
+            </div>
+          )}
+          <button
+            className="text-button"
+            onClick={() => {
+              setDemo(true);
+              setSignedIn(true);
+              setError(null);
+              history.replaceState(null, '', '/?demo=1');
+            }}
+          >
+            ดูตัวอย่างหน้าจอ
+          </button>
+          <small>สำหรับบัญชีที่ได้รับเชิญจาก STeP เท่านั้น</small>
+        </div>
+        <div className="login-art">
+          <div className="art-card">
+            <Brain size={28} />
+            <strong>จำสิ่งที่ช่วยให้ทำงานง่ายขึ้น</strong>
+            <span>ความจำส่วนตัว แก้ไขและลบได้</span>
+          </div>
+          <div className="art-card">
+            <FolderOpen size={28} />
+            <strong>เอกสารอยู่เป็นที่ หาได้เมื่อใช้</strong>
+            <span>อัปโหลดเอง หรือเลือกจาก Google Drive</span>
+          </div>
+          <div className="art-card">
+            <ShieldCheck size={28} />
+            <strong>คุณเลือกเองว่าจะแชร์อะไร</strong>
+            <span>workspace ส่วนตัว พร้อมชวนทีมมาทำงาน</span>
+          </div>
+        </div>
+      </main>
+    );
+  if (loading && !data)
+    return (
+      <main className="login">
+        <Busy label="กำลังเปิดพื้นที่ทำงาน" />
+      </main>
+    );
+  if (!data?.tenants.length)
+    return (
+      <main className="login">
+        <div className="login-card">
+          <div className="brand-logo">STeP</div>
+          <h1>บัญชีนี้ยังไม่ได้รับเชิญ</h1>
+          <p>{data?.user.email || 'ขอให้ผู้ดูแลเพิ่มบัญชี Google ของคุณในรายชื่อพนักงาน'}</p>
+          {Boolean(error) && <ErrorNotice error={error} onDismiss={() => setError(null)} />}
+          <button className="primary" onClick={() => void refresh().catch(setError)}>
+            ตรวจอีกครั้ง
+          </button>
+          <button onClick={() => void logout()}>เปลี่ยนบัญชี</button>
+        </div>
+      </main>
+    );
+  const props: ViewProps = { host, data, tenant, workspace, refresh, fail };
+  const sessions = data.sessions.filter(
+    (s) =>
+      s.tenant_id === tenant &&
+      (!workspace || s.workspace_id === workspace.id) &&
+      s.title.toLowerCase().includes(search.toLowerCase()),
+  );
+  return (
+    <div className="app-shell">
+      {mobile && <button className="sidebar-scrim" aria-label="ปิดเมนู" onClick={() => setMobile(false)} />}
+      <aside className={'sidebar ' + (mobile ? 'mobile-open' : '')}>
+        <div className="sidebar-brand">
+          <div className="brand-logo">STeP</div>
+          <span>AI WORKSPACE</span>
+          <button className="icon-button mobile-only" aria-label="ปิดเมนู" onClick={() => setMobile(false)}>
+            <X size={20} />
+          </button>
+        </div>
+        <button className="primary new-task" onClick={() => setDialog('conversation')}>
+          <Plus size={19} />
+          เริ่มงานใหม่
+        </button>
+        <label className="search">
+          <Search size={16} />
+          <input
+            placeholder="ค้นหางานของฉัน"
+            aria-label="ค้นหางานของฉัน"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <nav aria-label="เมนูหลัก">
+          {navigation.map((n) => (
+            <button key={n.id} className={page === n.id ? 'selected' : ''} onClick={() => changePage(n.id)}>
+              <n.icon size={19} />
+              {n.label}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-history">
+          <p className="section-label">บทสนทนาล่าสุด</p>
+          {sessions.slice(0, 16).map((s) => (
+            <button
+              key={s.id}
+              className={session?.id === s.id ? 'active-history' : ''}
+              onClick={() => {
+                setSession(s);
+                changePage('chat');
+              }}
+            >
+              <MessageSquare size={14} />
+              <span>{s.title}</span>
+            </button>
+          ))}
+          {!sessions.length && <small>งานที่คุณเริ่มจะแสดงตรงนี้</small>}
+        </div>
+        <div className="sidebar-footer">
+          <button className={page === 'settings' ? 'selected' : ''} onClick={() => changePage('settings')}>
+            <Settings size={19} />
+            การตั้งค่า
+          </button>
+          <div className="account">
+            <span className="avatar">{data.user.name?.slice(0, 1) || 'S'}</span>
+            <div>
+              <strong>{data.user.name || 'บัญชีของฉัน'}</strong>
+              <span>{data.tenants.find((t) => t.id === tenant)?.name}</span>
+            </div>
+            <button className="icon-button" aria-label="ออกจากระบบ" onClick={() => void logout()}>
+              <LogOut size={17} />
+            </button>
+          </div>
+        </div>
+      </aside>
+      <main className="main-shell">
+        <header className="topbar">
+          <div className="workspace-heading">
+            <button className="icon-button mobile-only" aria-label="เปิดเมนู" onClick={() => setMobile(true)}>
+              <Menu size={22} />
+            </button>
+            <FolderOpen size={19} />
+            <select
+              aria-label="เลือก workspace"
+              value={workspaceId}
+              onChange={(e) => {
+                setWorkspaceId(e.target.value);
+                setSession(null);
+              }}
+            >
+              <option value="">พื้นที่ส่วนตัว</option>
+              {workspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+            <button
+              className="icon-button"
+              aria-label="สร้าง workspace"
+              onClick={() => setDialog('workspace')}
+            >
+              <Plus size={18} />
+            </button>
+          </div>
+          <div className="topbar-actions">
+            {demo && <span className="badge demo">ตัวอย่าง · ไม่ใช่ข้อมูลจริง</span>}
+            {workspace?.created_by === data.user.id && (
+              <button onClick={() => setDialog('share')}>
+                <Share2 size={16} />
+                เชิญทีม
+              </button>
+            )}
+            <span className="private-hint">
+              <ShieldCheck size={15} />
+              คุณเลือกสิ่งที่แชร์ได้
+            </span>
+          </div>
+        </header>
+        {!online && (
+          <div className="connection-banner" role="status">
+            ขณะนี้ออฟไลน์ · เชื่อมต่ออินเทอร์เน็ตเพื่อเปิดข้อมูลและเริ่มงาน
+          </div>
+        )}
+        {update && (
+          <div className="connection-banner">
+            มีแอปรุ่นใหม่ <button onClick={() => void updateApp()}>อัปเดตเมื่อพร้อม</button>
+          </div>
+        )}
+        {Boolean(error) && (
+          <div className="global-notice">
+            <ErrorNotice
+              error={error}
+              onDismiss={() => setError(null)}
+              onAction={(code) => {
+                setError(null);
+                if (code === 'UNAUTHENTICATED') {
+                  void logout();
+                  return;
+                }
+                if (code === 'GOOGLE_PRIVATE_CONTEXT') {
+                  changePage('chat');
+                  setDialog('conversation');
+                  return;
+                }
+                if (/AI|GOOGLE|HARNESS|SERVER|MEMBER_LIMIT/.test(code)) {
+                  setSettingsTab(
+                    code === 'AI_QUOTA'
+                      ? 'usage'
+                      : code.startsWith('GOOGLE_')
+                        ? 'google'
+                        : code === 'MEMBER_LIMIT'
+                          ? 'team'
+                          : 'ai',
+                  );
+                  changePage('settings');
+                } else if (/STORAGE|DOCUMENT|FILE_INVALID|UPLOAD_PENDING/.test(code)) changePage('documents');
+                else if (code === 'MEMORY_LIMIT') changePage('memory');
+                else if (code === 'ACCESS_DENIED') {
+                  setSession(null);
+                  changePage('chat');
+                } else if (/NETWORK/.test(code)) void refresh().catch(setError);
+              }}
+            />
+          </div>
+        )}
+        <div className={'page ' + (page === 'chat' ? 'chat-page' : '')}>
+          {page === 'chat' && (
+            <Chat
+              {...props}
+              key={tenant + workspaceId}
+              session={session}
+              setSession={setSession}
+              skill={skill}
+              clearSkill={() => setSkill(null)}
+              newSession={() => setDialog('conversation')}
+            />
+          )}
+          {page === 'documents' && <Documents {...props} />}
+          {page === 'memory' && <Memories {...props} />}
+          {page === 'receipt' && <ReceiptView {...props} />}
+          {page === 'settings' && (
+            <SettingsView
+              {...props}
+              key={tenant}
+              initialTab={settingsTab}
+              onLogout={() => void logout()}
+              onTenantChange={(id) => {
+                setSettingsTab('account');
+                setTenant(id);
+              }}
+            />
+          )}
+          {page === 'skills' && (
+            <>
+              <div className="page-heading">
+                <div>
+                  <p className="eyebrow">เลือกจากงานที่อยากทำ</p>
+                  <h1>Skill</h1>
+                  <p>ช่วยเริ่มงาน จัดข้อมูล และตรวจสิ่งที่ยังขาด</p>
+                </div>
+              </div>
+              <div className="skill-grid">
+                {data.skills
+                  .filter(
+                    (s) =>
+                      (!('tenant_id' in s) || s.tenant_id === tenant) &&
+                      !s.metadata.developerOnly &&
+                      !s.metadata.webUnsupported,
+                  )
+                  .map((s) => (
+                    <button
+                      className="skill-card"
+                      key={s.id}
+                      onClick={() => {
+                        if (s.skill_key === 'receipt-audit') changePage('receipt');
+                        else {
+                          setSkill(s);
+                          changePage('chat');
+                        }
+                      }}
+                    >
+                      <div className="skill-card-icon">
+                        {s.skill_key === 'receipt-audit' ? <Receipt size={24} /> : <BookOpen size={24} />}
+                      </div>
+                      <h2>{s.title}</h2>
+                      <p>{s.description}</p>
+                      <span>
+                        เริ่มใช้ Skill <ArrowUp size={15} />
+                      </span>
+                    </button>
+                  ))}
+              </div>
+              {!data.skills.length && (
+                <Empty
+                  icon={<BookOpen size={30} />}
+                  title="กำลังเตรียม Skill ขององค์กร"
+                  detail="ผู้ดูแลต้องนำเข้า Skill และเอกสาร STeP ก่อนเปิดใช้งานจริง"
+                />
+              )}
+            </>
+          )}
+        </div>
+      </main>
+      {dialog === 'workspace' && (
+        <Modal title="สร้าง workspace" onClose={() => setDialog(null)}>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const form = new FormData(e.currentTarget);
+              try {
+                const w = await host.call<Workspace>('workspace.create', {
+                  tenant,
+                  name: form.get('name'),
+                  description: form.get('description'),
+                });
+                await refresh();
+                setWorkspaceId(w.id);
+                setSession(null);
+                setDialog(null);
+              } catch (err) {
+                fail(err);
+              }
+            }}
+          >
+            <p className="muted">เริ่มเป็นพื้นที่ส่วนตัว คุณเลือกเชิญทีมได้ภายหลัง</p>
+            <label>
+              ชื่อ workspace
+              <input name="name" required maxLength={100} placeholder="เช่น เตรียมงานประชุม" autoFocus />
+            </label>
+            <label>
+              รายละเอียด
+              <textarea name="description" maxLength={1000} rows={3} />
+            </label>
+            <footer>
+              <button type="button" onClick={() => setDialog(null)}>
+                ยกเลิก
+              </button>
+              <button className="primary">สร้าง workspace</button>
+            </footer>
+          </form>
+        </Modal>
+      )}
+      {dialog === 'share' && workspace && (
+        <Modal title={'เชิญทีมเข้า ' + workspace.name} onClose={() => setDialog(null)}>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const form = new FormData(e.currentTarget);
+              try {
+                await host.call('workspace.share', {
+                  tenant,
+                  id: workspace.id,
+                  email: form.get('email'),
+                  role: form.get('role'),
+                });
+                setDialog(null);
+              } catch (err) {
+                fail(err);
+              }
+            }}
+          >
+            <p className="muted">
+              สมาชิกจะเห็นเฉพาะข้อมูลที่เลือก “แชร์ใน workspace” ความจำและบทสนทนาส่วนตัวยังเป็นของคุณ
+            </p>
+            <label>
+              อีเมลพนักงานที่เป็นสมาชิก STeP แล้ว
+              <input name="email" type="email" required autoFocus />
+            </label>
+            <label>
+              สิทธิ์
+              <select name="role">
+                <option value="editor">แก้ไขข้อมูลที่แชร์ได้</option>
+                <option value="viewer">อ่านข้อมูลที่แชร์ได้</option>
+              </select>
+            </label>
+            <footer>
+              <button type="button" onClick={() => setDialog(null)}>
+                ยกเลิก
+              </button>
+              <button className="primary">เพิ่มสมาชิก</button>
+            </footer>
+          </form>
+        </Modal>
+      )}
+      {dialog === 'conversation' && (
+        <Modal title="เริ่มงานใหม่" onClose={() => setDialog(null)}>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const form = new FormData(e.currentTarget);
+              try {
+                const s = await host.call<Conversation>('session.create', {
+                  tenant,
+                  workspace: workspace?.id || null,
+                  visibility: form.get('visibility'),
+                });
+                await refresh();
+                setSession(s);
+                setDialog(null);
+                changePage('chat');
+              } catch (err) {
+                fail(err);
+              }
+            }}
+          >
+            <p className="muted">เลือกคนที่เห็นบทสนทนานี้ก่อนเริ่ม พื้นที่ส่วนตัวจะใช้ความจำของคุณได้</p>
+            <label className="radio-row">
+              <input type="radio" name="visibility" value="private" defaultChecked />
+              ส่วนตัว · คุณเห็นคนเดียว
+            </label>
+            {workspace && (
+              <label className="radio-row">
+                <input type="radio" name="visibility" value="workspace" />
+                แชร์กับสมาชิกใน {workspace.name}
+              </label>
+            )}
+            <footer>
+              <button type="button" onClick={() => setDialog(null)}>
+                ยกเลิก
+              </button>
+              <button className="primary">เริ่มงาน</button>
+            </footer>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
