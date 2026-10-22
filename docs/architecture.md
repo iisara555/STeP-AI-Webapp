@@ -1,0 +1,70 @@
+# Centralized STeP PWA
+
+The web application is separate from the Electron repository. It uses a static
+React/Vite app on Cloudflare Pages and Supabase Auth, Postgres, private Storage,
+and Edge Functions. Gemini runs only on the server. Hosting can start on free
+plans; Gemini usage and any future plan changes are separate costs.
+
+## Identity and access
+
+Google sign-in establishes identity. An unexpired invitation plus a verified
+Google identity establishes tenant membership. A service-only bootstrap reserves
+the first owner invitation; browser clients cannot assign owners. Domain suffixes
+and editable user metadata never establish access. Tenant membership is checked
+again on each operation and before a worker commits a result.
+
+Workspaces start private. Their creator can add active members of the same tenant
+as editors or viewers. Conversations have immutable private/workspace visibility.
+Personal memory, documents, conversations and receipt reviews are owner-only;
+tenant administrators can manage members and aggregate usage without gaining
+access to private contents. Infrastructure operators still have database access.
+RLS enforces these boundaries for database and Storage, including derived images.
+
+## AI and data
+
+The API exposes named actions, never arbitrary desktop IPC, shell or SQL. A
+conversation shows selected documents and memory before asking for AI consent.
+Workspace conversations cannot use private memory or another workspace's files.
+Organization knowledge comes from an explicitly imported, versioned Harness pack;
+source instructions cannot grant authority. The original retrieval and authority
+code is retained with its MIT notice and source commit under harness-core/vendor.
+
+Postgres jobs use idempotency keys, leases, a global concurrency cap of two, fresh
+access checks and budget reservations. Interrupted jobs do not replay provider
+calls automatically. Responses are stored once. Failed or ambiguous calls retain
+their reservation because a provider may already have charged. Usage is an
+estimate based on configured rates, not a provider invoice. AI is disabled until
+server credentials, rates and a positive tenant budget have been configured.
+
+Google Workspace uses a separate web OAuth grant: Calendar read-only and
+drive.file for explicitly selected files. Grants are encrypted server-side with
+tenant/user associated data. Paused and expired grants have distinct remedies.
+OAuth scopes remain subject to Google's verification and the organization's
+policies. This implementation does not send email or modify Google resources.
+
+## Files and receipts
+
+Original files stay in private Storage. PDF and Office text extraction runs in the
+browser; image preparation runs in a worker. OCR is explicit, billed Gemini work.
+Prepared receipt images are separate derivatives so the original remains
+available. Receipt output has three sections: type, completeness and next steps.
+The model also checks signatures and the configured STeP buyer details. Findings
+remain unverified until a person compares the original and saves a review; they
+never constitute reimbursement approval or signature authentication.
+
+Limits include 10 MiB/file, 30 PDF pages, 200k extracted characters, 32k AI input
+tokens, bounded embedding batches, 800 MB/tenant and 25 MB/member file storage.
+Pilot capacity is at most 20 invited staff. These are application limits rather
+than promises of free-plan capacity or OCR accuracy.
+
+## PWA and operations
+
+The service worker caches public application assets only. API responses,
+documents, memory and conversations are not cached for offline reading. Signing
+out clears in-memory application state; Auth tokens remain managed by Supabase.
+Desktop-native integrations remain in the original Desktop app.
+
+Schema, function deployment, OAuth configuration, secrets, an actual Pages URL,
+organization import, backups and real-account acceptance are separate steps.
+Passing synthetic tests does not certify a live Google or Gemini connection.
+See deployment.md and progress.md for the verified state and outstanding setup.

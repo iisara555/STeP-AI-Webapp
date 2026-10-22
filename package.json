@@ -1,0 +1,46 @@
+{
+  "name": "step-ai-webapp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "web",
+    "packages/harness-core"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "check": "tsc --noEmit && prettier --check .",
+    "format": "prettier --write .",
+    "test": "tsx --test test/*.test.ts",
+    "test:db": "tsx --test --test-concurrency=1 test/database/*.test.ts",
+    "test:e2e": "playwright test",
+    "harness:export": "node scripts/export-harness.mjs",
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "harness:import": "tsx scripts/import-harness.ts",
+    "harness:verify": "tsx scripts/verify-upstream.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.118.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@electric-sql/pglite": "0.5.11",
+    "@electric-sql/pglite-pgvector": "0.0.12",
+    "@playwright/test": "1.64.1",
+    "@types/js-yaml": "4.0.9",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "js-yaml": "5.5.0",
+    "prettier": "3.9.10",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
+  }
+}
