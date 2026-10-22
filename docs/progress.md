@@ -19,6 +19,10 @@
 - The target homelab is not installed yet: this execution environment has
   `vpn_configured: false` and no TCP grants. SSH installation and testing from an
   actual tailnet device require that network connection first. No live AI was called.
+- After combining the frontend consent update from PR #5, the production Docker
+  image was rebuilt and ran healthy. Hosting smoke plus four desktop/mobile admin
+  trial/accessibility checks passed. The download bundle contains the combined
+  source and public Supabase configuration; the real homelab is still not installed.
 - Supabase backend reconciliation is tracked in PR #5. The sandbox/shared-quota
   migrations are installed and API/worker/callback are now version 4. SQL verified
   service-only configuration/reservation RPCs, sandbox RLS, zero paid budget and
