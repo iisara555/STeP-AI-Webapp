@@ -27,6 +27,7 @@ import {
 } from './google.ts';
 import { validFile } from './files.ts';
 import { receiptSchema } from './receipt.ts';
+import { openrouter, trialConfigured } from './openrouter.ts';
 
 const uuid = z.string().uuid();
 const visibility = z.enum(['private', 'workspace']);
@@ -130,12 +131,52 @@ async function snapshot(actor: Actor) {
     skills,
   };
 }
-export async function dispatch(actor: Actor, action: string, input: unknown, env: Environment) {
+export async function dispatch(
+  actor: Actor,
+  action: string,
+  input: unknown,
+  env: Environment,
+  fetcher: typeof fetch = fetch,
+) {
   const db = actor.userDb;
   if (action === 'snapshot') return snapshot(actor);
   const base = tenantRequest.parse(input);
   await member(actor, base.tenant);
   switch (action) {
+    case 'admin.openrouter.status': {
+      await member(actor, base.tenant, true);
+      return { configured: trialConfigured(env, base.tenant), dailyLimit: 40, minuteLimit: 5 };
+    }
+    case 'admin.openrouter.models':
+    case 'admin.openrouter.test': {
+      await member(actor, base.tenant, true);
+      if (!trialConfigured(env, base.tenant)) throw new Error('OPENROUTER_NOT_CONFIGURED');
+      const provider = openrouter(env, fetcher);
+      if (action === 'admin.openrouter.models') return { models: await provider.models() };
+      const p = tenantRequest
+        .extend({
+          model: z
+            .string()
+            .regex(/^[a-zA-Z0-9_./-]+:free$/)
+            .max(200),
+          prompt: z.string().trim().min(1).max(4000),
+          consent: z.literal(true),
+          requestId: uuid,
+        })
+        .strict()
+        .parse(input);
+      assertSafeText(p.prompt);
+      await checked(
+        actor.service.rpc('reserve_openrouter_trial', {
+          t: p.tenant,
+          u: actor.user.id,
+          request_id: p.requestId,
+        }),
+      );
+      const result = await provider.generate(p.model, p.prompt);
+      await member(actor, p.tenant, true);
+      return result;
+    }
     case 'workspace.create': {
       const p = tenantRequest
         .extend({ name: z.string().trim().min(1).max(100), description: z.string().max(1000).default('') })

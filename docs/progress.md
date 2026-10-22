@@ -1,5 +1,26 @@
 # Progress
 
+## 2026-10-22 · Administrator OpenRouter free trial
+
+- Added Settings → เชื่อมต่อ AI → ทดลอง OpenRouter Free for active tenant owners/admins.
+  The separate channel accepts only explicitly consented synthetic text, without
+  organization documents, memory, chat history or Google Workspace context.
+- Server-only credentials and a single configured tenant gate access. Every call
+  checks the live catalog for a zero-priced `:free` text model and sets zero price
+  ceilings with provider fallbacks disabled. No paid AI budget or purchase is enabled.
+- Service-only SQL reservations enforce idempotency and shared limits of 5 attempts
+  per minute / 40 per UTC day, including failed attempts. Prompts/replies are temporary
+  UI state; only reservation IDs/timestamps are persisted. Provider errors are sanitized.
+- Validation: type/format checks and production build passed; 24 synthetic unit/API/PWA
+  tests, 21 PostgreSQL isolation/accounting tests and 16 desktop/mobile Playwright tests
+  passed, including consent reset, temporary result clearing and accessibility.
+- Not activated in production: this environment has no Supabase credentials and its
+  outbound policy does not permit OpenRouter. No transcript key was installed or
+  committed and no live inference was attempted. Activation requires applying the new
+  migration, deploying the API/frontend, setting a replacement `OPENROUTER_API_KEY`
+  with `OPENROUTER_TRIAL_TENANT_ID`, then real-account authorization and $0 billing
+  acceptance. Existing hosting/Google rollout requirements below remain applicable.
+
 ## 2026-10-22 · Centralized PWA implementation
 
 - Source baseline: STeP-AI-Harness `90ee71ca667c63284afe4996eddc7e8095b9a059`, Desktop 0.6.20.

@@ -55,6 +55,8 @@ local environment file. Never put them in `VITE_` or a committed SQL migration.
 | `GEMINI_API_KEY`                 | Central paid-tier Gemini key owned by STeP                    |
 | `GEMINI_MODEL`                   | Verified available model, default `gemini-3.8-flash`          |
 | `GEMINI_EMBEDDING_MODEL`         | Available 768-dimensional model, default `gemini-embedding-2` |
+| `OPENROUTER_API_KEY`             | Separate server-only OpenRouter trial key                     |
+| `OPENROUTER_TRIAL_TENANT_ID`     | Exact tenant UUID authorized for the admin free trial         |
 | `WORKER_SECRET`                  | At least 32 random bytes, also stored in Vault                |
 | `CREDENTIAL_ENCRYPTION_KEY`      | Base64 of exactly 32 random bytes                             |
 | `GOOGLE_WORKSPACE_CLIENT_ID`     | Web OAuth client for Workspace                                |
@@ -114,3 +116,27 @@ bounded paid Gemini call. Measure receipt accuracy with permitted labeled real
 documents, including faint signatures, incorrect tax IDs and addresses. Check
 Word output in installed Word/LibreOffice and complete a backup restore drill.
 Synthetic tests do not certify live OAuth, provider billing or OCR accuracy.
+
+## Optional administrator free trial
+
+Apply migration `20261022140000_openrouter_trial.sql` and deploy the updated API
+function and frontend before enabling this channel. Set `OPENROUTER_API_KEY` and
+`OPENROUTER_TRIAL_TENANT_ID` together as Supabase Edge Function secrets. Removing
+either disables the trial. Never use `VITE_` for the key or place it in Git, a
+migration, browser storage or frontend input. Replace any key previously pasted
+into a chat before activation; this change does not install that transcript key.
+
+An active tenant owner/admin opens การตั้งค่า → เชื่อมต่อ AI → ทดลอง OpenRouter Free,
+loads the live model list and confirms each synthetic prompt before sending.
+Members and admins of other tenants are denied server-side. Test with both
+permitted and denied real accounts after deployment. The app caps attempts at
+5/minute and 40/day UTC across the selected tenant; OpenRouter can impose lower
+or account-wide limits. A failed attempt still counts. Rate limiting never causes
+automatic retries or upgrades, and a 402 never initiates a credit purchase.
+
+Check the exact model and $0 cost in OpenRouter Activity during real-account
+acceptance. Do not send confidential information to free providers. Pay-as-you-go
+procurement and production AI activation remain separate organizational choices.
+See the official [model catalog API](https://openrouter.ai/docs/api/api-reference/models/get-models),
+[provider price ceilings](https://openrouter.ai/docs/guides/routing/provider-selection#max-price)
+and [account limits](https://openrouter.ai/docs/api/reference/limits).

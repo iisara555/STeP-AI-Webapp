@@ -119,6 +119,48 @@ test('settings explain paused Google access and support resuming it', async ({ p
   await page.getByRole('button', { name: 'กลับมาใช้ข้อมูลบัญชี', exact: true }).click();
   await expect(page.getByRole('button', { name: 'หยุดการใช้ข้อมูลบัญชี', exact: true })).toBeVisible();
 });
+test('admin can review a free model trial, consent once and clear its temporary reply', async ({ page }) => {
+  const providerRequests: string[] = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).hostname === 'openrouter.ai') providerRequests.push(request.url());
+  });
+  await page.goto('/?demo=1');
+  const open = page.getByRole('button', { name: 'เปิดเมนู', exact: true });
+  if (await open.isVisible()) await open.click();
+  await page.getByRole('button', { name: 'การตั้งค่า', exact: true }).click();
+  await page.getByRole('button', { name: 'เชื่อมต่อ AI', exact: true }).click();
+  const trial = page.getByRole('region', { name: 'ทดลอง OpenRouter Free สำหรับผู้ดูแล' });
+  await expect(trial.getByText('ตัวอย่างหน้าจอเท่านั้น · ไม่ได้เรียก OpenRouter จริง')).toBeVisible();
+  const send = trial.getByRole('button', { name: 'ส่งทดลองโมเดลฟรี', exact: true });
+  await expect(send).toBeDisabled();
+  await trial.getByRole('button', { name: 'โหลดรายการโมเดลฟรี', exact: true }).click();
+  await expect(trial.getByRole('combobox', { name: 'โมเดลฟรี', exact: true })).toHaveValue(
+    'synthetic/example:free',
+  );
+  const consent = trial.getByRole('checkbox');
+  await consent.check();
+  await trial
+    .getByRole('textbox', { name: 'ข้อความทดลอง (ข้อมูลสมมติ)', exact: true })
+    .fill('ลองวางแผนประชุมตัวอย่าง');
+  await expect(consent).not.toBeChecked();
+  await expect(send).toBeDisabled();
+  await consent.check();
+  await send.click();
+  await expect(
+    trial.getByText('คำตอบจำลองสำหรับทดลองหน้าจอ OpenRouter เท่านั้น', { exact: true }),
+  ).toBeVisible();
+  await expect(send).toBeDisabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  const accessibility = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
+  expect(accessibility.violations.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target) }))).toEqual(
+    [],
+  );
+  await trial.getByRole('button', { name: 'ล้างผลการทดลอง', exact: true }).click();
+  await expect(
+    trial.getByText('คำตอบจำลองสำหรับทดลองหน้าจอ OpenRouter เท่านั้น', { exact: true }),
+  ).toHaveCount(0);
+  expect(providerRequests).toEqual([]);
+});
 test('main screens fit the viewport and pass essential accessibility checks', async ({ page }) => {
   test.setTimeout(90000);
   await page.goto('/?demo=1');

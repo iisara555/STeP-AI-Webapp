@@ -16,6 +16,7 @@ import {
 import type { Membership } from '../../packages/harness-core/src/contracts.ts';
 import type { ViewProps } from './App.tsx';
 import { Busy, Modal, bytes, number } from './components.tsx';
+import { OpenRouterTrial } from './OpenRouterTrial.tsx';
 type GoogleState = { status: string; services: string[] };
 type Usage = {
   runs: { input_tokens: number; output_tokens: number; reserved_cents: number; status: string }[];
@@ -203,6 +204,7 @@ export function SettingsView({
                   แชต อ่านเอกสาร และตรวจใบเสร็จใช้วงเงินร่วมกัน ไม่มีการเปลี่ยนผู้ให้บริการอัตโนมัติ
                 </p>
               </div>
+              {admin && <OpenRouterTrial key={tenant} host={host} tenant={tenant} />}
               {admin && (
                 <form
                   className="settings-card"
