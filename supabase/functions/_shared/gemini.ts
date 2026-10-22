@@ -16,7 +16,7 @@ export interface ModelResult {
   usage: ModelUsage;
   truncated: boolean;
 }
-async function responseJson(response: Response, max = 1000000) {
+export async function responseJson(response: Response, max = 1000000) {
   if (Number(response.headers.get('content-length')) > max) throw new Error('PROVIDER_STREAM_INVALID');
   const reader = response.body?.getReader();
   if (!reader) throw new Error('PROVIDER_STREAM_INVALID');

@@ -8,6 +8,15 @@ const tenant = '10000000-0000-4000-8000-000000000001',
   workspace = '30000000-0000-4000-8000-000000000001';
 export function demoHost(): Host {
   const data: Snapshot = {
+    ai: {
+      provider: 'gemini',
+      model: 'synthetic-demo',
+      upstream: 'google',
+      displayName: 'Google Gemini API · ตัวอย่าง',
+      consentId: 'synthetic-demo-consent',
+      configured: true,
+      textOnly: false,
+    },
     user: { id: user, email: 'employee@example.test', name: 'พนักงานตัวอย่าง' },
     tenants: [
       {
@@ -144,11 +153,13 @@ export function demoHost(): Host {
           case 'context.plan':
             return {
               provider: 'Google Gemini API · ตัวอย่าง',
+              providerConsent: 'synthetic-demo-consent',
               documents: data.documents.filter((d) => (p.documentIds as string[]).includes(d.id)),
               memories: p.useMemory ? data.memories.map((m) => ({ id: m.id, title: m.title })) : [],
               google: /ประชุม|ปฏิทิน/.test(String(p.message)),
             };
           case 'run.start': {
+            if (p.providerConsent !== data.ai?.consentId) throw new ApiError('AI_PROVIDER_CHANGED');
             const session = data.sessions.find((s) => s.id === p.session);
             if (session) {
               session.title = String(p.message).slice(0, 100);

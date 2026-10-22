@@ -28,6 +28,7 @@ import type { ViewProps } from './App.tsx';
 import { exportWord } from './extract.ts';
 type Plan = {
   provider: string;
+  providerConsent: string;
   documents: { id: string; name: string }[];
   memories: { id: string; title: string }[];
   google: boolean;
@@ -169,7 +170,7 @@ export function Chat({
     }
   };
   const submit = async () => {
-    if (!session) return;
+    if (!session || !plan) return;
     const id = session.id;
     setBusy(true);
     try {
@@ -183,6 +184,7 @@ export function Chat({
         documentIds: documents,
         useMemory,
         consent: true,
+        providerConsent: plan.providerConsent,
         googleConsent,
       });
       if (currentSession.current !== id) return;

@@ -15,7 +15,7 @@ import {
 } from '../../../packages/harness-core/src/index.ts';
 import type { Memory, Skill, SourceRef } from '../../../packages/harness-core/src/contracts.ts';
 import { checked, clients, constantTimeEqual, requireEnv, safeCode, type Environment } from './runtime.ts';
-import { gemini } from './gemini.ts';
+import { modelClient, requireProviderConsent } from './ai.ts';
 import { calendarEvents, driveText, wantsCalendar } from './google.ts';
 import { imageBase64 } from './files.ts';
 import { normalizeReceipt } from './receipt.ts';
@@ -29,7 +29,7 @@ checks ต้องมีหัวข้อ วันที่ ชื่อผ�
 evidence ต้องเป็นข้อความที่อ่านได้จากภาพ ถ้าไม่มีให้ null ห้ามแต่งข้อกำหนดการเบิกจ่ายหรือสรุปว่าอนุมัติให้เบิกได้ ให้ระบุข้อที่ยังต้องให้คนตรวจ
 สรุปสิ่งที่ต้องทำต่อให้กระชับ ไม่เกินห้าข้อ`;
 export async function processOne(env: Environment, fetcher: typeof fetch = fetch) {
-  const { service } = clients(env);
+  const { service } = clients(env, undefined, fetcher);
   const job = await checked(service.rpc('claim_run'));
   if (!job?.id) return { processed: false };
   const deadline = Date.now() + 95000;
@@ -50,7 +50,10 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
     outputTokens = 0;
   try {
     const context = await checked(service.rpc('worker_payload', { job_id: job.id, lease: job.lease_token }));
-    const ai = gemini(env, jobFetch);
+    const info = requireProviderConsent(env, job.input.providerConsent);
+    if (job.ai_provider !== info.provider) throw new Error('AI_PROVIDER_CHANGED');
+    if (info.textOnly && job.kind !== 'chat') throw new Error('AI_TRIAL_TEXT_ONLY');
+    const ai = modelClient(env, jobFetch);
     let result: Record<string, unknown>;
     if (job.kind === 'chat') {
       const query = assertSafeText(String(job.input.message || ''));
@@ -184,7 +187,10 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
               });
           }
           // Authorised vectors only: query results are checked again under the job's actor in SQL.
-          if (context.documents.some((d: { source_kind: string }) => d.source_kind === 'upload')) {
+          if (
+            !info.textOnly &&
+            context.documents.some((d: { source_kind: string }) => d.source_kind === 'upload')
+          ) {
             const vector = await ai.embed(query);
             inputTokens += estimateTextTokens(query).estimatedTokens;
             const hits = await checked(
