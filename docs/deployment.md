@@ -1,5 +1,8 @@
 # Deployment
 
+For the initial homelab pilot, use [homelab + Tailscale](homelab.md). The frontend
+runs on the homelab while Supabase remains hosted. Pages is a later hosting option.
+
 ## Hosting
 
 Use a static Cloudflare Pages project and dedicated Supabase project. The initial

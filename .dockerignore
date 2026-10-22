@@ -1,0 +1,20 @@
+# Allow only application build inputs; operator data and credentials stay outside the context.
+*
+!package.json
+!package-lock.json
+!web/
+!web/**
+!packages/
+!packages/**
+!deploy/
+!deploy/homelab/
+!deploy/homelab/Dockerfile
+!deploy/homelab/nginx.conf
+web/node_modules/
+web/dist/
+web/.env*
+packages/**/node_modules/
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
