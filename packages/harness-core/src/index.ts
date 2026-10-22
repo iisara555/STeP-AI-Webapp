@@ -122,6 +122,54 @@ export function boundedContext(parts: string[], maxTokens: number = LIMITS.conte
 }
 export function errorView(code: string): ErrorView {
   const known: Record<string, ErrorView> = {
+    OPENROUTER_NOT_CONFIGURED: {
+      title: 'ช่องทดลอง OpenRouter ยังไม่พร้อมใช้',
+      detail: 'ให้ผู้ดูแลเซิร์ฟเวอร์ตั้ง OPENROUTER_API_KEY และ OPENROUTER_TRIAL_TENANT_ID สำหรับองค์กรนี้',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    OPENROUTER_KEY_INVALID: {
+      title: 'OpenRouter ไม่ยอมรับคีย์หรือสิทธิ์การใช้',
+      detail: 'ให้ผู้ดูแลเซิร์ฟเวอร์ตรวจคีย์และข้อจำกัดของบัญชี ไม่ต้องกรอกคีย์ในหน้าจอนี้',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    OPENROUTER_RATE_LIMIT: {
+      title: 'ถึงขีดจำกัดการทดลอง OpenRouter',
+      detail: 'รอให้โควตารายหนึ่งนาทีหรือรายวันคืนก่อนลองใหม่ คำขอไม่ถูกส่งซ้ำอัตโนมัติ',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    OPENROUTER_FREE_ONLY: {
+      title: 'โมเดลนี้ไม่ผ่านเงื่อนไขใช้ฟรี',
+      detail: 'โหลดรายการโมเดลฟรีใหม่ ระบบตรวจราคาอีกครั้งก่อนส่งข้อความทุกครั้ง',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    OPENROUTER_UNAVAILABLE: {
+      title: 'ติดต่อ OpenRouter ไม่สำเร็จหรือหมดเวลารอ',
+      detail: 'โมเดลฟรีอาจไม่ว่าง คำขอนี้ไม่ถูกส่งซ้ำและไม่มีการสลับไปโมเดลเสียเงิน',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    OPENROUTER_CREDIT_REQUIRED: {
+      title: 'OpenRouter ปฏิเสธคำขอตามเงื่อนไขเครดิต',
+      detail: 'ตรวจสถานะบัญชีกับ OpenRouter ช่องทดลองนี้ไม่เติมเงินและไม่เปลี่ยนไปใช้โมเดลเสียเงิน',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    OPENROUTER_RESPONSE_INVALID: {
+      title: 'OpenRouter ส่งผลลัพธ์ที่ใช้ไม่ได้',
+      detail: 'ไม่ได้รับคำตอบข้อความที่สมบูรณ์ตามรูปแบบที่รองรับ ไม่มีการส่งคำขอซ้ำอัตโนมัติ',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    OPENROUTER_COST_UNEXPECTED: {
+      title: 'OpenRouter รายงานค่าใช้จ่ายที่ไม่ใช่ศูนย์',
+      detail: 'หยุดทดลองและให้ผู้ดูแลตรวจ Activity ของ OpenRouter ก่อนส่งคำขอถัดไป',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
     AI_RATE_LIMIT: {
       title: 'บริการ AI จำกัดการใช้งานในขณะนี้',
       detail: 'รอสักครู่ก่อนเริ่มใหม่ หากเกิดซ้ำให้ผู้ดูแลตรวจโควตาและจำนวนคำขอใน Google',

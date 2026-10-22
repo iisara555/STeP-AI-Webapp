@@ -309,6 +309,21 @@ export function demoHost(): Host {
               aiConfigured: true,
               model: 'Gemini · ตัวอย่าง',
             };
+          case 'admin.openrouter.status':
+            return { configured: true, dailyLimit: 40, minuteLimit: 5 };
+          case 'admin.openrouter.models':
+            return { models: [{ id: 'synthetic/example:free', name: 'โมเดลจำลอง (free)' }] };
+          case 'admin.openrouter.test':
+            if (!p.consent || p.model !== 'synthetic/example:free') throw new ApiError('INVALID_REQUEST');
+            return {
+              model: 'synthetic/example:free',
+              text: 'คำตอบจำลองสำหรับทดลองหน้าจอ OpenRouter เท่านั้น',
+              inputTokens: 20,
+              outputTokens: 15,
+              elapsedMs: 100,
+              cost: 0,
+              truncated: false,
+            };
           case 'admin.members':
             return { members: data.memberships, invites: [] };
           case 'admin.invite':

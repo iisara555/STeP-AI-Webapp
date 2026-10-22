@@ -68,3 +68,31 @@ Schema, function deployment, OAuth configuration, secrets, an actual Pages URL,
 organization import, backups and real-account acceptance are separate steps.
 Passing synthetic tests does not certify a live Google or Gemini connection.
 See deployment.md and progress.md for the verified state and outstanding setup.
+
+## Administrator OpenRouter trial
+
+Settings → เชื่อมต่อ AI includes a separate, synchronous text-only OpenRouter
+trial for active owners/admins of one operator-selected tenant. It works with
+zero Gemini budget and does not enable paid chat, embeddings or receipt OCR.
+Only the explicitly consented trial prompt is sent; no stored conversations,
+memory, organization documents or Google context are retrieved. Known credential
+patterns are rejected. Free providers may retain data or train on it; the UI asks
+for synthetic, nonconfidential input and explains this before each attempt.
+
+The API authenticates tenant membership and admin role, requires explicit consent,
+and reserves an idempotent attempt via a service-only Postgres function that checks
+the active tenant/admin again. Reservations serialize per tenant, allow at most
+5 attempts/minute and 40/day (UTC), and retain only IDs/timestamps. Failed and
+ambiguous attempts count and are never retried automatically. A fresh provider
+catalog check requires a `:free` model, text input/output and zero for every
+reported price, including prompt/completion. Each generation disables provider
+fallbacks and sets prompt/completion/request/image price ceilings to zero. There
+is no paid-model fallback or purchase action. Provider billing remains external;
+an unexpected nonzero reported cost is surfaced as an error.
+
+Responses are bounded to 512 output tokens with a 20-second upstream deadline,
+rendered as plain text and held only in component memory. Only token totals,
+elapsed time and optional reported cost accompany the reply; raw provider
+diagnostics and keys never reach clients. Missing cost is not reported as $0.
+The user's admin role is rechecked before returning a result. The demo path is
+explicitly synthetic and makes no provider request.
