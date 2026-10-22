@@ -4,8 +4,8 @@
 
 Use a static Cloudflare Pages project and dedicated Supabase project. The initial
 project is `zwwchjshmxdzhhotacte`, Singapore, created after its quoted monthly cost
-was $0. No Cloudflare provisioning or Google OAuth management connection is
-available in this session; an actual Pages URL has not been created.
+was $0. No Pages project has been provisioned for this pilot, and Google OAuth management
+requires separate setup. An actual Pages URL has not been created.
 
 Create Pages in the STeP account, connect this repository, and use:
 

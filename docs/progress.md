@@ -37,6 +37,10 @@
   PostgreSQL (PGlite) and 16 desktop/mobile browser/accessibility checks passed.
   Vault tests use synthetic rows; multi-connection contention, actual OAuth and
   provider billing still require live acceptance. No live AI was called.
+- The combined PR #4/#5 frontend built and ran as a healthy non-root, read-only
+  Docker container. Hosting smoke and four desktop/mobile sandbox/accessibility
+  checks passed against that production image. The operator bundle was refreshed
+  with matching frontend source and public configuration only.
 - Applied the sandbox and shared-quota migrations in the hosted project as
   `20261022164853` and `20261022164909`; local filenames match all 12 remote versions.
   The earlier sandbox migration had not been deployed and was renamed to its
