@@ -19,12 +19,12 @@
 - The target homelab is not installed yet: this execution environment has
   `vpn_configured: false` and no TCP grants. SSH installation and testing from an
   actual tailnet device require that network connection first. No live AI was called.
-- Live Supabase inspection found an existing unclaimed owner reservation for the
-  requested account, a zero paid budget and a disabled free trial. The deployed
-  API/worker/callback are version 3 and include provider/Vault changes absent from
-  this checkout; the admin-sandbox reservation RPC is absent and Vault APP_ORIGIN is
-  unset. Those deployed functions and migrations were preserved. Reconcile backend
-  source and configure the actual HTTPS origin before live login/trial acceptance.
+- Supabase backend reconciliation is tracked in PR #5. The sandbox/shared-quota
+  migrations are installed and API/worker/callback are now version 4. SQL verified
+  service-only configuration/reservation RPCs, sandbox RLS, zero paid budget and
+  disabled worker trial. Merge that frontend consent update before installing this
+  checkout; the prepared bundle combines both PRs. The actual HTTPS origin,
+  replacement trial credentials and live Google/AI acceptance are still pending.
 
 ## 2026-10-22 · Administrator OpenRouter free trial
 

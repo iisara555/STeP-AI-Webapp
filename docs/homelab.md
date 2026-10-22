@@ -4,6 +4,13 @@
 OpenRouter และคีย์บริการทั้งหมดอยู่ฝั่ง Supabase ชุดนี้ไม่ติดตั้งฐานข้อมูลใหม่บน homelab
 และไม่เปิดบริการออกสู่อินเทอร์เน็ตผ่าน Cloudflare หรือ Tailscale Funnel
 
+## รุ่นหน้าเว็บที่ต้องใช้
+
+Supabase API/worker/callback อัปเดตเป็นรุ่น 4 แล้ว ต้องใช้หน้าเว็บที่ส่ง
+`providerConsent` จาก [PR #5](https://github.com/iisara555/STeP-AI-Webapp/pull/5)
+รวม PR ดังกล่าวก่อนติดตั้ง checkout นี้ ชุดติดตั้ง homelab ที่เตรียมให้รวมทั้งสองส่วนไว้แล้ว
+ฐานข้อมูลจำกัดโควตาติดตั้งแล้ว แต่ยังต้องตั้ง HTTPS origin และคีย์ใหม่ก่อนทดลองจริง
+
 ## เตรียมเครื่อง
 
 ต้องมี Docker Engine, Docker Compose v2, Git และ Tailscale ที่เชื่อม tailnet แล้ว
