@@ -2,7 +2,7 @@
 
 The web application is separate from the Electron repository. It uses a static
 React/Vite app on Cloudflare Pages and Supabase Auth, Postgres, private Storage,
-and Edge Functions. Gemini runs only on the server. Hosting can start on free
+and Edge Functions. AI runs only on the server; the paid path uses Gemini. Hosting can start on free
 plans; Gemini usage and any future plan changes are separate costs.
 
 ## Identity and access
@@ -33,7 +33,7 @@ Postgres jobs use idempotency keys, leases, a global concurrency cap of two, fre
 access checks and budget reservations. Interrupted jobs do not replay provider
 calls automatically. Responses are stored once. Failed or ambiguous calls retain
 their reservation because a provider may already have charged. Usage is an
-estimate based on configured rates, not a provider invoice. AI is disabled until
+estimate based on configured rates, not a provider invoice. Paid AI is disabled until
 server credentials, rates and a positive tenant budget have been configured.
 
 Google Workspace uses a separate web OAuth grant: Calendar read-only and
@@ -96,3 +96,25 @@ elapsed time and optional reported cost accompany the reply; raw provider
 diagnostics and keys never reach clients. Missing cost is not reported as $0.
 The user's admin role is rechecked before returning a result. The demo path is
 explicitly synthetic and makes no provider request.
+
+## Provider and deployment configuration
+
+The API/worker/callback retain the existing deployed provider selection and Vault
+fallback. Environment values override the exact Vault allowlist; only service_role
+can read the configuration RPC. A configuration failure returns a sanitized 503.
+Snapshots expose provider/model/consent metadata, never keys. User confirmation is
+bound to that provider, model and upstream; the API and worker reject a changed
+identity before sending context.
+
+The existing opt-in OpenRouter worker pilot supports administrator text chat and
+pins one free model/upstream with data collection denied and zero price ceilings.
+It can use the authorized context shown at confirmation and stores conversation
+results. It remains separate from the temporary synthetic-only Settings sandbox.
+The worker pilot is disabled by default and does not enable a paid budget.
+
+Both channels serialize admission under one account lock and share 40 attempts per
+UTC day / 15 per minute, including failed, cancelled and purged accounting rows.
+The Settings sandbox also retains its 5/minute per-tenant limit; the worker has an
+additional tenant daily limit. PostgreSQL tests cover the combined accounting and
+revocation paths; real multi-connection contention is a separate acceptance check.
+See [backend pilot preparation](backend-pilot.md) before deployment or activation.

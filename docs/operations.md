@@ -43,9 +43,12 @@ No restore drill with live staff data has been completed in the initial setup.
 
 Every public data table and private grant/state table has RLS. Private credential
 tables intentionally have no client privileges or policies; their INFO advisory
-does not require adding permissive policies. Eleven authenticated SECURITY
+does not require adding permissive policies. Twelve authenticated SECURITY
 DEFINER RPCs are intentional, checking auth.uid()/resource access with a fixed
-empty search_path. Worker, grant-reading, bootstrap and import RPCs are service-only.
+empty search_path. Worker, grant-reading, bootstrap, import, sandbox reservation and Vault configuration
+RPCs are service-only. `configure_free_trial` is an intentional authenticated RPC
+that checks active administrator membership; private sandbox accounting has RLS
+and no client policies. Its INFO advisory does not justify granting client access.
 Tests emulate Supabase's permissive function defaults; revoking PUBLIC alone is
 insufficient because schema-level authenticated/anon defaults also exist.
 

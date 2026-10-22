@@ -28,6 +28,7 @@ import {
 import { validFile } from './files.ts';
 import { receiptSchema } from './receipt.ts';
 import { openrouter, trialConfigured } from './openrouter.ts';
+import { aiService, requireProviderConsent } from './ai.ts';
 
 const uuid = z.string().uuid();
 const visibility = z.enum(['private', 'workspace']);
@@ -44,6 +45,7 @@ const start = z.object({
   documentIds: z.array(uuid).max(8).default([]),
   useMemory: z.boolean().default(true),
   consent: z.literal(true),
+  providerConsent: z.string().min(1).max(1000),
   googleConsent: z.boolean().default(false),
 });
 export async function contextPlan(
@@ -95,10 +97,9 @@ export async function contextPlan(
     documents: docs,
     memories: memories.map((m) => ({ id: m.id, title: m.title, visibility: m.visibility })),
     google: wantsCalendar(input.message),
-    provider: 'Google Gemini API',
   };
 }
-async function snapshot(actor: Actor) {
+async function snapshot(actor: Actor, env: Environment) {
   await checked(actor.userDb.rpc('accept_invites'));
   const [tenants, memberships, workspaces, sessions, memories, documents, skills] = await Promise.all([
     checked(actor.userDb.from('tenants').select('*')),
@@ -121,6 +122,7 @@ async function snapshot(actor: Actor) {
     ),
   ]);
   return {
+    ai: aiService(env),
     user: { id: actor.user.id, email: actor.user.email, name: actor.user.user_metadata?.full_name || '' },
     tenants,
     memberships,
@@ -139,7 +141,7 @@ export async function dispatch(
   fetcher: typeof fetch = fetch,
 ) {
   const db = actor.userDb;
-  if (action === 'snapshot') return snapshot(actor);
+  if (action === 'snapshot') return snapshot(actor, env);
   const base = tenantRequest.parse(input);
   await member(actor, base.tenant);
   switch (action) {
@@ -453,7 +455,12 @@ export async function dispatch(
           useMemory: z.boolean(),
         })
         .parse(input);
-      return contextPlan(actor, p);
+      const info = aiService(env);
+      return {
+        ...(await contextPlan(actor, p)),
+        provider: info.displayName,
+        providerConsent: info.consentId,
+      };
     }
     case 'knowledge.read': {
       const p = tenantRequest.extend({ key: z.string().min(1).max(120) }).parse(input);
@@ -470,8 +477,13 @@ export async function dispatch(
       return row;
     }
     case 'run.start': {
-      if (!env('GEMINI_API_KEY') || !env('WORKER_SECRET')) throw new Error('AI_NOT_CONFIGURED');
       const p = start.parse(input);
+      const info = requireProviderConsent(env, p.providerConsent);
+      if (!info.configured) throw new Error('AI_NOT_CONFIGURED');
+      if (info.provider === 'openrouter_free') {
+        await member(actor, p.tenant, true);
+        if (p.kind !== 'chat') throw new Error('AI_TRIAL_TEXT_ONLY');
+      }
       if (p.kind === 'chat') {
         if (!p.session || !p.message) throw new Error('INVALID_REQUEST');
         assertSafeText(p.message);
@@ -497,6 +509,8 @@ export async function dispatch(
             documentIds: p.documentIds,
             useMemory: p.useMemory,
             consent: true,
+            aiProvider: info.provider,
+            providerConsent: info.consentId,
             googleConsent: p.googleConsent,
           },
         }),
@@ -614,7 +628,9 @@ export async function dispatch(
           outputRate: z.number().positive().max(100000),
         })
         .parse(input);
-      if (!env('GEMINI_API_KEY') && p.budgetCents > 0) throw new Error('AI_NOT_CONFIGURED');
+      const info = aiService(env);
+      if (info.provider !== 'gemini') throw new Error('AI_FREE_UNAVAILABLE');
+      if (!info.configured && p.budgetCents > 0) throw new Error('AI_NOT_CONFIGURED');
       await checked(
         db.rpc('configure_ai', {
           t: p.tenant,
@@ -625,12 +641,25 @@ export async function dispatch(
       );
       return { ok: true };
     }
+    case 'admin.ai-trial': {
+      const p = tenantRequest
+        .extend({ enabled: z.boolean(), dailyLimit: z.number().int().min(1).max(50) })
+        .parse(input);
+      const info = aiService(env);
+      if (info.provider !== 'openrouter_free') throw new Error('AI_FREE_UNAVAILABLE');
+      if (p.enabled && !info.configured) throw new Error('AI_NOT_CONFIGURED');
+      await checked(
+        db.rpc('configure_free_trial', { t: p.tenant, enabled: p.enabled, daily_limit: p.dailyLimit }),
+      );
+      return { ok: true };
+    }
     case 'usage': {
       const usage = await checked(db.rpc('usage_summary', { t: base.tenant }));
       return {
         ...usage,
-        aiConfigured: Boolean(env('GEMINI_API_KEY') && env('WORKER_SECRET')),
-        model: env('GEMINI_MODEL') || 'gemini-3.8-flash',
+        aiConfigured: aiService(env).configured,
+        model: aiService(env).model,
+        ai: aiService(env),
       };
     }
     default:

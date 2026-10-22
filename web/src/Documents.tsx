@@ -20,7 +20,9 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
     [search, setSearch] = useState(''),
     [busy, setBusy] = useState(false),
     [deleting, setDeleting] = useState<DocumentRecord | null>(null),
-    [consent, setConsent] = useState<DocumentRecord | null>(null),
+    [consent, setConsent] = useState<
+      (DocumentRecord & { providerName: string; providerConsent?: string }) | null
+    >(null),
     [notice, setNotice] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
   const rows = data.documents.filter(
@@ -109,6 +111,7 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
         kind: 'document',
         requestId: crypto.randomUUID(),
         consent: true,
+        providerConsent: consent.providerConsent,
       });
       setConsent(null);
       setNotice('เริ่มอ่านเอกสารแล้ว คุณเปิดงานอื่นต่อได้');
@@ -211,7 +214,16 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
             <div className="inline-actions">
               {d.source_kind === 'upload' && d.status === 'ready' && (
                 <>
-                  <button disabled={busy} onClick={() => setConsent(d)}>
+                  <button
+                    disabled={busy || data.ai?.textOnly}
+                    onClick={() =>
+                      setConsent({
+                        ...d,
+                        providerName: data.ai?.displayName || 'Google Gemini API',
+                        providerConsent: data.ai?.consentId,
+                      })
+                    }
+                  >
                     เตรียมให้ AI ค้น
                   </button>
                   <button
@@ -281,7 +293,7 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
       {consent && (
         <Modal title="เตรียมเอกสารให้ AI อ่าน" onClose={() => setConsent(null)}>
           <p>
-            ส่ง “{consent.name}” ให้ Google Gemini API เพื่ออ่านข้อความหรือเตรียมการค้นหา ใช้วงเงิน AI
+            ส่ง “{consent.name}” ให้ {consent.providerName} เพื่ออ่านข้อความหรือเตรียมการค้นหา ใช้วงเงิน AI
             ขององค์กร
           </p>
           <p className="muted">

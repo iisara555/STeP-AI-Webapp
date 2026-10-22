@@ -13,7 +13,7 @@ import {
   Unlink,
   Users,
 } from 'lucide-react';
-import type { Membership } from '../../packages/harness-core/src/contracts.ts';
+import type { AiService, Membership } from '../../packages/harness-core/src/contracts.ts';
 import type { ViewProps } from './App.tsx';
 import { Busy, Modal, bytes, number } from './components.tsx';
 import { OpenRouterTrial } from './OpenRouterTrial.tsx';
@@ -23,6 +23,7 @@ type Usage = {
   visibleBytes: number;
   aiConfigured: boolean;
   model: string;
+  ai?: AiService;
 };
 export function SettingsView({
   host,
@@ -97,6 +98,10 @@ export function SettingsView({
       setBusy(false);
     }
   };
+  const aiReady = Boolean(
+    usage?.aiConfigured &&
+    (usage.ai?.textOnly ? admin && org.free_ai_trial_enabled : org.monthly_ai_budget_cents > 0),
+  );
   const totalTokens = usage?.runs.reduce((n, r) => n + r.input_tokens + r.output_tokens, 0) || 0;
   const cost = usage?.runs.reduce((n, r) => n + r.reserved_cents, 0) || 0;
   return (
@@ -183,21 +188,21 @@ export function SettingsView({
                   </span>
                   <div>
                     <h3>AI ขององค์กร</h3>
-                    <p>{usage?.model || 'Google Gemini API'}</p>
+                    <p>{usage?.ai?.displayName || usage?.model || 'Google Gemini API'}</p>
                   </div>
-                  <span
-                    className={
-                      'badge ' + (usage?.aiConfigured && org.monthly_ai_budget_cents > 0 ? 'ready' : '')
-                    }
-                  >
-                    {usage?.aiConfigured && org.monthly_ai_budget_cents > 0 ? 'พร้อมใช้' : 'ยังไม่พร้อมใช้'}
+                  <span className={'badge ' + (aiReady ? 'ready' : '')}>
+                    {aiReady ? 'พร้อมใช้' : 'ยังไม่พร้อมใช้'}
                   </span>
                 </div>
-                {(!usage?.aiConfigured || org.monthly_ai_budget_cents <= 0) && (
+                {!aiReady && (
                   <p className="warning-note">
-                    {admin
-                      ? 'ตั้งค่าคีย์ที่ฝั่งเซิร์ฟเวอร์ แล้วกำหนดวงเงินและอัตราค่าบริการก่อนเปิดใช้งาน'
-                      : 'ผู้ดูแลกำลังเตรียมบริการ AI และวงเงินขององค์กร'}
+                    {usage?.ai?.textOnly
+                      ? admin
+                        ? 'เซิร์ฟเวอร์เลือก OpenRouter รุ่นฟรีสำหรับผู้ดูแล แชตองค์กรยังต้องเปิดทดลองแยกต่างหาก คุณใช้ช่องทดลองข้อความด้านล่างได้เมื่อผู้ดูแลระบบตั้งค่าแล้ว'
+                        : 'รุ่นฟรีเปิดให้ผู้ดูแลทดลองเท่านั้น'
+                      : admin
+                        ? 'ตั้งค่าคีย์ที่ฝั่งเซิร์ฟเวอร์ แล้วกำหนดวงเงินและอัตราค่าบริการก่อนเปิดใช้งาน'
+                        : 'ผู้ดูแลกำลังเตรียมบริการ AI และวงเงินขององค์กร'}
                   </p>
                 )}
                 <p className="small muted">
@@ -205,7 +210,7 @@ export function SettingsView({
                 </p>
               </div>
               {admin && <OpenRouterTrial key={tenant} host={host} tenant={tenant} />}
-              {admin && (
+              {admin && !usage?.ai?.textOnly && (
                 <form
                   className="settings-card"
                   onSubmit={async (e) => {
@@ -357,7 +362,7 @@ export function SettingsView({
                   <li>
                     <strong>การใช้ AI</strong>
                     <p>
-                      แอปแสดงข้อมูลที่จะส่งให้ Google Gemini ก่อนเริ่มงาน เอกสารที่อัปโหลดยังไม่ถูกส่งไป AI
+                      แอปแสดงข้อมูลและบริการ AI ที่จะรับข้อมูลก่อนเริ่มงาน เอกสารที่อัปโหลดยังไม่ถูกส่งไป AI
                       ทันที
                     </p>
                   </li>

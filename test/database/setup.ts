@@ -5,7 +5,9 @@ import { readFile, readdir } from 'node:fs/promises';
 export async function database() {
   const db = new PGlite({ extensions: { vector, pgcrypto } });
   await db.exec(`
- create schema auth; create schema storage; create schema extensions;
+ create schema auth; create schema storage; create schema extensions; create schema vault;
+ -- Synthetic Vault stand-in: exercise SQL allowlists/ACLs without real secrets or encryption.
+ create table vault.decrypted_secrets(name text primary key, decrypted_secret text);
  create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
  alter default privileges in schema public grant execute on functions to anon,authenticated,service_role;
  create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz,raw_user_meta_data jsonb default '{}');

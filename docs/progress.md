@@ -21,6 +21,26 @@
   with `OPENROUTER_TRIAL_TENANT_ID`, then real-account authorization and $0 billing
   acceptance. Existing hosting/Google rollout requirements below remain applicable.
 
+## 2026-10-22 · Supabase backend reconciliation
+
+- Recovered the existing provider/Vault migrations and version-3 function behavior
+  into source while retaining the administrator-only, temporary Settings sandbox.
+  Worker chat remains a separate opt-in channel; paid budgets are unchanged.
+- Added shared account admission for both OpenRouter paths: 40 attempts/day UTC
+  and 15/minute, including failed/cancelled/purged jobs. The sandbox also retains
+  its 5/minute tenant limit. Admission locks precede tenant locks for free jobs.
+- Added the sandbox tenant restriction to the service-only Vault allowlist.
+  Environment values take precedence; configuration failures return a sanitized 503.
+  Browser confirmations bind provider/model/upstream consent, and the API/worker
+  reject stale consent before sending context. Text-only mode disables OCR/indexing.
+- Validation: type/format and production build passed; 31 unit/API/PWA, 26 real
+  PostgreSQL (PGlite) and 16 desktop/mobile browser/accessibility checks passed.
+  Vault tests use synthetic rows; multi-connection contention, actual OAuth and
+  provider billing still require live acceptance. No live AI was called.
+- Hosted migration/function deployment is being completed through the Supabase
+  connector. Homelab SSH, the real HTTPS origin, replacement trial credentials and
+  real-account trial acceptance remain pending; neither trial channel is enabled.
+
 ## 2026-10-22 · Centralized PWA implementation
 
 - Source baseline: STeP-AI-Harness `90ee71ca667c63284afe4996eddc7e8095b9a059`, Desktop 0.6.20.

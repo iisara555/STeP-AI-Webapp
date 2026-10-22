@@ -102,6 +102,9 @@ test('upload is private and does not immediately send a document to AI', async (
   await expect(page.getByText('เก็บไฟล์แล้ว · ยังไม่ได้ส่งให้ AI')).toBeVisible();
   await page.getByRole('button', { name: 'เตรียมให้ AI ค้น' }).click();
   await expect(page.getByRole('dialog').getByText(/ใช้วงเงิน AI ขององค์กร/)).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'ยืนยันและเริ่มอ่าน' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('เริ่มอ่านเอกสารแล้ว คุณเปิดงานอื่นต่อได้')).toBeVisible();
 });
 test('settings explain paused Google access and support resuming it', async ({ page }) => {
   await page.goto('/?demo=1');
