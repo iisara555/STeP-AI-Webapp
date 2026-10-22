@@ -1,5 +1,31 @@
 # Progress
 
+## 2026-10-22 · Homelab pilot preparation
+
+- Added a reproducible multi-stage Docker build and Compose service for the static
+  frontend, with pinned Node/nginx image digests. Only a hosted Supabase URL and
+  modern publishable key are accepted as browser configuration. Operator files,
+  source credentials and local environment files are excluded from the build context.
+- Runtime is a non-root nginx process on a read-only filesystem, with a loopback-only
+  host port, bounded resources, PWA cache headers, security headers, SPA/OAuth callback
+  routing and a health check. Supabase remains the backend; no database is self-hosted.
+- Added Thai setup/rollback instructions for Tailscale Serve over a dedicated HTTPS
+  port, plus a hosting smoke checker. The current pilot uses Tailscale; no Cloudflare
+  DNS, Tunnel, Access policies or public ingress were created.
+- Validation: type/format checks, 24 unit/API/PWA tests, 21 PostgreSQL tests, the
+  production build and 16 desktop/mobile browser checks passed. The Docker image
+  built and ran healthy; hosting checks verified callback fallback, cache/CSP headers
+  and missing-asset handling. Its runtime contains no server credentials or build CA.
+- The target homelab is not installed yet: this execution environment has
+  `vpn_configured: false` and no TCP grants. SSH installation and testing from an
+  actual tailnet device require that network connection first. No live AI was called.
+- Live Supabase inspection found an existing unclaimed owner reservation for the
+  requested account, a zero paid budget and a disabled free trial. The deployed
+  API/worker/callback are version 3 and include provider/Vault changes absent from
+  this checkout; the admin-sandbox reservation RPC is absent and Vault APP_ORIGIN is
+  unset. Those deployed functions and migrations were preserved. Reconcile backend
+  source and configure the actual HTTPS origin before live login/trial acceptance.
+
 ## 2026-10-22 · Administrator OpenRouter free trial
 
 - Added Settings → เชื่อมต่อ AI → ทดลอง OpenRouter Free for active tenant owners/admins.
