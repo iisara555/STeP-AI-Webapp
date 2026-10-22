@@ -53,6 +53,7 @@ Tests emulate Supabase's permissive function defaults; revoking PUBLIC alone is
 insufficient because schema-level authenticated/anon defaults also exist.
 
 Review the [SECURITY DEFINER guidance](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable)
+[private-table advisory](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy)
 and [RLS guidance](https://supabase.com/docs/guides/database/postgres/row-level-security)
 when changing access. Organization admins manage members and aggregate usage;
 infrastructure operators retain technical access and require operational controls.

@@ -37,9 +37,19 @@
   PostgreSQL (PGlite) and 16 desktop/mobile browser/accessibility checks passed.
   Vault tests use synthetic rows; multi-connection contention, actual OAuth and
   provider billing still require live acceptance. No live AI was called.
-- Hosted migration/function deployment is being completed through the Supabase
-  connector. Homelab SSH, the real HTTPS origin, replacement trial credentials and
-  real-account trial acceptance remain pending; neither trial channel is enabled.
+- Applied the sandbox and shared-quota migrations in the hosted project as
+  `20261022164853` and `20261022164909`; local filenames match all 12 remote versions.
+  The earlier sandbox migration had not been deployed and was renamed to its
+  assigned version without rewriting remote history. API/worker/callback version 4
+  are ACTIVE, with the sandbox route and provider consent verified in deployed source.
+- Hosted SQL confirmed the service-only RPC ACLs, sandbox RLS, shared quota/Vault
+  allowlist definitions, no public table without RLS, zero paid budget and disabled
+  worker trial. Security advisors show only the documented 12 intentional RPC WARNs
+  and four policy-free private-table INFOs. No server key was printed or installed.
+- Direct HTTP smoke could not reach the hosted function URLs with the available
+  network tools; deployment/source checks do not establish runtime or login acceptance.
+  Homelab SSH, the real HTTPS origin, replacement trial credentials and real-account
+  trial acceptance remain pending. The sandbox tenant restriction is unset in Vault.
 
 ## 2026-10-22 · Centralized PWA implementation
 
