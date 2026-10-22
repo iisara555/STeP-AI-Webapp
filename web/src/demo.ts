@@ -61,6 +61,33 @@ export function demoHost(): Host {
     ],
     documents: [],
     skills: [
+      ...[
+        'tor-government-writing',
+        'thai-official-documents',
+        'project-plan',
+        'meeting-summary',
+        'step-image-prompt',
+      ].map((key, index) => ({
+        id: 'synthetic-skill-' + index,
+        skill_key: key,
+        title: [
+          'ร่าง TOR ภาครัฐ',
+          'เอกสารราชการไทย',
+          'ร่างข้อเสนอโครงการ',
+          'สรุปการประชุม',
+          'เขียน Prompt สร้างภาพ',
+        ][index],
+        description: 'Skill สังเคราะห์สำหรับทดสอบขั้นตอนใช้งาน',
+        instructions: 'คำแนะนำตัวอย่างเท่านั้น ไม่ใช่เอกสารองค์กร',
+        metadata: {
+          owner: 'common',
+          stage: 'pilot',
+          triggers: ['ตัวอย่าง'],
+          scope: { allow: ['ร่างเพื่อให้คนตรวจ'] },
+          support_source_keys: [],
+        },
+        source_version: 'demo',
+      })),
       {
         id: 'sample-skill',
         skill_key: 'document-outline',
@@ -124,13 +151,28 @@ export function demoHost(): Host {
               owner_id: user,
               workspace_id: p.workspace as string | null,
               visibility: p.visibility as 'private' | 'workspace',
-              title: 'เริ่มงานใหม่',
+              title: String(p.title || 'เริ่มงานใหม่'),
               draft: '',
               version: 1,
             };
             data.sessions.unshift(row);
             messages[row.id] = [];
             return row;
+          }
+          case 'skill.read': {
+            const s = data.skills.find((s) => s.skill_key === p.key);
+            if (!s) throw new ApiError('ACCESS_DENIED');
+            return structuredClone(s);
+          }
+          case 'session.search': {
+            const query = String(p.query).toLowerCase();
+            return data.sessions
+              .filter((s) =>
+                (s.title + ' ' + s.draft + ' ' + (messages[s.id] || []).map((m) => m.body).join(' '))
+                  .toLowerCase()
+                  .includes(query),
+              )
+              .slice(0, 50);
           }
           case 'session.read':
             return {

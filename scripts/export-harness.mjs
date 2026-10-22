@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 import * as yaml from 'js-yaml';
 import { skillTitle } from '../packages/harness-core/src/skill-labels.ts';
+import { skillSupport } from './harness-support.mjs';
 const { values } = parseArgs({ options: { source: { type: 'string' }, out: { type: 'string' } } });
 if (!values.source) throw new Error('Use --source /path/to/authorized/STeP-AI-Harness');
 const root = await realpath(resolve(values.source));
@@ -58,6 +59,20 @@ for (const [key, path] of [
   });
 const registry = yaml.load(await text('manifest/skills.yaml'));
 const router = yaml.load(await text('manifest/router-index.yaml'));
+const documentRegistry = yaml.load(await text('manifest/documents.yaml'));
+const excluded = new Set([
+  'not-provided',
+  'superseded',
+  'archived',
+  'withdrawn',
+  'restricted',
+  'unregistered',
+]);
+const deniedPaths = new Set(
+  Object.values(documentRegistry.documents)
+    .filter((d) => d.sensitivity === 'restricted' || excluded.has(d.status))
+    .flatMap((d) => [d.path, d.index].filter(Boolean)),
+);
 const skills = [];
 for (const [key, entry] of Object.entries(registry.skills)) {
   if (!entry.path || ['retired', 'archived', 'draft'].includes(entry.governance?.lifecycle?.stage)) continue;
@@ -66,6 +81,29 @@ for (const [key, entry] of Object.entries(registry.skills)) {
   const front = instructions.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   const metadata = front ? yaml.load(front[1]) : {};
   const route = router.skills.find((s) => s.name === key) || {};
+  const supportKeys = [];
+  // Restricted/retired registry entries remain excluded even if a Skill links to their file.
+  for (const support of await skillSupport(root, dirname(entry.path), deniedPaths)) {
+    const existing = sources.find((s) => s.provenance.path === support.path);
+    const sourceKey =
+      existing?.source_key ||
+      'support-' + createHash('sha256').update(support.path).digest('hex').slice(0, 32);
+    supportKeys.push(sourceKey);
+    if (!existing)
+      sources.push({
+        source_key: sourceKey,
+        title: support.path.split('/').slice(-2).join('/'),
+        body: support.body,
+        source_version: commit,
+        provenance: {
+          path: support.path,
+          kind: 'skill-support',
+          skill_key: key,
+          verification: 'working-reference',
+          sha256: createHash('sha256').update(support.body).digest('hex'),
+        },
+      });
+  }
   skills.push({
     skill_key: key,
     title: skillTitle(key, metadata.name || key),
@@ -73,6 +111,15 @@ for (const [key, entry] of Object.entries(registry.skills)) {
     instructions,
     metadata: {
       ...route,
+      owner: entry.owner || 'common',
+      stage: entry.governance?.lifecycle?.stage || 'unregistered',
+      skill_version: entry.version || '',
+      source_path: entry.path,
+      optional_source_keys: entry.references?.optional || [],
+      support_source_keys: supportKeys,
+      missing_required_source_keys: (entry.references?.mandatory || []).filter(
+        (k) => !sources.some((s) => s.source_key === k),
+      ),
       developerOnly: ['ai-admin', 'developer'].includes(entry.owner),
       webUnsupported: ['browser-form-assistant'].includes(key),
       required_source_keys: entry.references?.mandatory || [],
@@ -88,6 +135,7 @@ const pack = {
   skills,
 };
 const output = JSON.stringify(pack);
+if (sources.length > 500 || skills.length > 200) throw new Error('PACK_RECORD_LIMIT');
 if (Buffer.byteLength(output) > 20 * 1024 * 1024) throw new Error('PACK_TOO_LARGE');
 await mkdir(dirname(out), { recursive: true, mode: 0o700 });
 await writeFile(out, output, { flag: 'wx', mode: 0o600 });

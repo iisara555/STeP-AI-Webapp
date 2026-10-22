@@ -5,6 +5,13 @@ React/Vite app on Cloudflare Pages and Supabase Auth, Postgres, private Storage,
 and Edge Functions. AI runs only on the server; the paid path uses Gemini. Hosting can start on free
 plans; Gemini usage and any future plan changes are separate costs.
 
+Desktop workflow adapters retain the original five document profiles, internal-media
+Prompt compiler, Thai date helpers, team starters and document presentation presets.
+Forms prepare private conversations/drafts; they do not start AI calls. Prompt
+preparation stays local until an explicit handoff or download. The searchable
+32-group Desktop reference records supported, partial and native-only capabilities.
+See [Desktop details](desktop-reference.md) for the source inventory and limits.
+
 ## Identity and access
 
 Google sign-in establishes identity. An unexpired invitation plus a verified
@@ -28,6 +35,14 @@ Workspace conversations cannot use private memory or another workspace's files.
 Organization knowledge comes from an explicitly imported, versioned Harness pack;
 source instructions cannot grant authority. The original retrieval and authority
 code is retained with its MIT notice and source commit under harness-core/vendor.
+
+Skill-local text references/templates/examples retain provenance and are excluded
+from general organization retrieval. The selected Skill may include bounded working
+references labelled as such. Existing mandatory sources remain complete; oversized
+material fails before provider access, and unavailable sources remain explicit gaps.
+User-scoped history search uses the same tenant/session/message RLS as reading a
+conversation, searches title/draft/body without an external search service, and
+returns at most 50 sessions. The new routes require matching API/worker deployment.
 
 Postgres jobs use idempotency keys, leases, a global concurrency cap of two, fresh
 access checks and budget reservations. Interrupted jobs do not replay provider

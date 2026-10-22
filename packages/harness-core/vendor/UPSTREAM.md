@@ -12,6 +12,12 @@ Copied from `iisara555/STeP-AI-Harness` at
   loading is replaced with a per-invocation array of authorized tenant sources.
 - `../src/skill-labels.ts` adapts the staff-facing Thai title map from
   `desktop/src/skill-display.ts`; it contains UI labels only.
+- `desktop/` retains the upstream document profiles/output parser, date helpers,
+  document presentation presets and internal-media Prompt engine. Imports use explicit
+  `.ts` extensions for web/server tooling. `starters.ts` uses Thai labels directly and
+  exposes the team keys; it never uses team selection for authorization.
+- Public symbol assets in `web/public/step-symbol-*.svg` are the unchanged Desktop
+  artwork; palette and usage come from upstream `DESIGN.md`. No logo is redrawn.
 
 No organization registry, employee record or controlled document is included.
 Import these separately into the tenant database with the operator tool.

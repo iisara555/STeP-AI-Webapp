@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
-  ArrowUp,
-  BookOpen,
   Brain,
   Check,
-  ChevronDown,
   CircleHelp,
+  History as HistoryIcon,
+  Image,
+  FilePenLine,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Command,
   FileText,
   FolderOpen,
   LayoutGrid,
@@ -29,7 +32,25 @@ import { Documents } from './Documents.tsx';
 import { Memories } from './Memories.tsx';
 import { ReceiptView } from './ReceiptView.tsx';
 import { SettingsView } from './SettingsView.tsx';
-export type Page = 'chat' | 'skills' | 'documents' | 'memory' | 'receipt' | 'settings';
+import { SkillsHub } from './SkillsHub.tsx';
+import { DocumentTools } from './DocumentTools.tsx';
+import { MediaStudio } from './MediaStudio.tsx';
+import { Help } from './Help.tsx';
+import { History } from './History.tsx';
+import { CommandPalette } from './CommandPalette.tsx';
+import { ThemeSelect } from './ThemeSelect.tsx';
+import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
+export type Page =
+  | 'chat'
+  | 'skills'
+  | 'documents'
+  | 'memory'
+  | 'receipt'
+  | 'settings'
+  | 'document-tools'
+  | 'media'
+  | 'history'
+  | 'help';
 export interface ViewProps {
   host: Host;
   data: Snapshot;
@@ -40,6 +61,9 @@ export interface ViewProps {
 }
 const navigation = [
   { id: 'chat' as const, label: 'งานของฉัน', icon: MessageSquare },
+  { id: 'history' as const, label: 'ค้นงานเก่า', icon: HistoryIcon },
+  { id: 'document-tools' as const, label: 'ร่างเอกสาร', icon: FilePenLine },
+  { id: 'media' as const, label: 'สื่อภายใน', icon: Image },
   { id: 'skills' as const, label: 'Skill', icon: LayoutGrid },
   { id: 'documents' as const, label: 'เอกสาร', icon: FileText },
   { id: 'memory' as const, label: 'ความจำ', icon: Brain },
@@ -56,7 +80,21 @@ export function App() {
   const [data, setData] = useState<Snapshot | null>(null),
     [tenant, setTenant] = useState(''),
     [workspaceId, setWorkspaceId] = useState('');
-  const [page, setPage] = useState<Page>(location.pathname === '/settings' ? 'settings' : 'chat'),
+  const [page, setPage] = useState<Page>(
+      [
+        'settings',
+        'skills',
+        'documents',
+        'memory',
+        'receipt',
+        'document-tools',
+        'media',
+        'history',
+        'help',
+      ].includes(location.pathname.slice(1))
+        ? (location.pathname.slice(1) as Page)
+        : 'chat',
+    ),
     [session, setSession] = useState<Conversation | null>(null),
     [skill, setSkill] = useState<Skill | null>(null);
   const [error, setError] = useState<unknown>(null),
@@ -66,6 +104,12 @@ export function App() {
   const [search, setSearch] = useState(''),
     [update, setUpdate] = useState(false),
     [online, setOnline] = useState(navigator.onLine);
+  const [collapsed, setCollapsed] = useState(false),
+    [palette, setPalette] = useState(false);
+  const [prepared, setPrepared] = useState<{ sessionId: string; text: string } | null>(null);
+  const consumePrepared = useCallback(() => setPrepared(null), []);
+  const activeTenant = useRef(tenant);
+  activeTenant.current = tenant;
   const epoch = useRef(0);
   const authenticatedUser = useRef('');
   const [authGeneration, setAuthGeneration] = useState(0);
@@ -157,6 +201,7 @@ export function App() {
     };
   }, []);
   useEffect(() => {
+    setPrepared(null);
     setSession(null);
     setSkill(null);
     setWorkspaceId('');
@@ -167,15 +212,79 @@ export function App() {
   const changePage = (p: Page) => {
     setPage(p);
     setMobile(false);
-    history.replaceState(null, '', p === 'settings' ? '/settings' : '/');
+    history.replaceState(null, '', (p === 'chat' ? '/' : '/' + p) + (demo ? '?demo=1' : ''));
   };
   const fail = useCallback((e: unknown) => setError(e), []);
+  const useSkill = (selected: Skill) => {
+    if (selected.skill_key === 'receipt-audit') changePage('receipt');
+    else {
+      setSkill(selected);
+      changePage('chat');
+    }
+  };
+  const prepareWork = async (work: PreparedWork) => {
+    const selected = data?.skills.find(
+      (s) =>
+        (!s.tenant_id || s.tenant_id === tenant) &&
+        s.skill_key === work.skillKey &&
+        !s.metadata.developerOnly &&
+        !s.metadata.webUnsupported,
+    );
+    if (work.skillKey && !selected && !host.demo) throw new ApiError('HARNESS_INCOMPLETE');
+    const current = epoch.current;
+    let created = await host.call<Conversation>('session.create', {
+      tenant,
+      workspace: null,
+      visibility: 'private',
+      title: work.title,
+    });
+    if (work.draft)
+      created = await host.call<Conversation>('session.draft', {
+        tenant,
+        id: created.id,
+        version: created.version,
+        draft: work.draft,
+      });
+    if (current !== epoch.current || activeTenant.current !== tenant) return;
+    await refresh();
+    if (current !== epoch.current || activeTenant.current !== tenant) return;
+    setWorkspaceId('');
+    setSession(created);
+    setSkill(selected || null);
+    setPrepared({ sessionId: created.id, text: work.message });
+    changePage('chat');
+  };
+  useEffect(() => {
+    if (!signedIn || !data) return;
+    const key = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.isComposing || e.repeat) return;
+      const k = e.key.toLowerCase();
+      if (k === 'k' && !e.altKey) {
+        e.preventDefault();
+        setPalette((v) => !v);
+      } else if (k === 'n' && e.altKey) {
+        e.preventDefault();
+        setDialog('conversation');
+      } else if (k === 'm' && e.shiftKey) {
+        e.preventDefault();
+        changePage('memory');
+      } else if (k === ',') {
+        e.preventDefault();
+        changePage('settings');
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [signedIn, data, demo]);
+
   const logout = async () => {
     setSignedIn(false);
     epoch.current++;
     setData(null);
     setSession(null);
     setError(null);
+    setPrepared(null);
+    setPalette(false);
     await host.signOut().catch(() => {});
     setSignedIn(false);
     setDemo(false);
@@ -204,7 +313,10 @@ export function App() {
     return (
       <main className="login">
         <div className="login-card">
-          <div className="brand-logo">STeP</div>
+          <div className="brand-logo">
+            <img className="brand-colour" src="/step-symbol-colour.svg" alt="STeP" />
+            <img className="brand-white" src="/step-symbol-mono-white.svg" alt="STeP" />
+          </div>
           <p className="eyebrow">MAKE INNOVATION SIMPLE</p>
           <h1>
             พื้นที่ทำงานของคุณ
@@ -273,7 +385,10 @@ export function App() {
     return (
       <main className="login">
         <div className="login-card">
-          <div className="brand-logo">STeP</div>
+          <div className="brand-logo">
+            <img className="brand-colour" src="/step-symbol-colour.svg" alt="STeP" />
+            <img className="brand-white" src="/step-symbol-mono-white.svg" alt="STeP" />
+          </div>
           <h1>บัญชีนี้ยังไม่ได้รับเชิญ</h1>
           <p>{data?.user.email || 'ขอให้ผู้ดูแลเพิ่มบัญชี Google ของคุณในรายชื่อพนักงาน'}</p>
           {Boolean(error) && <ErrorNotice error={error} onDismiss={() => setError(null)} />}
@@ -292,19 +407,27 @@ export function App() {
       s.title.toLowerCase().includes(search.toLowerCase()),
   );
   return (
-    <div className="app-shell">
+    <div className={'app-shell ' + (collapsed ? 'sidebar-collapsed' : '')}>
       {mobile && <button className="sidebar-scrim" aria-label="ปิดเมนู" onClick={() => setMobile(false)} />}
       <aside className={'sidebar ' + (mobile ? 'mobile-open' : '')}>
         <div className="sidebar-brand">
-          <div className="brand-logo">STeP</div>
+          <div className="brand-logo">
+            <img className="brand-colour" src="/step-symbol-colour.svg" alt="STeP" />
+            <img className="brand-white" src="/step-symbol-mono-white.svg" alt="STeP" />
+          </div>
           <span>AI WORKSPACE</span>
           <button className="icon-button mobile-only" aria-label="ปิดเมนู" onClick={() => setMobile(false)}>
             <X size={20} />
           </button>
         </div>
+        <button className="sidebar-command" onClick={() => setPalette(true)}>
+          <Command size={18} />
+          <span>ค้นหน้าหรือ Skill</span>
+          <kbd>⌘/Ctrl K</kbd>
+        </button>
         <button className="primary new-task" onClick={() => setDialog('conversation')}>
           <Plus size={19} />
-          เริ่มงานใหม่
+          <span>เริ่มงานใหม่</span>
         </button>
         <label className="search">
           <Search size={16} />
@@ -317,9 +440,15 @@ export function App() {
         </label>
         <nav aria-label="เมนูหลัก">
           {navigation.map((n) => (
-            <button key={n.id} className={page === n.id ? 'selected' : ''} onClick={() => changePage(n.id)}>
+            <button
+              key={n.id}
+              className={page === n.id ? 'selected' : ''}
+              aria-label={n.label}
+              title={n.label}
+              onClick={() => changePage(n.id)}
+            >
               <n.icon size={19} />
-              {n.label}
+              <span>{n.label}</span>
             </button>
           ))}
         </nav>
@@ -341,9 +470,17 @@ export function App() {
           {!sessions.length && <small>งานที่คุณเริ่มจะแสดงตรงนี้</small>}
         </div>
         <div className="sidebar-footer">
+          <button
+            aria-label="คู่มือและความสามารถ"
+            title="คู่มือและความสามารถ"
+            onClick={() => changePage('help')}
+          >
+            <CircleHelp size={19} />
+            <span>คู่มือและความสามารถ</span>
+          </button>
           <button className={page === 'settings' ? 'selected' : ''} onClick={() => changePage('settings')}>
             <Settings size={19} />
-            การตั้งค่า
+            <span>การตั้งค่า</span>
           </button>
           <div className="account">
             <span className="avatar">{data.user.name?.slice(0, 1) || 'S'}</span>
@@ -362,6 +499,13 @@ export function App() {
           <div className="workspace-heading">
             <button className="icon-button mobile-only" aria-label="เปิดเมนู" onClick={() => setMobile(true)}>
               <Menu size={22} />
+            </button>
+            <button
+              className="icon-button desktop-only"
+              onClick={() => setCollapsed((v) => !v)}
+              aria-label={collapsed ? 'ขยายแถบเมนู' : 'ย่อแถบเมนู'}
+            >
+              {collapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}
             </button>
             <FolderOpen size={19} />
             <select
@@ -388,6 +532,7 @@ export function App() {
             </button>
           </div>
           <div className="topbar-actions">
+            <ThemeSelect />
             {demo && <span className="badge demo">ตัวอย่าง · ไม่ใช่ข้อมูลจริง</span>}
             {workspace?.created_by === data.user.id && (
               <button onClick={() => setDialog('share')}>
@@ -458,6 +603,9 @@ export function App() {
               skill={skill}
               clearSkill={() => setSkill(null)}
               newSession={() => setDialog('conversation')}
+              prepared={prepared}
+              consumePrepared={consumePrepared}
+              onPrepare={prepareWork}
             />
           )}
           {page === 'documents' && <Documents {...props} />}
@@ -475,57 +623,37 @@ export function App() {
               }}
             />
           )}
-          {page === 'skills' && (
-            <>
-              <div className="page-heading">
-                <div>
-                  <p className="eyebrow">เลือกจากงานที่อยากทำ</p>
-                  <h1>Skill</h1>
-                  <p>ช่วยเริ่มงาน จัดข้อมูล และตรวจสิ่งที่ยังขาด</p>
-                </div>
-              </div>
-              <div className="skill-grid">
-                {data.skills
-                  .filter(
-                    (s) =>
-                      (!('tenant_id' in s) || s.tenant_id === tenant) &&
-                      !s.metadata.developerOnly &&
-                      !s.metadata.webUnsupported,
-                  )
-                  .map((s) => (
-                    <button
-                      className="skill-card"
-                      key={s.id}
-                      onClick={() => {
-                        if (s.skill_key === 'receipt-audit') changePage('receipt');
-                        else {
-                          setSkill(s);
-                          changePage('chat');
-                        }
-                      }}
-                    >
-                      <div className="skill-card-icon">
-                        {s.skill_key === 'receipt-audit' ? <Receipt size={24} /> : <BookOpen size={24} />}
-                      </div>
-                      <h2>{s.title}</h2>
-                      <p>{s.description}</p>
-                      <span>
-                        เริ่มใช้ Skill <ArrowUp size={15} />
-                      </span>
-                    </button>
-                  ))}
-              </div>
-              {!data.skills.length && (
-                <Empty
-                  icon={<BookOpen size={30} />}
-                  title="กำลังเตรียม Skill ขององค์กร"
-                  detail="ผู้ดูแลต้องนำเข้า Skill และเอกสาร STeP ก่อนเปิดใช้งานจริง"
-                />
-              )}
-            </>
+          {page === 'skills' && <SkillsHub {...props} onUse={useSkill} />}
+          {page === 'document-tools' && <DocumentTools {...props} onPrepare={prepareWork} />}
+          {page === 'media' && <MediaStudio {...props} onPrepare={prepareWork} />}
+          {page === 'history' && (
+            <History
+              {...props}
+              key={tenant + workspaceId}
+              onOpen={(s) => {
+                setSession(s);
+                changePage('chat');
+              }}
+            />
           )}
+          {page === 'help' && <Help onOpen={(p) => changePage(p as Page)} />}
         </div>
       </main>
+      {palette && (
+        <CommandPalette
+          data={data}
+          tenant={tenant}
+          onClose={() => setPalette(false)}
+          onPage={(p) => {
+            changePage(p as Page);
+            setPalette(false);
+          }}
+          onSkill={(s) => {
+            useSkill(s);
+            setPalette(false);
+          }}
+        />
+      )}
       {dialog === 'workspace' && (
         <Modal title="สร้าง workspace" onClose={() => setDialog(null)}>
           <form

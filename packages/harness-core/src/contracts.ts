@@ -108,6 +108,7 @@ export interface Run {
   created_at: string;
 }
 export interface Skill {
+  tenant_id?: string;
   id: string;
   skill_key: string;
   title: string;
