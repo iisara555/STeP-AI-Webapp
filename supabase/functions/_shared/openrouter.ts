@@ -15,7 +15,7 @@ const completionSchema = z.object({
   choices: z
     .array(
       z.object({
-        message: z.object({ content: z.string() }),
+        message: z.object({ content: z.string().nullable() }),
         finish_reason: z.enum(['stop', 'length']),
       }),
     )
@@ -94,20 +94,24 @@ export function openrouter(env: Environment, fetcher: typeof fetch = fetch) {
         model,
         messages: [{ role: 'user', content: prompt }],
         stream: false,
-        max_tokens: 512,
+        max_tokens: 2048,
+        // Reasoning models can spend the whole output budget thinking. Keep it short and unreturned;
+        // models without reasoning ignore this because require_parameters is not set here.
+        reasoning: { effort: 'low', exclude: true },
         provider: { allow_fallbacks: false, max_price: { prompt: 0, completion: 0, request: 0, image: 0 } },
       });
       const parsed = completionSchema.safeParse(raw);
       if (!parsed.success || raw.error) throw new Error('OPENROUTER_RESPONSE_INVALID');
       const result = parsed.data,
-        choice = result.choices[0];
-      if (!choice.message.content.trim() || choice.message.content.length > 20000)
-        throw new Error('OPENROUTER_RESPONSE_INVALID');
+        choice = result.choices[0],
+        text = choice.message.content ?? '';
+      if (!text.trim()) throw new Error('AI_EMPTY_REPLY');
+      if (text.length > 20000) throw new Error('OPENROUTER_RESPONSE_INVALID');
       if (result.usage.cost !== undefined && result.usage.cost !== 0)
         throw new Error('OPENROUTER_COST_UNEXPECTED');
       return {
         model: result.model,
-        text: choice.message.content,
+        text,
         inputTokens: result.usage.prompt_tokens,
         outputTokens: result.usage.completion_tokens,
         cost: result.usage.cost ?? null,

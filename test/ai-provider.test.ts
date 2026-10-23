@@ -76,6 +76,21 @@ test('existing free worker client pins upstream, denies data collection and reje
     openrouterFree(env, priced).generate({ system: 'rule', prompt: 'synthetic' }),
     /AI_FREE_UNAVAILABLE/,
   );
+  for (const choice of [
+    { finish_reason: 'length', message: { content: '' } },
+    { finish_reason: 'stop', message: { content: null } },
+  ]) {
+    const empty = (async (url) =>
+      Response.json(
+        String(url).endsWith('/models')
+          ? { data: [model] }
+          : { choices: [choice], usage: { prompt_tokens: 10, completion_tokens: 4096, cost: 0 } },
+      )) as typeof fetch;
+    await assert.rejects(
+      openrouterFree(env, empty).generate({ system: 'rule', prompt: 'synthetic' }),
+      /^Error: AI_EMPTY_REPLY$/,
+    );
+  }
 });
 test('API rejects stale provider consent, nonadmin trials and OCR before creating a job', async () => {
   let role = 'owner';

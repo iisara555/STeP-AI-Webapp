@@ -1,5 +1,29 @@
 # Progress
 
+## 2026-10-23 · Homelab origin, first owner and OpenRouter empty replies
+
+- The frontend from main `5f7d059` runs on the homelab (Ubuntu 24.04) as a healthy,
+  loopback-only container. Tailscale Serve publishes it inside the tailnet at
+  `https://homelab.tail17add1.ts.net:8443`; hosting smoke passed over that origin.
+  No public ingress or Funnel was created. Docker requires sudo on that host.
+- Auth Site URL/redirect, Google login, disabled email/anonymous sign-in and the
+  `APP_ORIGIN` secret were configured by the operator. The API returned 401 for the
+  homelab origin and 403 `ORIGIN_DENIED` for a foreign origin. The first verified
+  Google sign-in claimed the reserved owner membership; Auth holds only that account.
+- Workspace OAuth, Picker and credential-encryption secrets were set by the operator;
+  Workspace connection, Gemini, worker dispatch and a member denial test are not yet
+  accepted. AI budget remains zero.
+- The administrator OpenRouter sandbox reached the provider. One attempt received an
+  upstream 429; another spent its 512-token output budget on reasoning and returned no
+  text (522 tokens, $0 in OpenRouter Activity), surfacing as `OPENROUTER_RESPONSE_INVALID`.
+  The sandbox now requests low, unreturned reasoning with 2048 output tokens, and both
+  the sandbox and worker report empty text as `AI_EMPTY_REPLY`. The worker keeps
+  `require_parameters` and does not send reasoning options, so non-reasoning pinned
+  upstreams remain eligible. Requires API/worker redeployment.
+- Validation: TypeScript, formatting, build, 38 unit/API/PWA and 27 PostgreSQL tests
+  passed with synthetic provider responses under Node 25.2.1. No live AI call was made
+  by tests; Playwright was not rerun because only an error catalogue entry changed.
+
 ## 2026-10-23 · Expanded Harness pack import
 
 - Hosted migrations match all 12 local versions. API/worker version 5 are ACTIVE and
