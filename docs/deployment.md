@@ -38,10 +38,14 @@ With the official Supabase CLI installed:
 npx supabase login
 npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase db push
-npx supabase functions deploy api --no-verify-jwt
-npx supabase functions deploy worker --no-verify-jwt
-npx supabase functions deploy google-callback --no-verify-jwt
+npx supabase functions deploy api worker google-callback --no-verify-jwt \
+  --use-api --import-map supabase/functions/deno.json
 ```
+
+The shared `supabase/functions/deno.json` import map must be passed explicitly;
+without it, server-side bundling fails to resolve `zod` and the previous version
+keeps serving. Deploy only the functions whose source changed, then compare the
+deployed source with the merged commit.
 
 The initial project also has provider/Vault changes deployed outside the earlier
 checkout. This source reconciles those changes with the administrator sandbox;
