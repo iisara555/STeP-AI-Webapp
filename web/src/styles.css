@@ -176,9 +176,8 @@ button {
   color: var(--text);
   line-height: 1.5;
   cursor: pointer;
-  transition:
-    background 0.15s,
-    border-color 0.15s;
+  /* Theme ink and background must change together to preserve contrast, so only the border eases. */
+  transition: border-color 0.15s;
 }
 button:hover:not(:disabled) {
   background: var(--hover);
