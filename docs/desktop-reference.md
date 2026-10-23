@@ -89,7 +89,7 @@ npm run harness:import -- --file .exports/reviewed-pack.json --tenant TENANT_UUI
 Frontend และ API/worker ต้องมาจากชุดเปลี่ยนแปลงเดียวกัน เพื่อใช้ `session.search`, `skill.read`
 และ Skill support context ใหม่ ไม่ต้องเพิ่ม schema migration
 อัปเดต Functions ด้วยขั้นตอน deployment เดิม แล้วนำเข้า pack ที่ตรวจแล้วแยกต่างหาก
-PR นี้ต่อจาก backend pilot (#5); homelab packaging (#4) ต้องรวม source ใหม่นี้ก่อน build
+PR นี้รวม main ที่มี backend pilot (#5) และ homelab packaging (#4) แล้ว ต้อง deploy Functions ใหม่ให้ตรงกับ frontend ก่อนเปิดความสามารถใหม่
 
 ตรวจด้วยข้อมูลสังเคราะห์ ไม่มี live AI หรือการเขียน Google resources
 การติดตั้ง homelab, Google OAuth, live provider, Word ในโปรแกรมขององค์กร และ source import บน hosted tenant
