@@ -81,10 +81,15 @@ export function openrouterFree(env: Environment, fetcher: typeof fetch = fetch) 
       const text = choice?.message?.content;
       const usage = answer.usage;
       if (
+        ['stop', 'length'].includes(choice?.finish_reason) &&
+        !choice.message?.tool_calls?.length &&
+        (text == null || (typeof text === 'string' && !text.trim()))
+      )
+        throw new Error('AI_EMPTY_REPLY');
+      if (
         !['stop', 'length'].includes(choice?.finish_reason) ||
         choice.message?.tool_calls?.length ||
         typeof text !== 'string' ||
-        !text.trim() ||
         text.length > 200000 ||
         !Number.isSafeInteger(usage?.prompt_tokens) ||
         usage.prompt_tokens < 0 ||

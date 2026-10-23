@@ -172,6 +172,13 @@ export function errorView(code: string): ErrorView {
       action: 'ปิดข้อความ',
       retry: false,
     },
+    AI_EMPTY_REPLY: {
+      title: 'โมเดลไม่ได้ส่งข้อความคำตอบกลับมา',
+      detail:
+        'โมเดลแบบคิดก่อนตอบอาจใช้เพดานคำตอบหมดก่อนเขียนคำตอบ ลองโมเดลอื่นที่ไม่ใช่แบบคิดก่อนตอบ ไม่มีการส่งคำขอซ้ำอัตโนมัติ',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
     OPENROUTER_RESPONSE_INVALID: {
       title: 'OpenRouter ส่งผลลัพธ์ที่ใช้ไม่ได้',
       detail: 'ไม่ได้รับคำตอบข้อความที่สมบูรณ์ตามรูปแบบที่รองรับ ไม่มีการส่งคำขอซ้ำอัตโนมัติ',

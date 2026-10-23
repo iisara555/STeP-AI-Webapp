@@ -102,7 +102,8 @@ test('OpenRouter rechecks prices, caps every request at zero and sends only the 
     allow_fallbacks: false,
     max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
   });
-  assert.equal(body.max_tokens, 512);
+  assert.equal(body.max_tokens, 2048);
+  assert.deepEqual(body.reasoning, { effort: 'low', exclude: true });
   assert.equal(body.stream, false);
   assert.ok(!('models' in body) && !('tools' in body) && !('plugins' in body));
   const priceChanged = (async () =>
@@ -135,13 +136,27 @@ test('OpenRouter errors discard diagnostics, never retry and do not fabricate mi
     { ...reply, error: { message: 'sensitive' } },
     { ...reply, usage: { ...reply.usage, cost: 1 } },
     { ...reply, choices: [] },
-    { ...reply, choices: [{ message: { content: null }, finish_reason: 'stop' }] },
+    { ...reply, choices: [{ message: { content: 'x' }, finish_reason: 'error' }] },
   ]) {
     const fetcher = (async (url) =>
       Response.json(String(url).endsWith('/models') ? { data: [model] } : invalid)) as typeof fetch;
     await assert.rejects(
       openrouter(trialEnv, fetcher).generate(model.id, 'สมมติ'),
       /OPENROUTER_(RESPONSE_INVALID|COST_UNEXPECTED)/,
+    );
+  }
+  // A reasoning model can exhaust its budget and return no text; report that distinctly.
+  for (const empty of [
+    { message: { content: null }, finish_reason: 'stop' },
+    { message: { content: '' }, finish_reason: 'length' },
+  ]) {
+    const fetcher = (async (url) =>
+      Response.json(
+        String(url).endsWith('/models') ? { data: [model] } : { ...reply, choices: [empty] },
+      )) as typeof fetch;
+    await assert.rejects(
+      openrouter(trialEnv, fetcher).generate(model.id, 'สมมติ'),
+      /^Error: AI_EMPTY_REPLY$/,
     );
   }
   const fetcher = (async (url) =>
