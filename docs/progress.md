@@ -1,5 +1,26 @@
 # Progress
 
+## 2026-10-23 · Expanded Harness pack import
+
+- Hosted migrations match all 12 local versions. API/worker version 5 are ACTIVE and
+  their deployed source matches main after PR #6 (only the type-only `contracts.ts`
+  is stripped by bundling); google-callback version 4 is unchanged since that rollout.
+- Exported the reviewed baseline from a clean clone at
+  `90ee71ca667c63284afe4996eddc7e8095b9a059`: 106 sources / 48 Skills. The upstream
+  verifier passed original retrieval 61/61 and buyer identity 3/3. The operator imported
+  it into the STeP tenant; hosted SQL confirmed 106 sources and 48 Skills at that version.
+  The pack stayed in ignored `.exports/`; no source bodies entered Git.
+- The import secret check rejected the pack because `sk` without a separator matched
+  `skill-authoring-standard`. Key prefixes now require `sk-`/`sk_`, `ghp_` or
+  `github_pat_`, matching the exporter. Synthetic tests keep real key shapes rejected.
+  The deployed API/worker still use the earlier pattern for memory/prompt checks and
+  need redeployment after merge.
+- Export now normalizes Windows path separators, so `.exports/` output works there.
+- Validation: TypeScript, formatting (line endings normalized for a CRLF checkout),
+  production build, 38 unit/API/PWA and 27 PostgreSQL (PGlite) tests passed under
+  Node 25.2.1, outside the declared engine range. Playwright was not run; no UI changed.
+  No live AI, Google call, homelab installation or function deployment was performed.
+
 ## 2026-10-23 · Desktop workflows and complete product reference
 
 - Audited Desktop 0.6.20 at `90ee71ca667c63284afe4996eddc7e8095b9a059`.
