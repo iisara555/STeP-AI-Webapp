@@ -15,10 +15,11 @@ import {
 } from '../../../packages/harness-core/src/index.ts';
 import type { Memory, Skill, SourceRef } from '../../../packages/harness-core/src/contracts.ts';
 import { checked, clients, constantTimeEqual, requireEnv, safeCode, type Environment } from './runtime.ts';
-import { gemini } from './gemini.ts';
+import { modelClient, requireProviderConsent } from './ai.ts';
 import { calendarEvents, driveText, wantsCalendar } from './google.ts';
 import { imageBase64 } from './files.ts';
 import { normalizeReceipt } from './receipt.ts';
+import { skillContext } from '../../../packages/harness-core/src/skill-context.ts';
 const textSchema = z.object({ text: z.string().max(200000), truncated: z.boolean() });
 const receiptPrompt = `อ่านข้อความและจัดกลุ่มข้อมูลจากใบเสร็จในภาพเท่านั้น ไม่เติมสิ่งที่มองไม่เห็น
 ตอบ JSON ตามรูปแบบนี้: {"document_type":"full_tax_invoice|abbreviated_tax_invoice|cash_bill|general_receipt|unknown","complete":"complete|incomplete|uncertain","signature":"present|absent|uncertain","checks":[{"field":"ชื่อช่องข้อมูล","status":"found|missing|uncertain|mismatch","value":null,"evidence":null}],"next_steps":["ต้องทำอะไรต่อ"],"warnings":[]}
@@ -29,7 +30,7 @@ checks ต้องมีหัวข้อ วันที่ ชื่อผ�
 evidence ต้องเป็นข้อความที่อ่านได้จากภาพ ถ้าไม่มีให้ null ห้ามแต่งข้อกำหนดการเบิกจ่ายหรือสรุปว่าอนุมัติให้เบิกได้ ให้ระบุข้อที่ยังต้องให้คนตรวจ
 สรุปสิ่งที่ต้องทำต่อให้กระชับ ไม่เกินห้าข้อ`;
 export async function processOne(env: Environment, fetcher: typeof fetch = fetch) {
-  const { service } = clients(env);
+  const { service } = clients(env, undefined, fetcher);
   const job = await checked(service.rpc('claim_run'));
   if (!job?.id) return { processed: false };
   const deadline = Date.now() + 95000;
@@ -50,7 +51,10 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
     outputTokens = 0;
   try {
     const context = await checked(service.rpc('worker_payload', { job_id: job.id, lease: job.lease_token }));
-    const ai = gemini(env, jobFetch);
+    const info = requireProviderConsent(env, job.input.providerConsent);
+    if (job.ai_provider !== info.provider) throw new Error('AI_PROVIDER_CHANGED');
+    if (info.textOnly && job.kind !== 'chat') throw new Error('AI_TRIAL_TEXT_ONLY');
+    const ai = modelClient(env, jobFetch);
     let result: Record<string, unknown>;
     if (job.kind === 'chat') {
       const query = assertSafeText(String(job.input.message || ''));
@@ -78,7 +82,7 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
         const sources: SourceRef[] = [];
         const knowledge = new OrganizationKnowledge(
           registered
-            .filter((s) => !s.source_key.startsWith('__'))
+            .filter((s) => !s.source_key.startsWith('__') && s.provenance.kind !== 'skill-support')
             .map((s) => ({
               ...s.provenance,
               id: s.source_key,
@@ -120,28 +124,13 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
           );
           // The user's query precedes optional references so budget trimming never drops it.
           parts.unshift(`คำขอปัจจุบัน: ${query}`);
-          if (skill) parts.push(`Skill ที่เลือก: ${skill.title}\n${skill.instructions}`);
-          const required = skill?.metadata.required_source_keys;
-          if (Array.isArray(required))
-            for (const key of required.slice(0, 8)) {
-              const source = registered.find((s) => s.source_key === key && !s.source_key.startsWith('__'));
-              if (!source) continue;
-              const chunks = chunkText(source.body).map((c) => ({
-                title: source.title,
-                body: c.content,
-                location: c.location,
-              }));
-              const matching = rankSources(chunks, query, 3),
-                selected = matching.length ? matching : chunks.slice(0, 2);
-              parts.push(untrusted(source.source_key, selected.map((c) => c.body).join('\n')));
-              sources.push({
-                id: source.source_key,
-                title: source.title,
-                location: selected.map((c) => c.location).join(', '),
-                version: source.source_version,
-                kind: 'organization',
-              });
-            }
+          if (skill) {
+            const selected = skillContext(skill, registered, query);
+            parts.push(...selected.parts);
+            sources.push(...selected.sources);
+          }
+          // Required Skill material and the current request must fit before optional context.
+          if (estimateTextTokens(parts.join('\n')).estimatedTokens > 27000) throw new Error('CONTEXT_LIMIT');
           for (const section of found) {
             const id = section.id;
             parts.push(untrusted(id, `${section.title}\n${section.heading}\n${section.text}`));
@@ -184,7 +173,10 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
               });
           }
           // Authorised vectors only: query results are checked again under the job's actor in SQL.
-          if (context.documents.some((d: { source_kind: string }) => d.source_kind === 'upload')) {
+          if (
+            !info.textOnly &&
+            context.documents.some((d: { source_kind: string }) => d.source_kind === 'upload')
+          ) {
             const vector = await ai.embed(query);
             inputTokens += estimateTextTokens(query).estimatedTokens;
             const hits = await checked(

@@ -10,7 +10,10 @@ if (!values.source || !values.pack)
 const pack = JSON.parse(await readFile(values.pack, 'utf8'));
 const knowledge = new OrganizationKnowledge(
   pack.sources
-    .filter((s: { source_key: string }) => !s.source_key.startsWith('__'))
+    .filter(
+      (s: { source_key: string; provenance: Record<string, unknown> }) =>
+        !s.source_key.startsWith('__') && s.provenance.kind !== 'skill-support',
+    )
     .map((s: { source_key: string; title: string; body: string; provenance: object }) => ({
       ...s.provenance,
       id: s.source_key,

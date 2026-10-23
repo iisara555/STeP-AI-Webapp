@@ -1,5 +1,91 @@
 # Progress
 
+## 2026-10-23 · Protected routes reconciled with Desktop workflows
+
+- Merged the Desktop workflow pages into the protected-route branch. `web/src/routes.ts` is the
+  single page list; `/document-tools`, `/media`, `/history` and `/help` now reload, follow browser
+  history, redirect anonymous visitors to login and survive the Google sign-in return allowlist.
+- Validation: TypeScript/Prettier, 41 unit/API/PWA tests, 27 PostgreSQL (PGlite) tests, production
+  build and 44 of 46 desktop/mobile Chromium checks passed, including all 16 Auth checks covering
+  the ten page URLs. The two Word download checks also fail on unchanged `main` in the cloud
+  container (Chromium 141 reports the file name as `download`); GitHub CI remains authoritative.
+- Hosted Auth settings, Google OAuth credentials and real-account acceptance remain pending, as below.
+
+## 2026-10-23 · Desktop workflows and complete product reference
+
+- Audited Desktop 0.6.20 at `90ee71ca667c63284afe4996eddc7e8095b9a059`.
+  Added a searchable Thai reference covering 32 feature groups and all 91 top-level
+  renderer modules, with pinned source links and a SHA-256 inventory. Statuses
+  distinguish web support, partial support and capabilities still requiring Desktop.
+- Added the original five document profiles/variants, team starters, internal-media
+  Prompt compiler, Thai dates and Word presentation presets. Forms prepare private
+  drafts/conversations and still require the existing per-request AI consent.
+  Media preparation is local; no image-generation API or external publication is added.
+- Added Skill search/team filters/details, source gaps and command search, title/body/draft
+  history search under user RLS, theme selection before first paint, original symbol
+  artwork, CI colours and a collapsible desktop rail. Word supports Markdown headings,
+  bullets/tables, three A4 presets and page numbers; native rich editing/font embedding
+  and institutional-template acceptance remain separate.
+- Extended private Harness export with 66 non-executable Skill-local references,
+  templates and examples: 106 sources / 48 Skills in the reviewed baseline pack.
+  Paths/symlinks, restricted registry entries, size and credential checks remain enforced.
+  Worker retrieval and the upstream verifier exclude working references from organization
+  knowledge. Mandatory sources remain complete or stop on context limits; missing
+  originals remain explicit gaps. No source bodies or staff records enter public Git.
+- Validation: type/format and production build passed; 38 synthetic unit/API/PWA,
+  27 PostgreSQL (PGlite) and 30 desktop/mobile browser tests passed. Browser checks
+  include Word XML/layout, local media preparation, consent, history, Skill details,
+  responsive layout and WCAG A/AA in both themes. Original private retrieval 61/61
+  and buyer identity 3/3 passed; all 91 upstream module hashes were verified.
+- The production Docker image built with TLS verification and the environment proxy/CA.
+  Its dedicated local container is healthy, non-root (`101:101`) and read-only;
+  static hosting/CSP/PWA/OAuth callback smoke passed. GitHub Actions run 39875584009
+  passed on the reviewed implementation head. These are local/CI checks, not homelab
+  or live provider acceptance.
+- A later CI accessibility check caught an intermediate theme frame with yellow
+  text over a transitioning light background. Button ink/background now switch
+  together; only the border transition remains. Immediate theme checks are retained
+  without sleeps, disabled contrast rules or automatic test retries.
+- Main's existing homelab/backend changes (#4/#5) are integrated. Matching API/worker
+  deployment and operator import of the expanded private pack are still required for
+  the new routes/context. The hosted project remains on the previously recorded
+  function/pack versions; no live inference, Google write, paid usage, source import
+  or real homelab installation was performed for this change.
+- The complete capability reference records remaining work: personal Skill approval,
+  recurring user schedules, Tasks/Gmail writes, learning/maintenance, rich/native Office,
+  browser/Vault/MCP/process tools, voice and image generation. No placeholder action
+  claims these have been ported. See [Desktop details](desktop-reference.md).
+
+## 2026-10-22 · Homelab pilot preparation
+
+- Added a reproducible multi-stage Docker build and Compose service for the static
+  frontend, with pinned Node/nginx image digests. Only a hosted Supabase URL and
+  modern publishable key are accepted as browser configuration. Operator files,
+  source credentials and local environment files are excluded from the build context.
+- Runtime is a non-root nginx process on a read-only filesystem, with a loopback-only
+  host port, bounded resources, PWA cache headers, security headers, SPA/OAuth callback
+  routing and a health check. Supabase remains the backend; no database is self-hosted.
+- Added Thai setup/rollback instructions for Tailscale Serve over a dedicated HTTPS
+  port, plus a hosting smoke checker. The current pilot uses Tailscale; no Cloudflare
+  DNS, Tunnel, Access policies or public ingress were created.
+- Validation: type/format checks, 24 unit/API/PWA tests, 21 PostgreSQL tests, the
+  production build and 16 desktop/mobile browser checks passed. The Docker image
+  built and ran healthy; hosting checks verified callback fallback, cache/CSP headers
+  and missing-asset handling. Its runtime contains no server credentials or build CA.
+- The target homelab is not installed yet: this execution environment has
+  `vpn_configured: false` and no TCP grants. SSH installation and testing from an
+  actual tailnet device require that network connection first. No live AI was called.
+- After combining the frontend consent update from PR #5, the production Docker
+  image was rebuilt and ran healthy. Hosting smoke plus four desktop/mobile admin
+  trial/accessibility checks passed. The download bundle contains the combined
+  source and public Supabase configuration; the real homelab is still not installed.
+- Supabase backend reconciliation is tracked in PR #5. The sandbox/shared-quota
+  migrations are installed and API/worker/callback are now version 4. SQL verified
+  service-only configuration/reservation RPCs, sandbox RLS, zero paid budget and
+  disabled worker trial. Merge that frontend consent update before installing this
+  checkout; the prepared bundle combines both PRs. The actual HTTPS origin,
+  replacement trial credentials and live Google/AI acceptance are still pending.
+
 ## 2026-10-22 · Administrator OpenRouter free trial
 
 - Added Settings → เชื่อมต่อ AI → ทดลอง OpenRouter Free for active tenant owners/admins.
@@ -42,6 +128,40 @@
 - Google OAuth credentials, a real Pages origin and real-account acceptance remain required.
   The Supabase connector has no Auth configuration update tool; the browser Dashboard requires
   sign-in. Follow [auth-setup.md](auth-setup.md) to complete the controlled setup in the Dashboard.
+
+## 2026-10-22 · Supabase backend reconciliation
+
+- Recovered the existing provider/Vault migrations and version-3 function behavior
+  into source while retaining the administrator-only, temporary Settings sandbox.
+  Worker chat remains a separate opt-in channel; paid budgets are unchanged.
+- Added shared account admission for both OpenRouter paths: 40 attempts/day UTC
+  and 15/minute, including failed/cancelled/purged jobs. The sandbox also retains
+  its 5/minute tenant limit. Admission locks precede tenant locks for free jobs.
+- Added the sandbox tenant restriction to the service-only Vault allowlist.
+  Environment values take precedence; configuration failures return a sanitized 503.
+  Browser confirmations bind provider/model/upstream consent, and the API/worker
+  reject stale consent before sending context. Text-only mode disables OCR/indexing.
+- Validation: type/format and production build passed; 31 unit/API/PWA, 26 real
+  PostgreSQL (PGlite) and 16 desktop/mobile browser/accessibility checks passed.
+  Vault tests use synthetic rows; multi-connection contention, actual OAuth and
+  provider billing still require live acceptance. No live AI was called.
+- The combined PR #4/#5 frontend built and ran as a healthy non-root, read-only
+  Docker container. Hosting smoke and four desktop/mobile sandbox/accessibility
+  checks passed against that production image. The operator bundle was refreshed
+  with matching frontend source and public configuration only.
+- Applied the sandbox and shared-quota migrations in the hosted project as
+  `20261022164853` and `20261022164909`; local filenames match all 12 remote versions.
+  The earlier sandbox migration had not been deployed and was renamed to its
+  assigned version without rewriting remote history. API/worker/callback version 4
+  are ACTIVE, with the sandbox route and provider consent verified in deployed source.
+- Hosted SQL confirmed the service-only RPC ACLs, sandbox RLS, shared quota/Vault
+  allowlist definitions, no public table without RLS, zero paid budget and disabled
+  worker trial. Security advisors show only the documented 12 intentional RPC WARNs
+  and four policy-free private-table INFOs. No server key was printed or installed.
+- Direct HTTP smoke could not reach the hosted function URLs with the available
+  network tools; deployment/source checks do not establish runtime or login acceptance.
+  Homelab SSH, the real HTTPS origin, replacement trial credentials and real-account
+  trial acceptance remain pending. The sandbox tenant restriction is unset in Vault.
 
 ## 2026-10-22 · Centralized PWA implementation
 

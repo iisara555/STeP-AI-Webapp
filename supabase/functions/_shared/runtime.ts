@@ -13,15 +13,15 @@ export function requireEnv(env: Environment, key: string) {
   if (!value) throw new Error('SERVER_NOT_CONFIGURED');
   return value;
 }
-export function clients(env: Environment, authorization?: string) {
+export function clients(env: Environment, authorization?: string, fetcher: typeof fetch = fetch) {
   const url = requireEnv(env, 'SUPABASE_URL');
   const secret = env('SUPABASE_SECRET_KEY') || env('SUPABASE_SERVICE_ROLE_KEY');
   if (!secret) throw new Error('SERVER_NOT_CONFIGURED');
   const options = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
-  const service = createClient(url, secret, options);
+  const service = createClient(url, secret, { ...options, global: { fetch: fetcher } });
   const user = createClient(url, env('SUPABASE_PUBLISHABLE_KEY') || env('SUPABASE_ANON_KEY') || secret, {
     ...options,
-    global: { headers: { Authorization: authorization || '' } },
+    global: { fetch: fetcher, headers: { Authorization: authorization || '' } },
   });
   return { service, user };
 }
@@ -31,7 +31,7 @@ export async function checked<T>(
   const result = await value;
   if (result.error) {
     const code = result.error.message.match(
-      /\b(?:ACCESS_DENIED|STORAGE_QUOTA|UPLOAD_PENDING|AI_NOT_CONFIGURED|AI_QUOTA|RUN_ACTIVE|VERSION_CONFLICT|REQUEST_CONFLICT|MEMBER_NOT_FOUND|GOOGLE_IDENTITY_REQUIRED|MEMBER_LIMIT|MEMORY_LIMIT|OPENROUTER_RATE_LIMIT)\b/,
+      /\b(?:ACCESS_DENIED|STORAGE_QUOTA|UPLOAD_PENDING|AI_NOT_CONFIGURED|AI_QUOTA|RUN_ACTIVE|VERSION_CONFLICT|REQUEST_CONFLICT|MEMBER_NOT_FOUND|GOOGLE_IDENTITY_REQUIRED|MEMBER_LIMIT|MEMORY_LIMIT|AI_FREE_QUOTA|AI_FREE_RATE_LIMIT|OPENROUTER_RATE_LIMIT)\b/,
     )?.[0];
     throw new Error(code || 'DATA_ERROR');
   }

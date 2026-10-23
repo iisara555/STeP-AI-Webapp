@@ -8,6 +8,15 @@ const tenant = '10000000-0000-4000-8000-000000000001',
   workspace = '30000000-0000-4000-8000-000000000001';
 export function demoHost(): Host {
   const data: Snapshot = {
+    ai: {
+      provider: 'gemini',
+      model: 'synthetic-demo',
+      upstream: 'google',
+      displayName: 'Google Gemini API · ตัวอย่าง',
+      consentId: 'synthetic-demo-consent',
+      configured: true,
+      textOnly: false,
+    },
     user: { id: user, email: 'employee@example.test', name: 'พนักงานตัวอย่าง' },
     tenants: [
       {
@@ -52,6 +61,33 @@ export function demoHost(): Host {
     ],
     documents: [],
     skills: [
+      ...[
+        'tor-government-writing',
+        'thai-official-documents',
+        'project-plan',
+        'meeting-summary',
+        'step-image-prompt',
+      ].map((key, index) => ({
+        id: 'synthetic-skill-' + index,
+        skill_key: key,
+        title: [
+          'ร่าง TOR ภาครัฐ',
+          'เอกสารราชการไทย',
+          'ร่างข้อเสนอโครงการ',
+          'สรุปการประชุม',
+          'เขียน Prompt สร้างภาพ',
+        ][index],
+        description: 'Skill สังเคราะห์สำหรับทดสอบขั้นตอนใช้งาน',
+        instructions: 'คำแนะนำตัวอย่างเท่านั้น ไม่ใช่เอกสารองค์กร',
+        metadata: {
+          owner: 'common',
+          stage: 'pilot',
+          triggers: ['ตัวอย่าง'],
+          scope: { allow: ['ร่างเพื่อให้คนตรวจ'] },
+          support_source_keys: [],
+        },
+        source_version: 'demo',
+      })),
       {
         id: 'sample-skill',
         skill_key: 'document-outline',
@@ -115,13 +151,28 @@ export function demoHost(): Host {
               owner_id: user,
               workspace_id: p.workspace as string | null,
               visibility: p.visibility as 'private' | 'workspace',
-              title: 'เริ่มงานใหม่',
+              title: String(p.title || 'เริ่มงานใหม่'),
               draft: '',
               version: 1,
             };
             data.sessions.unshift(row);
             messages[row.id] = [];
             return row;
+          }
+          case 'skill.read': {
+            const s = data.skills.find((s) => s.skill_key === p.key);
+            if (!s) throw new ApiError('ACCESS_DENIED');
+            return structuredClone(s);
+          }
+          case 'session.search': {
+            const query = String(p.query).toLowerCase();
+            return data.sessions
+              .filter((s) =>
+                (s.title + ' ' + s.draft + ' ' + (messages[s.id] || []).map((m) => m.body).join(' '))
+                  .toLowerCase()
+                  .includes(query),
+              )
+              .slice(0, 50);
           }
           case 'session.read':
             return {
@@ -144,11 +195,13 @@ export function demoHost(): Host {
           case 'context.plan':
             return {
               provider: 'Google Gemini API · ตัวอย่าง',
+              providerConsent: 'synthetic-demo-consent',
               documents: data.documents.filter((d) => (p.documentIds as string[]).includes(d.id)),
               memories: p.useMemory ? data.memories.map((m) => ({ id: m.id, title: m.title })) : [],
               google: /ประชุม|ปฏิทิน/.test(String(p.message)),
             };
           case 'run.start': {
+            if (p.providerConsent !== data.ai?.consentId) throw new ApiError('AI_PROVIDER_CHANGED');
             const session = data.sessions.find((s) => s.id === p.session);
             if (session) {
               session.title = String(p.message).slice(0, 100);

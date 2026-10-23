@@ -1,0 +1,462 @@
+{
+  "format": "step-desktop-reference/v1",
+  "sourceCommit": "90ee71ca667c63284afe4996eddc7e8095b9a059",
+  "desktopVersion": "0.6.20",
+  "modules": [
+    {
+      "path": "desktop/src/App.tsx",
+      "sha256": "4edd014905572f5bb6c77b5dfbd6a5716a0a65500ff428f4d55f4223c4ac6078",
+      "features": ["workspace"]
+    },
+    {
+      "path": "desktop/src/ai-connections.tsx",
+      "sha256": "4fee8a0d37d1cf99c877448db7dbda64a96671b3f37d1232e1078d2f71383c76",
+      "features": ["connections"]
+    },
+    {
+      "path": "desktop/src/approval.tsx",
+      "sha256": "bdd1692b10099a342dad0ea5813bd3a3aabdf8ded605da7e26380826c9b9cbc6",
+      "features": ["tool-loop"]
+    },
+    {
+      "path": "desktop/src/assets.d.ts",
+      "sha256": "12e8ac1f088d75748bdaf86efcaf6728dd1534f33a708caf0ba7d5afe1c8f424",
+      "features": ["ui-foundation"]
+    },
+    {
+      "path": "desktop/src/automations.tsx",
+      "sha256": "7195def90a93b5a7993f0a75a8cbfc01d883e30db7368cbde84c257f5bbee8fe",
+      "features": ["mcp"]
+    },
+    {
+      "path": "desktop/src/avatar-ids.ts",
+      "sha256": "5d251041fdd32c693bdb0978e084a38d1e5596e9640296c65f97d6ac8e873264",
+      "features": ["profile"]
+    },
+    {
+      "path": "desktop/src/avatars.tsx",
+      "sha256": "2e7b7df245503ecb93d0f3974262021ffa03193661f327abf2fbc3fc22910f5f",
+      "features": ["profile"]
+    },
+    {
+      "path": "desktop/src/browser.tsx",
+      "sha256": "d0f775c1a9dc09cd5ac1338f005fd059c8a6dbd0b215e4e45f2c5495a49c364e",
+      "features": ["browser"]
+    },
+    {
+      "path": "desktop/src/chat-markdown.tsx",
+      "sha256": "b13bd5a8428e4fa8f0c1e732d3ae7f377625c85fdbfeed77506b13fb3517679e",
+      "features": ["draft"]
+    },
+    {
+      "path": "desktop/src/commands.ts",
+      "sha256": "b7ecb12f127592bb90691662b536b02ca698d9838e2bbace9e95dddb13225875",
+      "features": ["commands"]
+    },
+    {
+      "path": "desktop/src/connection-capabilities.ts",
+      "sha256": "1329275f739e034afb25b323a9b6bbde252ff71528c3198bed865dba7a4eee9f",
+      "features": ["connections"]
+    },
+    {
+      "path": "desktop/src/connection-state.ts",
+      "sha256": "e1af700870300a63b88a3adb20db7d0da2739c10e10f7d09b64f01313754520a",
+      "features": ["connections"]
+    },
+    {
+      "path": "desktop/src/credential-copy.ts",
+      "sha256": "e0e0256dbfe408063d019e609449b3dd98126face930524a8ba34e494dc979f1",
+      "features": ["vault"]
+    },
+    {
+      "path": "desktop/src/credential-settings.tsx",
+      "sha256": "a0c2fe33aba55613388ffd783e3e3498d8745a1fdb71c579037985b57b51141a",
+      "features": ["vault"]
+    },
+    {
+      "path": "desktop/src/document-elements.ts",
+      "sha256": "03754482a9239b745a342c308d8cfcf3f83068a96c84e4f35a491116aadc0271",
+      "features": ["draft"]
+    },
+    {
+      "path": "desktop/src/document-layout.ts",
+      "sha256": "71a694a9b1cefe45bbd305289d1eb94ded8aaf850f09c3a44c7632e033cff196",
+      "features": ["layout"]
+    },
+    {
+      "path": "desktop/src/document-output.ts",
+      "sha256": "7b0789d6062d07d170855304d3b6cb8de8ffb3b61cbe77fafe1de0daf821e8a0",
+      "features": ["document-tools", "layout"]
+    },
+    {
+      "path": "desktop/src/document-presentation-controls.tsx",
+      "sha256": "533fbfb0df497b73d93a15ee4099c121a5daacac8d5b1ebdac279684b14ff854",
+      "features": ["layout"]
+    },
+    {
+      "path": "desktop/src/document-presentation.ts",
+      "sha256": "99b375f64eac80cdc260714a03dfcc41ddbacf479059789e791fa0b0a0506eeb",
+      "features": ["layout"]
+    },
+    {
+      "path": "desktop/src/document-tool-app.tsx",
+      "sha256": "4eda72b998305a0c1fb98cb039093743190f7114325da7ccc9d3de81d353b809",
+      "features": ["document-tools"]
+    },
+    {
+      "path": "desktop/src/document-toolbar.tsx",
+      "sha256": "1abfd5a1be88423fd58effbd36d3330421e374a92f10858390542f63dde43f12",
+      "features": ["draft"]
+    },
+    {
+      "path": "desktop/src/document-tools.ts",
+      "sha256": "245c6acbad47cd1ac3019aaee6fc3b040cd428d4f0748ef8fe57c88a43fc8c06",
+      "features": ["document-tools"]
+    },
+    {
+      "path": "desktop/src/draft.ts",
+      "sha256": "fe506572d2df34b22fbaf99c75ba51d52b4d1ce200aaea4448f2337f9a96ba4b",
+      "features": ["draft"]
+    },
+    {
+      "path": "desktop/src/extraction-provenance.ts",
+      "sha256": "c9b9a57dbafba31cf1d6008a2d36da34849670a33ccf876720251c4f7d645e13",
+      "features": ["receipt", "files"]
+    },
+    {
+      "path": "desktop/src/feedback.tsx",
+      "sha256": "9e1706b9fdf727cd9094213402949d80d84add2967a91d87be6848e56eca0121",
+      "features": ["help"]
+    },
+    {
+      "path": "desktop/src/google-services.ts",
+      "sha256": "ad1ee691760869eb8c87a6e7ead408f6727a1ed6cbe31f999d3f95ad49f72b30",
+      "features": ["google"]
+    },
+    {
+      "path": "desktop/src/i18n.ts",
+      "sha256": "49cb50ae442ff93696b972fe62e91459f7603e9bd63ae002bf2fbfb09734487b",
+      "features": ["profile"]
+    },
+    {
+      "path": "desktop/src/icons.tsx",
+      "sha256": "3e39d31e77eb9b6087ad1df5be23a077431bf811cc936dc5c15797cf9f7b4840",
+      "features": ["ui-foundation"]
+    },
+    {
+      "path": "desktop/src/illustration.tsx",
+      "sha256": "2f629f859dfc306cdf5f7411e773d559e3d82e3fae0b06fc693f951304115871",
+      "features": ["ui-foundation"]
+    },
+    {
+      "path": "desktop/src/image-routing.ts",
+      "sha256": "4c1571fdb5724461b589851f7bce79ecaa744cb606fb1a0224fa5ac1100913a2",
+      "features": ["images"]
+    },
+    {
+      "path": "desktop/src/internal-media-app.tsx",
+      "sha256": "648a0154ae85b7236d3df21cdbaaae073c2c26b05b2176710d075908d3b17877",
+      "features": ["media"]
+    },
+    {
+      "path": "desktop/src/internal-media.ts",
+      "sha256": "d6a016a1dd5068fab00c60447276dac1647391fcc366fa55ef74570afa2585d7",
+      "features": ["media"]
+    },
+    {
+      "path": "desktop/src/keyboard.tsx",
+      "sha256": "cbc6fec07deadae920f02509e78f28ca48237382c68f6fc84dfbd7834f223081",
+      "features": ["commands"]
+    },
+    {
+      "path": "desktop/src/lazy-screen.tsx",
+      "sha256": "99a8379cf2f07eb541466c08a2a02bfe4f13879469c549236f6131024e87d0b5",
+      "features": ["ui-foundation"]
+    },
+    {
+      "path": "desktop/src/learning-curator.ts",
+      "sha256": "d7db45acae757a3a0d5e57163bc22ed63ee61c496ba114df854fb5378e3ed87a",
+      "features": ["learning"]
+    },
+    {
+      "path": "desktop/src/learning-metrics.ts",
+      "sha256": "5fa1fdb5f2c86215cf449953a619a3b6a42b900d6f7be82ba77e9fdfb2c8b46b",
+      "features": ["learning"]
+    },
+    {
+      "path": "desktop/src/learning-types.ts",
+      "sha256": "c1177062d61279c1c17fa92593f22925dcec5d007441196194422ac67b18bc58",
+      "features": ["learning"]
+    },
+    {
+      "path": "desktop/src/learning.tsx",
+      "sha256": "e9ebe3b5ec299a88bcbf0644b732b396cdb52bf88fbf9325f6008663309ab799",
+      "features": ["learning"]
+    },
+    {
+      "path": "desktop/src/main.tsx",
+      "sha256": "0aa667866de10d5186c204e3ac32b03527aef5c0bead361d5f816ac92eda9902",
+      "features": ["ui-foundation"]
+    },
+    {
+      "path": "desktop/src/maintenance.tsx",
+      "sha256": "4f988749414d39621d20aaafcc649855a035e55bde597b2406e7f0164f898e49",
+      "features": ["memory"]
+    },
+    {
+      "path": "desktop/src/memory.tsx",
+      "sha256": "d744c98611be992d73fc66acf2c5d4e3a4f1ffde3849c9008f0c5ef1f27de936",
+      "features": ["memory"]
+    },
+    {
+      "path": "desktop/src/messages.ts",
+      "sha256": "fba8af0e25fb8855a8aa8a8d585193ce3dc58f2b1731ed406d211632e89ca5ba",
+      "features": ["history"]
+    },
+    {
+      "path": "desktop/src/morning-brief.tsx",
+      "sha256": "ef69b26b0aafc9c619ffe3d7ebab473945426a84769e91c70ddf4a5aaf73951f",
+      "features": ["morning"]
+    },
+    {
+      "path": "desktop/src/packs.tsx",
+      "sha256": "09cf53f2468cb87a6d03cb0f4b0bcab8f807e02ec563b055ce7203bc6c24aecd",
+      "features": ["skill-packs"]
+    },
+    {
+      "path": "desktop/src/provider-presets.ts",
+      "sha256": "91d040e7aa0aa020b0ffb39eae5dd95be9b93d63c159b47639c9ffd5108f72db",
+      "features": ["connections"]
+    },
+    {
+      "path": "desktop/src/readiness.tsx",
+      "sha256": "906e39e766810393a08117a17b9f1926596d1fba6ffa4ea035a8877ef882b794",
+      "features": ["connections"]
+    },
+    {
+      "path": "desktop/src/receipt-compliance.ts",
+      "sha256": "ec60806bd54fe23f5b0b89d6af240eaf923710e44f285bbeb42e23e7864e5be2",
+      "features": ["receipt"]
+    },
+    {
+      "path": "desktop/src/receipt-form.ts",
+      "sha256": "4ce217290f7ef874b47d2ffae782a0886648d21ac6bee03a7afab1c192bc99ee",
+      "features": ["receipt"]
+    },
+    {
+      "path": "desktop/src/receipt-hybrid.ts",
+      "sha256": "48febf9503e89d3ec3363afc9b4bae563cc736fd95c7446ba3acc65115d1d9e4",
+      "features": ["receipt"]
+    },
+    {
+      "path": "desktop/src/receipt-source.ts",
+      "sha256": "3bc4ffa395fcf52337a71b82726b3ddf885e18c11757f52a3006166432d8aa7e",
+      "features": ["receipt"]
+    },
+    {
+      "path": "desktop/src/receipt-trial.ts",
+      "sha256": "27c83b704b524923151d6965c7faafe0a27acfacb17fc42cbc851bd1b6022c66",
+      "features": ["receipt"]
+    },
+    {
+      "path": "desktop/src/receipt-vision.ts",
+      "sha256": "479214ef440189f86a0a60ebacf071be5d77e5e3457faba4d16958ed9f33de2d",
+      "features": ["receipt"]
+    },
+    {
+      "path": "desktop/src/receipt-workflow.ts",
+      "sha256": "1941c2745501aeea8bb298c8581016a09dee592f48fff5ce31e10268bb1e3965",
+      "features": ["receipt"]
+    },
+    {
+      "path": "desktop/src/receipt.tsx",
+      "sha256": "c5f538136821b9940bf23554809a45a7f29c0e997bcf57234849d8220f462a69",
+      "features": ["receipt"]
+    },
+    {
+      "path": "desktop/src/reduced-motion.ts",
+      "sha256": "247bd5a343a82bc938e06ff70653668a7d79f9a8190785980cb4657a37e1da94",
+      "features": ["ui-foundation"]
+    },
+    {
+      "path": "desktop/src/schedules-app.tsx",
+      "sha256": "d81d8e729789ddbeb7e7fdf08af9f6a38ee608e0d1a96dcd45c02f5a571bd868",
+      "features": ["schedules"]
+    },
+    {
+      "path": "desktop/src/schedules.ts",
+      "sha256": "af387f4326cfd2c5c70571f0053a8b41b13725e70afe5222557226af175c3dc6",
+      "features": ["schedules"]
+    },
+    {
+      "path": "desktop/src/settings.tsx",
+      "sha256": "e27b01628c2b8798486d34284fcab33741ffc25f34636a369de1491c1bd45ff6",
+      "features": ["profile"]
+    },
+    {
+      "path": "desktop/src/setup.tsx",
+      "sha256": "94f839366fb31c36db284382fb3358f0e2ae27a8f42513d2202849448c954f64",
+      "features": ["help"]
+    },
+    {
+      "path": "desktop/src/sidebar-rail.tsx",
+      "sha256": "172d4454c4cecdbf9e3797359a070291d921526d689e26c786a06698cc7304f4",
+      "features": ["theme"]
+    },
+    {
+      "path": "desktop/src/skill-capabilities.ts",
+      "sha256": "9920e92db747ff53bf3b758bf9369e65785b8364892457c1ee67767898637a96",
+      "features": ["skills"]
+    },
+    {
+      "path": "desktop/src/skill-display.ts",
+      "sha256": "aa9cd4971b606a02458cf40a5982e856a53cf0b0b529556d02352fabe1ce9879",
+      "features": ["skills"]
+    },
+    {
+      "path": "desktop/src/skills.tsx",
+      "sha256": "58173ae1cc8abbfefbfb85c326314975954ee643d699ae9ffa8fbd17cfb7448c",
+      "features": ["skills"]
+    },
+    {
+      "path": "desktop/src/speaking-styles.ts",
+      "sha256": "7c159be4722a53d1c3ad4f8c3be192e496b88c5c704374ee3d68e2d4f5829855",
+      "features": ["profile"]
+    },
+    {
+      "path": "desktop/src/starters.ts",
+      "sha256": "73bbfa228065a02c52da0c1690de99284280af5648b34fffb22b8dda762a4be6",
+      "features": ["starters"]
+    },
+    {
+      "path": "desktop/src/terms-version.ts",
+      "sha256": "5c9fc512d8cdadd0a80a19da8818bcc4c5484ddeeaa44a10a9fbf0373cb235a9",
+      "features": ["help"]
+    },
+    {
+      "path": "desktop/src/terms.tsx",
+      "sha256": "25884995166d547255fd6fc6067fd5de216ee5782d5cd37f428eacad10b12211",
+      "features": ["help"]
+    },
+    {
+      "path": "desktop/src/thai-date.ts",
+      "sha256": "e90ac15dfabf50c8b112744b52c1525274e99a6dc21f1e21e3f4f73be0761d87",
+      "features": ["layout"]
+    },
+    {
+      "path": "desktop/src/thai-text.tsx",
+      "sha256": "9bb75b55e7ee076731174dec90682bbcb8301b7892a4f0bfe01ebabae38731f8",
+      "features": ["layout"]
+    },
+    {
+      "path": "desktop/src/thai-typography.ts",
+      "sha256": "2f8ac44048797220b9c08dec832296df2cd8a3b88b64f9f8cbbc2979bfdd705b",
+      "features": ["layout"]
+    },
+    {
+      "path": "desktop/src/thinking-scribble.tsx",
+      "sha256": "183608e1330f6f12b09086f37d8aadb0136f3768a08ce2b02f9095a4bf9ae5ef",
+      "features": ["ui-foundation"]
+    },
+    {
+      "path": "desktop/src/titlebar.tsx",
+      "sha256": "f244c61f3a552e3413c8f34434fb48eff1293e9f2cfc06a99537948c7d46eca0",
+      "features": ["theme"]
+    },
+    {
+      "path": "desktop/src/tool-question.tsx",
+      "sha256": "c9e4606dca1acfe89abced1ccbf9ba709cbbb70fef15ed0247c91d52234c54e2",
+      "features": ["tool-loop"]
+    },
+    {
+      "path": "desktop/src/tool-registry.ts",
+      "sha256": "0e1d5f79365155f2dc88e20aebb648eb6c1d56d7340f3de4baa42021cf70bccf",
+      "features": ["tool-loop"]
+    },
+    {
+      "path": "desktop/src/tools.ts",
+      "sha256": "93fcc4d4af1c960852163ee58529b8f815c57792ee5a2acefd365112e4ec84d8",
+      "features": ["tool-loop"]
+    },
+    {
+      "path": "desktop/src/tour.tsx",
+      "sha256": "002cd96f874423e1c602a14994fb1e033f6e346b6ab4ce15528430b68a045889",
+      "features": ["help"]
+    },
+    {
+      "path": "desktop/src/types.ts",
+      "sha256": "60da572ab613abec0296f8df45527ca5fc6b8c961a937ca664d822ca3935beeb",
+      "features": ["ui-foundation"]
+    },
+    {
+      "path": "desktop/src/ui.tsx",
+      "sha256": "f484fb720e3011ea74361044d6899a784d915a9e4cffaa37a6c31c171b7b12d1",
+      "features": ["ui-foundation"]
+    },
+    {
+      "path": "desktop/src/update.tsx",
+      "sha256": "9536fa0e11e040018c46545f1880a6245c097992eb06874582d7cc3a4d04b045",
+      "features": ["updates"]
+    },
+    {
+      "path": "desktop/src/usage-display.ts",
+      "sha256": "98b2af8c7bd57b774c6e5adf744ba76d983888d79da3fd1c4c2f0b4af711a20f",
+      "features": ["usage"]
+    },
+    {
+      "path": "desktop/src/usage.tsx",
+      "sha256": "727361e4aed39a6ca1380748ff977d85ade6802ae852441ea8a384d2c37496b4",
+      "features": ["usage"]
+    },
+    {
+      "path": "desktop/src/vault-fields.ts",
+      "sha256": "397d5873b4a9caa2e15f9162b5477d401a9d4b09eedd9e9972bb6dc237690407",
+      "features": ["vault"]
+    },
+    {
+      "path": "desktop/src/vault-items.tsx",
+      "sha256": "ada0f7d12dc0e58813fb039a58e2b56f91660feb7b4b285e6c84e0250c5fea84",
+      "features": ["vault"]
+    },
+    {
+      "path": "desktop/src/vault-prompt.tsx",
+      "sha256": "ac8a885ce7ab525e41ddd17b18ab4c7adcd188d3b947a7a30c021af05382c636",
+      "features": ["vault"]
+    },
+    {
+      "path": "desktop/src/vision-transport.ts",
+      "sha256": "929b504a1ebe967547a12f9be2edd2ca4f5f04f3cf4809fa69bb5b87d821dec2",
+      "features": ["images"]
+    },
+    {
+      "path": "desktop/src/voice.tsx",
+      "sha256": "773b7f5704341f6dfddcdbcffaad18921a36383e110f915cae4fdf5690d4985b",
+      "features": ["profile"]
+    },
+    {
+      "path": "desktop/src/web.ts",
+      "sha256": "47874655a8cfd925bed7e92c074db7ea90b8ae41b3918f07e0a8ae709b717b12",
+      "features": ["browser"]
+    },
+    {
+      "path": "desktop/src/whats-new-dialog.tsx",
+      "sha256": "5d0c2fa499d2955549e696ea4ca5c33fbb14398eca6749492ba8d67f9ddd4e91",
+      "features": ["help"]
+    },
+    {
+      "path": "desktop/src/whats-new.ts",
+      "sha256": "6070d97ee3368d6e72c3998c54d65370615b878379285490745fe9625b4bad50",
+      "features": ["help"]
+    },
+    {
+      "path": "desktop/src/work-plan.tsx",
+      "sha256": "29196c544ec26644137b549d6a16bae5ce1244a19a443100d69dd2246d35a8bc",
+      "features": ["tool-loop"]
+    },
+    {
+      "path": "desktop/src/workbench.tsx",
+      "sha256": "a28e1cebe603d8c9b0e29e10f201f0687d290c7063ec101e08992509323dae73",
+      "features": ["workspace"]
+    }
+  ]
+}

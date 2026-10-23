@@ -2,8 +2,15 @@
 
 The web application is separate from the Electron repository. It uses a static
 React/Vite app on Cloudflare Pages and Supabase Auth, Postgres, private Storage,
-and Edge Functions. Gemini runs only on the server. Hosting can start on free
+and Edge Functions. AI runs only on the server; the paid path uses Gemini. Hosting can start on free
 plans; Gemini usage and any future plan changes are separate costs.
+
+Desktop workflow adapters retain the original five document profiles, internal-media
+Prompt compiler, Thai date helpers, team starters and document presentation presets.
+Forms prepare private conversations/drafts; they do not start AI calls. Prompt
+preparation stays local until an explicit handoff or download. The searchable
+32-group Desktop reference records supported, partial and native-only capabilities.
+See [Desktop details](desktop-reference.md) for the source inventory and limits.
 
 ## Identity and access
 
@@ -29,11 +36,19 @@ Organization knowledge comes from an explicitly imported, versioned Harness pack
 source instructions cannot grant authority. The original retrieval and authority
 code is retained with its MIT notice and source commit under harness-core/vendor.
 
+Skill-local text references/templates/examples retain provenance and are excluded
+from general organization retrieval. The selected Skill may include bounded working
+references labelled as such. Existing mandatory sources remain complete; oversized
+material fails before provider access, and unavailable sources remain explicit gaps.
+User-scoped history search uses the same tenant/session/message RLS as reading a
+conversation, searches title/draft/body without an external search service, and
+returns at most 50 sessions. The new routes require matching API/worker deployment.
+
 Postgres jobs use idempotency keys, leases, a global concurrency cap of two, fresh
 access checks and budget reservations. Interrupted jobs do not replay provider
 calls automatically. Responses are stored once. Failed or ambiguous calls retain
 their reservation because a provider may already have charged. Usage is an
-estimate based on configured rates, not a provider invoice. AI is disabled until
+estimate based on configured rates, not a provider invoice. Paid AI is disabled until
 server credentials, rates and a positive tenant budget have been configured.
 
 Google Workspace uses a separate web OAuth grant: Calendar read-only and
@@ -96,3 +111,25 @@ elapsed time and optional reported cost accompany the reply; raw provider
 diagnostics and keys never reach clients. Missing cost is not reported as $0.
 The user's admin role is rechecked before returning a result. The demo path is
 explicitly synthetic and makes no provider request.
+
+## Provider and deployment configuration
+
+The API/worker/callback retain the existing deployed provider selection and Vault
+fallback. Environment values override the exact Vault allowlist; only service_role
+can read the configuration RPC. A configuration failure returns a sanitized 503.
+Snapshots expose provider/model/consent metadata, never keys. User confirmation is
+bound to that provider, model and upstream; the API and worker reject a changed
+identity before sending context.
+
+The existing opt-in OpenRouter worker pilot supports administrator text chat and
+pins one free model/upstream with data collection denied and zero price ceilings.
+It can use the authorized context shown at confirmation and stores conversation
+results. It remains separate from the temporary synthetic-only Settings sandbox.
+The worker pilot is disabled by default and does not enable a paid budget.
+
+Both channels serialize admission under one account lock and share 40 attempts per
+UTC day / 15 per minute, including failed, cancelled and purged accounting rows.
+The Settings sandbox also retains its 5/minute per-tenant limit; the worker has an
+additional tenant daily limit. PostgreSQL tests cover the combined accounting and
+revocation paths; real multi-connection contention is a separate acceptance check.
+See [backend pilot preparation](backend-pilot.md) before deployment or activation.

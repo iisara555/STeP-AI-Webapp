@@ -5,6 +5,10 @@ export const pagePaths = {
   memory: '/memory',
   receipt: '/receipt',
   settings: '/settings',
+  'document-tools': '/document-tools',
+  media: '/media',
+  history: '/history',
+  help: '/help',
 } as const;
 export type Page = keyof typeof pagePaths;
 

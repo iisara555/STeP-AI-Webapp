@@ -18,7 +18,7 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
   const [document, setDocument] = useState<DocumentRecord | null>(null),
     [preview, setPreview] = useState(''),
     [busy, setBusy] = useState(false),
-    [consent, setConsent] = useState(false),
+    [consent, setConsent] = useState<{ providerName: string; providerConsent?: string } | null>(null),
     [run, setRun] = useState<Run | null>(null),
     [result, setResult] = useState<ReceiptResult | null>(null),
     [confirmed, setConfirmed] = useState(false),
@@ -149,9 +149,9 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
     }
   };
   const start = async () => {
-    if (!document) return;
+    if (!document || !consent) return;
     setBusy(true);
-    setConsent(false);
+    setConsent(null);
     setResult(null);
     try {
       setRun(
@@ -161,6 +161,7 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
           kind: 'receipt',
           requestId: crypto.randomUUID(),
           consent: true,
+          providerConsent: consent.providerConsent,
         }),
       );
     } catch (e) {
@@ -465,13 +466,31 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
                 <li>ข้อมูลหลักครบตามเอกสารหรือไม่</li>
                 <li>ต้องแก้ไขหรือเตรียมอะไรเพิ่ม</li>
               </ol>
-              <button className="primary" disabled={!document || busy} onClick={() => setConsent(true)}>
+              <button
+                className="primary"
+                disabled={!document || busy || data.ai?.textOnly}
+                onClick={() =>
+                  setConsent({
+                    providerName: data.ai?.displayName || 'Google Gemini API',
+                    providerConsent: data.ai?.consentId,
+                  })
+                }
+              >
                 เริ่มตรวจใบเสร็จ
               </button>
             </div>
           )}
           {result && !busy && (
-            <button className="text-button" onClick={() => setConsent(true)}>
+            <button
+              className="text-button"
+              disabled={data.ai?.textOnly}
+              onClick={() =>
+                setConsent({
+                  providerName: data.ai?.displayName || 'Google Gemini API',
+                  providerConsent: data.ai?.consentId,
+                })
+              }
+            >
               ตรวจจากภาพอีกครั้ง
             </button>
           )}
@@ -502,15 +521,16 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
         </section>
       )}
       {consent && document && (
-        <Modal title="ส่งใบเสร็จให้ AI อ่าน" onClose={() => setConsent(false)}>
+        <Modal title="ส่งใบเสร็จให้ AI อ่าน" onClose={() => setConsent(null)}>
           <p>
-            ส่งภาพ “{document.name}” ให้ Google Gemini API เพื่อตรวจข้อมูลและลายเซ็น ใช้วงเงิน AI ขององค์กร
+            ส่งภาพ “{document.name}” ให้ {consent.providerName} เพื่อตรวจข้อมูลและลายเซ็น ใช้วงเงิน AI
+            ขององค์กร
           </p>
           <p className="muted">
             เก็บต้นฉบับไว้เสมอ ภาพที่ปรับก่อนอ่านเป็นสำเนา ผลที่อ่านได้ยังต้องตรวจเทียบก่อนนำไปใช้
           </p>
           <footer>
-            <button onClick={() => setConsent(false)}>ยกเลิก</button>
+            <button onClick={() => setConsent(null)}>ยกเลิก</button>
             <button className="primary" onClick={() => void start()}>
               ยืนยันและเริ่มตรวจ
             </button>

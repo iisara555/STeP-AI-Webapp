@@ -1,11 +1,14 @@
 # Deployment
 
+For the initial homelab pilot, use [homelab + Tailscale](homelab.md). The frontend
+runs on the homelab while Supabase remains hosted. Pages is a later hosting option.
+
 ## Hosting
 
 Use a static Cloudflare Pages project and dedicated Supabase project. The initial
 project is `zwwchjshmxdzhhotacte`, Singapore, created after its quoted monthly cost
-was $0. No Cloudflare provisioning or Google OAuth management connection is
-available in this session; an actual Pages URL has not been created.
+was $0. No Pages project has been provisioned for this pilot, and Google OAuth management
+requires separate setup. An actual Pages URL has not been created.
 
 Create Pages in the STeP account, connect this repository, and use:
 
@@ -40,29 +43,33 @@ npx supabase functions deploy worker --no-verify-jwt
 npx supabase functions deploy google-callback --no-verify-jwt
 ```
 
-Schema and functions are already deployed in the initial project; local migration
-versions match its history. Check `supabase migration list` before updates. Do not
-reset the live database. JWT gateway verification is disabled intentionally: API
+The initial project also has provider/Vault changes deployed outside the earlier
+checkout. This source reconciles those changes with the administrator sandbox;
+follow [backend pilot preparation](backend-pilot.md) and check `supabase migration list`
+before updates. Do not reset the live database. JWT gateway verification is disabled intentionally: API
 code verifies Auth.getUser and membership, worker checks a shared secret, and the
 OAuth callback checks single-use expiring state and PKCE.
 
 Set these **server-only Edge Function secrets** in the dashboard or via an ignored
 local environment file. Never put them in `VITE_` or a committed SQL migration.
 
-| Secret                           | Purpose                                                       |
-| -------------------------------- | ------------------------------------------------------------- |
-| `APP_ORIGIN`                     | Exact HTTPS Pages origin, no trailing slash                   |
-| `GEMINI_API_KEY`                 | Central paid-tier Gemini key owned by STeP                    |
-| `GEMINI_MODEL`                   | Verified available model, default `gemini-3.8-flash`          |
-| `GEMINI_EMBEDDING_MODEL`         | Available 768-dimensional model, default `gemini-embedding-2` |
-| `OPENROUTER_API_KEY`             | Separate server-only OpenRouter trial key                     |
-| `OPENROUTER_TRIAL_TENANT_ID`     | Exact tenant UUID authorized for the admin free trial         |
-| `WORKER_SECRET`                  | At least 32 random bytes, also stored in Vault                |
-| `CREDENTIAL_ENCRYPTION_KEY`      | Base64 of exactly 32 random bytes                             |
-| `GOOGLE_WORKSPACE_CLIENT_ID`     | Web OAuth client for Workspace                                |
-| `GOOGLE_WORKSPACE_CLIENT_SECRET` | Its server-side secret                                        |
-| `GOOGLE_PICKER_API_KEY`          | Picker browser key restricted to actual origin/APIs           |
-| `GOOGLE_PICKER_APP_ID`           | Google Cloud project number, same OAuth project               |
+| Secret                           | Purpose                                                           |
+| -------------------------------- | ----------------------------------------------------------------- |
+| `APP_ORIGIN`                     | Exact HTTPS frontend origin, no trailing slash                    |
+| `AI_PROVIDER`                    | `gemini` (default) or the existing `openrouter_free` worker pilot |
+| `GEMINI_API_KEY`                 | Central paid-tier Gemini key owned by STeP                        |
+| `GEMINI_MODEL`                   | Verified available model, default `gemini-3.8-flash`              |
+| `GEMINI_EMBEDDING_MODEL`         | Available 768-dimensional model, default `gemini-embedding-2`     |
+| `OPENROUTER_API_KEY`             | Separate server-only OpenRouter trial key                         |
+| `OPENROUTER_TRIAL_TENANT_ID`     | Exact tenant UUID authorized for the admin free trial             |
+| `OPENROUTER_MODEL`               | Explicit `:free` model for the optional worker pilot              |
+| `OPENROUTER_PROVIDER`            | Pinned upstream for the optional worker pilot                     |
+| `WORKER_SECRET`                  | At least 32 random bytes, also stored in Vault                    |
+| `CREDENTIAL_ENCRYPTION_KEY`      | Base64 of exactly 32 random bytes                                 |
+| `GOOGLE_WORKSPACE_CLIENT_ID`     | Web OAuth client for Workspace                                    |
+| `GOOGLE_WORKSPACE_CLIENT_SECRET` | Its server-side secret                                            |
+| `GOOGLE_PICKER_API_KEY`          | Picker browser key restricted to actual origin/APIs               |
+| `GOOGLE_PICKER_APP_ID`           | Google Cloud project number, same OAuth project                   |
 
 Supabase provides URL, service-role and anon keys to functions automatically.
 Operator scripts read local `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or service
@@ -122,8 +129,8 @@ Synthetic tests do not certify live OAuth, provider billing or OCR accuracy.
 
 ## Optional administrator free trial
 
-Apply migration `20261022140000_openrouter_trial.sql` and deploy the updated API
-function and frontend before enabling this channel. Set `OPENROUTER_API_KEY` and
+Apply all pending sandbox/shared-quota migrations and deploy the reconciled API,
+worker, callback and frontend before enabling this channel. Set `OPENROUTER_API_KEY` and
 `OPENROUTER_TRIAL_TENANT_ID` together as Supabase Edge Function secrets. Removing
 either disables the trial. Never use `VITE_` for the key or place it in Git, a
 migration, browser storage or frontend input. Replace any key previously pasted
@@ -132,9 +139,9 @@ into a chat before activation; this change does not install that transcript key.
 An active tenant owner/admin opens การตั้งค่า → เชื่อมต่อ AI → ทดลอง OpenRouter Free,
 loads the live model list and confirms each synthetic prompt before sending.
 Members and admins of other tenants are denied server-side. Test with both
-permitted and denied real accounts after deployment. The app caps attempts at
-5/minute and 40/day UTC across the selected tenant; OpenRouter can impose lower
-or account-wide limits. A failed attempt still counts. Rate limiting never causes
+permitted and denied real accounts after deployment. The sandbox caps attempts at
+5/minute for the selected tenant; both trial channels share 40/day UTC and 15/minute
+across the account. OpenRouter can impose lower limits. A failed attempt still counts. Rate limiting never causes
 automatic retries or upgrades, and a 402 never initiates a credit purchase.
 
 Check the exact model and $0 cost in OpenRouter Activity during real-account

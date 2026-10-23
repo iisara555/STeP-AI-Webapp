@@ -100,7 +100,18 @@ test('every protected URL sends anonymous visitors to login without requesting w
   context,
 }) => {
   const state = await authFixture(context);
-  for (const path of ['/', '/skills', '/documents', '/memory', '/receipt', '/settings']) {
+  for (const path of [
+    '/',
+    '/skills',
+    '/documents',
+    '/memory',
+    '/receipt',
+    '/settings',
+    '/document-tools',
+    '/media',
+    '/history',
+    '/help',
+  ]) {
     await page.goto(path);
     await expect(page).toHaveURL(
       new RegExp('/login' + (path === '/' ? '$' : '\\?next=' + encodeURIComponent(path) + '$')),

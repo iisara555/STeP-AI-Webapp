@@ -1,0 +1,23 @@
+name: step-ai-pilot
+services:
+  web:
+    image: step-ai-webapp:${STEP_IMAGE_TAG:-pilot}
+    build:
+      context: ../..
+      dockerfile: deploy/homelab/Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?Set the hosted Supabase URL}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:?Set a modern publishable key}
+    ports:
+      - '127.0.0.1:${STEP_HTTP_PORT:-8080}:8080'
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,uid=101,gid=101
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 1

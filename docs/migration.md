@@ -11,6 +11,12 @@ Skill instructions/mandatory-reference IDs and authority/organization registries
 Output is bounded and scanned for recognizable credentials, created exclusively
 with private filesystem modes. Only ignored `.exports/` may hold packs locally.
 
+The exporter also carries non-executable Skill-local references/templates/examples,
+owner/lifecycle/version and explicit missing-reference IDs. Working references are
+separate from organization retrieval and cannot supply current-policy authority.
+See [the complete Desktop reference](desktop-reference.md) for the 32 feature groups,
+91-module inventory, transferred workflows and remaining native capabilities.
+
 The importer validates the pack then atomically replaces one tenant's sources and
 Skills through a service-only RPC. Active jobs block import; invalid rows roll
 back. Provenance stays attached. Re-importing a reviewed earlier pack rolls back

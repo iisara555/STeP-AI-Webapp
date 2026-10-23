@@ -1,5 +1,14 @@
 export type Visibility = 'private' | 'workspace';
 export type MemberRole = 'owner' | 'admin' | 'member';
+export interface AiService {
+  provider: 'gemini' | 'openrouter_free';
+  model: string;
+  upstream: string;
+  displayName: string;
+  consentId: string;
+  configured: boolean;
+  textOnly: boolean;
+}
 export type RunStatus =
   'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
 export interface Tenant {
@@ -11,6 +20,8 @@ export interface Tenant {
   monthly_ai_budget_cents: number;
   input_cents_per_million: number | null;
   output_cents_per_million: number | null;
+  free_ai_trial_enabled?: boolean;
+  free_ai_daily_limit?: number;
 }
 export interface Membership {
   tenant_id: string;
@@ -97,6 +108,7 @@ export interface Run {
   created_at: string;
 }
 export interface Skill {
+  tenant_id?: string;
   id: string;
   skill_key: string;
   title: string;
@@ -119,6 +131,7 @@ export interface ReceiptResult {
   warnings: string[];
 }
 export interface Snapshot {
+  ai?: AiService;
   user: { id: string; email?: string; name?: string };
   tenants: Tenant[];
   memberships: Membership[];

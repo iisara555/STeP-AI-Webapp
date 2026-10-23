@@ -21,7 +21,8 @@
     "harness:export": "node scripts/export-harness.mjs",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "harness:import": "tsx scripts/import-harness.ts",
-    "harness:verify": "tsx scripts/verify-upstream.ts"
+    "harness:verify": "tsx scripts/verify-upstream.ts",
+    "harness:reference": "tsx scripts/desktop-reference.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.118.0",

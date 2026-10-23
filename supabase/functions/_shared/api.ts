@@ -6,7 +6,12 @@ import {
   selectMemories,
   validateMemory,
 } from '../../../packages/harness-core/src/index.ts';
-import type { Memory, Conversation, DocumentRecord } from '../../../packages/harness-core/src/contracts.ts';
+import type {
+  Memory,
+  Conversation,
+  DocumentRecord,
+  Skill,
+} from '../../../packages/harness-core/src/contracts.ts';
 import {
   authenticate,
   checked,
@@ -28,6 +33,8 @@ import {
 import { validFile } from './files.ts';
 import { receiptSchema } from './receipt.ts';
 import { openrouter, trialConfigured } from './openrouter.ts';
+import { aiService, requireProviderConsent } from './ai.ts';
+import { literalSearch } from '../../../packages/harness-core/src/desktop-workflows.ts';
 
 const uuid = z.string().uuid();
 const visibility = z.enum(['private', 'workspace']);
@@ -44,6 +51,7 @@ const start = z.object({
   documentIds: z.array(uuid).max(8).default([]),
   useMemory: z.boolean().default(true),
   consent: z.literal(true),
+  providerConsent: z.string().min(1).max(1000),
   googleConsent: z.boolean().default(false),
 });
 export async function contextPlan(
@@ -95,10 +103,9 @@ export async function contextPlan(
     documents: docs,
     memories: memories.map((m) => ({ id: m.id, title: m.title, visibility: m.visibility })),
     google: wantsCalendar(input.message),
-    provider: 'Google Gemini API',
   };
 }
-async function snapshot(actor: Actor) {
+async function snapshot(actor: Actor, env: Environment) {
   await checked(actor.userDb.rpc('accept_invites'));
   const [tenants, memberships, workspaces, sessions, memories, documents, skills] = await Promise.all([
     checked(actor.userDb.from('tenants').select('*')),
@@ -121,6 +128,7 @@ async function snapshot(actor: Actor) {
     ),
   ]);
   return {
+    ai: aiService(env),
     user: { id: actor.user.id, email: actor.user.email, name: actor.user.user_metadata?.full_name || '' },
     tenants,
     memberships,
@@ -139,7 +147,7 @@ export async function dispatch(
   fetcher: typeof fetch = fetch,
 ) {
   const db = actor.userDb;
-  if (action === 'snapshot') return snapshot(actor);
+  if (action === 'snapshot') return snapshot(actor, env);
   const base = tenantRequest.parse(input);
   await member(actor, base.tenant);
   switch (action) {
@@ -220,7 +228,13 @@ export async function dispatch(
       return { ok: true };
     }
     case 'session.create': {
-      const p = tenantRequest.extend({ workspace: uuid.nullable(), visibility }).parse(input);
+      const p = tenantRequest
+        .extend({
+          workspace: uuid.nullable(),
+          visibility,
+          title: z.string().trim().min(1).max(160).default('เริ่มงานใหม่'),
+        })
+        .parse(input);
       return checked(
         db
           .from('sessions')
@@ -229,10 +243,44 @@ export async function dispatch(
             owner_id: actor.user.id,
             workspace_id: p.workspace,
             visibility: p.visibility,
+            title: p.title,
           })
           .select()
           .single(),
       );
+    }
+    case 'session.search': {
+      const p = tenantRequest.extend({ query: z.string().trim().min(1).max(100) }).parse(input);
+      const pattern = literalSearch(p.query);
+      // User-scoped queries retain RLS on both messages and sessions. No service client/search provider.
+      const [titles, drafts, messages] = await Promise.all([
+        checked(db.from('sessions').select('id').eq('tenant_id', p.tenant).ilike('title', pattern).limit(50)),
+        checked(db.from('sessions').select('id').eq('tenant_id', p.tenant).ilike('draft', pattern).limit(50)),
+        checked(
+          db.from('messages').select('session_id').eq('tenant_id', p.tenant).ilike('body', pattern).limit(50),
+        ),
+      ]);
+      const ids = [
+        ...new Set([...titles, ...drafts].map((s) => s.id).concat(messages.map((m) => m.session_id))),
+      ];
+      if (!ids.length) return [];
+      return checked(
+        db
+          .from('sessions')
+          .select('*')
+          .eq('tenant_id', p.tenant)
+          .in('id', ids)
+          .order('created_at', { ascending: false })
+          .limit(50),
+      );
+    }
+    case 'skill.read': {
+      const p = tenantRequest.extend({ key: z.string().regex(/^[a-zA-Z0-9_-]{1,120}$/) }).parse(input);
+      const skill = await checked<Skill | null>(
+        db.from('skills').select('*').eq('tenant_id', p.tenant).eq('skill_key', p.key).maybeSingle(),
+      );
+      if (!skill || skill.metadata.developerOnly) throw new Error('ACCESS_DENIED');
+      return skill;
     }
     case 'session.read': {
       const p = resource.parse(input);
@@ -453,7 +501,12 @@ export async function dispatch(
           useMemory: z.boolean(),
         })
         .parse(input);
-      return contextPlan(actor, p);
+      const info = aiService(env);
+      return {
+        ...(await contextPlan(actor, p)),
+        provider: info.displayName,
+        providerConsent: info.consentId,
+      };
     }
     case 'knowledge.read': {
       const p = tenantRequest.extend({ key: z.string().min(1).max(120) }).parse(input);
@@ -470,8 +523,13 @@ export async function dispatch(
       return row;
     }
     case 'run.start': {
-      if (!env('GEMINI_API_KEY') || !env('WORKER_SECRET')) throw new Error('AI_NOT_CONFIGURED');
       const p = start.parse(input);
+      const info = requireProviderConsent(env, p.providerConsent);
+      if (!info.configured) throw new Error('AI_NOT_CONFIGURED');
+      if (info.provider === 'openrouter_free') {
+        await member(actor, p.tenant, true);
+        if (p.kind !== 'chat') throw new Error('AI_TRIAL_TEXT_ONLY');
+      }
       if (p.kind === 'chat') {
         if (!p.session || !p.message) throw new Error('INVALID_REQUEST');
         assertSafeText(p.message);
@@ -497,6 +555,8 @@ export async function dispatch(
             documentIds: p.documentIds,
             useMemory: p.useMemory,
             consent: true,
+            aiProvider: info.provider,
+            providerConsent: info.consentId,
             googleConsent: p.googleConsent,
           },
         }),
@@ -614,7 +674,9 @@ export async function dispatch(
           outputRate: z.number().positive().max(100000),
         })
         .parse(input);
-      if (!env('GEMINI_API_KEY') && p.budgetCents > 0) throw new Error('AI_NOT_CONFIGURED');
+      const info = aiService(env);
+      if (info.provider !== 'gemini') throw new Error('AI_FREE_UNAVAILABLE');
+      if (!info.configured && p.budgetCents > 0) throw new Error('AI_NOT_CONFIGURED');
       await checked(
         db.rpc('configure_ai', {
           t: p.tenant,
@@ -625,12 +687,25 @@ export async function dispatch(
       );
       return { ok: true };
     }
+    case 'admin.ai-trial': {
+      const p = tenantRequest
+        .extend({ enabled: z.boolean(), dailyLimit: z.number().int().min(1).max(50) })
+        .parse(input);
+      const info = aiService(env);
+      if (info.provider !== 'openrouter_free') throw new Error('AI_FREE_UNAVAILABLE');
+      if (p.enabled && !info.configured) throw new Error('AI_NOT_CONFIGURED');
+      await checked(
+        db.rpc('configure_free_trial', { t: p.tenant, enabled: p.enabled, daily_limit: p.dailyLimit }),
+      );
+      return { ok: true };
+    }
     case 'usage': {
       const usage = await checked(db.rpc('usage_summary', { t: base.tenant }));
       return {
         ...usage,
-        aiConfigured: Boolean(env('GEMINI_API_KEY') && env('WORKER_SECRET')),
-        model: env('GEMINI_MODEL') || 'gemini-3.8-flash',
+        aiConfigured: aiService(env).configured,
+        model: aiService(env).model,
+        ai: aiService(env),
       };
     }
     default:

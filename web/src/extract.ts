@@ -115,17 +115,113 @@ function bounded(text: string) {
   if (text.length > 200000) throw new Error('DOCUMENT_TOO_LARGE');
   return text;
 }
-export async function exportWord(text: string, name: string) {
-  const { Document, Paragraph, Packer, TextRun } = await import('docx');
+export async function exportWord(
+  text: string,
+  name: string,
+  preset: 'saraban' | 'report' | 'book' = 'report',
+) {
+  const { DOCUMENT_PRESETS } =
+    await import('../../packages/harness-core/vendor/desktop/document-presentation.ts');
+  const format = DOCUMENT_PRESETS[preset];
+  if (!format || text.length > 200000) throw new Error('DOCUMENT_TOO_LARGE');
+  const {
+    Document,
+    Paragraph,
+    Packer,
+    TextRun,
+    HeadingLevel,
+    Table,
+    TableRow,
+    TableCell,
+    Footer,
+    PageNumber,
+    AlignmentType,
+  } = await import('docx');
+  const runs = (line: string) =>
+    line
+      .split(/(\*\*[^*]+\*\*)/g)
+      .filter(Boolean)
+      .map(
+        (part) =>
+          new TextRun({
+            text: part.replace(/^\*\*|\*\*$/g, ''),
+            bold: part.startsWith('**'),
+            font: 'TH Sarabun New',
+            size: format.points * 2,
+          }),
+      );
+  const children: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = [];
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const cells = (line: string) =>
+    line
+      .trim()
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split('|')
+      .map((cell) => cell.trim())
+      .slice(0, 20);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim().startsWith('|') && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1] || '')) {
+      const rows = [cells(line)];
+      i++;
+      while (lines[i + 1]?.trim().startsWith('|')) rows.push(cells(lines[++i]));
+      children.push(
+        new Table({
+          rows: rows.map(
+            (row, index) =>
+              new TableRow({
+                tableHeader: index === 0,
+                children: row.map(
+                  (cell) => new TableCell({ children: [new Paragraph({ children: runs(cell) })] }),
+                ),
+              }),
+          ),
+        }),
+      );
+      continue;
+    }
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    const bullet = /^\s*[-*]\s+/.test(line);
+    children.push(
+      new Paragraph({
+        children: runs(heading ? heading[2] : bullet ? line.replace(/^\s*[-*]\s+/, '') : line),
+        ...(heading
+          ? {
+              heading: [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][
+                heading[1].length - 1
+              ],
+            }
+          : {}),
+        ...(bullet ? { bullet: { level: 0 } } : {}),
+        spacing: { line: Math.round(format.line * 240), after: format.after * 20 },
+      }),
+    );
+  }
+  const cm = (value: number) => Math.round(value * 567);
   const document = new Document({
+    styles: { default: { document: { run: { font: 'TH Sarabun New', size: format.points * 2 } } } },
     sections: [
       {
-        children: text
-          .split('\n')
-          .map(
-            (line) =>
-              new Paragraph({ children: [new TextRun({ text: line, font: 'TH Sarabun New', size: 32 })] }),
-          ),
+        properties: {
+          page: {
+            size: { width: 11906, height: 16838 },
+            margin: Object.fromEntries(
+              Object.entries(format.margins).map(([key, value]) => [key, cm(value)]),
+            ),
+          },
+        },
+        footers: {
+          default: new Footer({
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [new TextRun({ children: [PageNumber.CURRENT, ' / ', PageNumber.TOTAL_PAGES] })],
+              }),
+            ],
+          }),
+        },
+        children,
       },
     ],
   });

@@ -122,6 +122,20 @@ export function boundedContext(parts: string[], maxTokens: number = LIMITS.conte
 }
 export function errorView(code: string): ErrorView {
   const known: Record<string, ErrorView> = {
+    CONTEXT_LIMIT: {
+      title: 'แหล่งข้อมูลบังคับใหญ่เกินบริบทที่รองรับ',
+      detail:
+        'ระบบยังไม่ได้ส่งคำขอนี้ให้ AI ให้ผู้ดูแลตรวจชุด Skill หรือแบ่งงานให้เล็กลง โดยคงแหล่งข้อมูลบังคับให้ครบ',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    HARNESS_INCOMPLETE: {
+      title: 'Skill หรือเอกสารประกอบยังไม่พร้อม',
+      detail:
+        'ให้ผู้ดูแลนำเข้าชุด Harness ที่ตรวจแล้ว ก่อนใช้แบบฟอร์มนี้ คุณยังเก็บร่างและเริ่มบทสนทนาทั่วไปได้',
+      action: 'ดูการตั้งค่า',
+      retry: false,
+    },
     OPENROUTER_NOT_CONFIGURED: {
       title: 'ช่องทดลอง OpenRouter ยังไม่พร้อมใช้',
       detail: 'ให้ผู้ดูแลเซิร์ฟเวอร์ตั้ง OPENROUTER_API_KEY และ OPENROUTER_TRIAL_TENANT_ID สำหรับองค์กรนี้',
@@ -199,6 +213,36 @@ export function errorView(code: string): ErrorView {
       detail: 'ผู้ดูแลต้องตั้งค่าบริการ AI และวงเงินก่อนเริ่มใช้งาน',
       action: 'ดูการตั้งค่า',
       retry: false,
+    },
+    AI_PROVIDER_CHANGED: {
+      title: 'บริการ AI เปลี่ยนแล้ว',
+      detail: 'เปิดข้อมูลที่จะส่งให้ AI อีกครั้ง แล้วตรวจผู้ให้บริการและโมเดลก่อนยืนยัน',
+      action: 'ตรวจข้อมูลอีกครั้ง',
+      retry: false,
+    },
+    AI_TRIAL_TEXT_ONLY: {
+      title: 'รุ่นทดลองนี้รองรับข้อความเท่านั้น',
+      detail: 'ใช้ช่องทดลอง OpenRouter Free ในการตั้งค่า การอ่านภาพและ embedding ต้องใช้บริการที่รองรับ',
+      action: 'ดูการตั้งค่า',
+      retry: false,
+    },
+    AI_FREE_UNAVAILABLE: {
+      title: 'รุ่นฟรียังไม่พร้อมให้บริการ',
+      detail: 'ยังไม่ได้ส่งต่อไปยังรุ่นเสียเงิน ตรวจบริการและโมเดลกับผู้ดูแลก่อนเริ่มใหม่',
+      action: 'ดูการตั้งค่า',
+      retry: false,
+    },
+    AI_FREE_QUOTA: {
+      title: 'ครบจำนวนทดลองวันนี้แล้ว',
+      detail: 'การทดลองใช้โควตาร่วมกันทั้งบัญชีและนับงานที่ล้มเหลวด้วย เริ่มใหม่หลังวัน UTC เปลี่ยน',
+      action: 'ดูปริมาณการใช้',
+      retry: false,
+    },
+    AI_FREE_RATE_LIMIT: {
+      title: 'ส่งคำขอทดลองถี่เกินไป',
+      detail: 'รอให้โควตาต่อนาทีว่างก่อนเริ่มใหม่ ไม่มีการส่งซ้ำหรือเปลี่ยนไปใช้รุ่นเสียเงินอัตโนมัติ',
+      action: 'รอก่อนเริ่มใหม่',
+      retry: true,
     },
     AI_SERVICE_ERROR: {
       title: 'ติดต่อบริการ AI ไม่สำเร็จ',

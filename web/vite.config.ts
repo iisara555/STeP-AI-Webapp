@@ -16,6 +16,9 @@ export default defineConfig({
           '/icon-512.png',
           '/icon-180.png',
           '/manifest.webmanifest',
+          '/theme.js',
+          '/step-symbol-colour.svg',
+          '/step-symbol-mono-white.svg',
           ...Object.keys(bundle)
             .filter((n) => /\.(js|css|woff2)$/.test(n))
             .map((n) => '/' + n),
