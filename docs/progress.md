@@ -26,6 +26,11 @@
   include Word XML/layout, local media preparation, consent, history, Skill details,
   responsive layout and WCAG A/AA in both themes. Original private retrieval 61/61
   and buyer identity 3/3 passed; all 91 upstream module hashes were verified.
+- The production Docker image built with TLS verification and the environment proxy/CA.
+  Its dedicated local container is healthy, non-root (`101:101`) and read-only;
+  static hosting/CSP/PWA/OAuth callback smoke passed. GitHub Actions run 39875584009
+  passed on the reviewed implementation head. These are local/CI checks, not homelab
+  or live provider acceptance.
 - Main's existing homelab/backend changes (#4/#5) are integrated. Matching API/worker
   deployment and operator import of the expanded private pack are still required for
   the new routes/context. The hosted project remains on the previously recorded
