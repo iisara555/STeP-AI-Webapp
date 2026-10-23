@@ -40,9 +40,8 @@ button {
   padding: 9px 14px;
   cursor: pointer;
   line-height: 1.5;
-  transition:
-    background 0.15s,
-    border-color 0.15s;
+  /* Theme ink and background must change together to preserve contrast. */
+  transition: border-color 0.15s;
 }
 button:hover {
   background: var(--soft);

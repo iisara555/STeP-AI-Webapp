@@ -31,6 +31,10 @@
   static hosting/CSP/PWA/OAuth callback smoke passed. GitHub Actions run 39875584009
   passed on the reviewed implementation head. These are local/CI checks, not homelab
   or live provider acceptance.
+- A later CI accessibility check caught an intermediate theme frame with yellow
+  text over a transitioning light background. Button ink/background now switch
+  together; only the border transition remains. Immediate theme checks are retained
+  without sleeps, disabled contrast rules or automatic test retries.
 - Main's existing homelab/backend changes (#4/#5) are integrated. Matching API/worker
   deployment and operator import of the expanded private pack are still required for
   the new routes/context. The hosted project remains on the previously recorded
