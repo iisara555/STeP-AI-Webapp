@@ -1,45 +1,34 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
-  Brain,
-  Check,
-  CircleHelp,
-  History as HistoryIcon,
-  Image,
-  FilePenLine,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Command,
-  FileText,
-  FolderOpen,
-  LayoutGrid,
-  LogOut,
-  Menu,
-  MessageSquare,
-  Plus,
-  Receipt,
-  Search,
-  Settings,
-  Share2,
-  ShieldCheck,
-  X,
-} from 'lucide-react';
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import { Command, ShieldCheck, Brain, FolderOpen, Check } from './icons.tsx';
 import type { Snapshot, Workspace, Conversation, Skill } from '../../packages/harness-core/src/contracts.ts';
 import { ApiError, configured, loadSnapshot, supabase, webHost, type Host } from './host.ts';
 import { demoHost } from './demo.ts';
-import { Busy, Empty, ErrorNotice, Modal, Visibility } from './components.tsx';
-import { Chat } from './Chat.tsx';
-import { Documents } from './Documents.tsx';
-import { Memories } from './Memories.tsx';
-import { ReceiptView } from './ReceiptView.tsx';
-import { SettingsView } from './SettingsView.tsx';
-import { SkillsHub } from './SkillsHub.tsx';
-import { DocumentTools } from './DocumentTools.tsx';
-import { MediaStudio } from './MediaStudio.tsx';
-import { Help } from './Help.tsx';
-import { History } from './History.tsx';
+import { Art, BrandSymbol, Busy, ErrorNotice, Modal } from './components.tsx';
+import { Chat, type PreparedText } from './Chat.tsx';
 import { CommandPalette } from './CommandPalette.tsx';
-import { ThemeSelect } from './ThemeSelect.tsx';
+import { TitleBar, mod, type MenuGroup } from './TitleBar.tsx';
+import { Sidebar, SidebarRail, sidebarChoice, tools } from './Sidebar.tsx';
+import { useTheme } from './ThemeSelect.tsx';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
+// Tool pages load on first open, so the first screen does not wait for the Desktop reference or Word export.
+const Documents = lazy(() => import('./Documents.tsx').then((m) => ({ default: m.Documents })));
+const Memories = lazy(() => import('./Memories.tsx').then((m) => ({ default: m.Memories })));
+const ReceiptView = lazy(() => import('./ReceiptView.tsx').then((m) => ({ default: m.ReceiptView })));
+const SettingsView = lazy(() => import('./SettingsView.tsx').then((m) => ({ default: m.SettingsView })));
+const SkillsHub = lazy(() => import('./SkillsHub.tsx').then((m) => ({ default: m.SkillsHub })));
+const DocumentTools = lazy(() => import('./DocumentTools.tsx').then((m) => ({ default: m.DocumentTools })));
+const MediaStudio = lazy(() => import('./MediaStudio.tsx').then((m) => ({ default: m.MediaStudio })));
+const Help = lazy(() => import('./Help.tsx').then((m) => ({ default: m.Help })));
+const History = lazy(() => import('./History.tsx').then((m) => ({ default: m.History })));
 export type Page =
   | 'chat'
   | 'skills'
@@ -59,16 +48,37 @@ export interface ViewProps {
   refresh: () => Promise<void>;
   fail: (error: unknown) => void;
 }
-const navigation = [
-  { id: 'chat' as const, label: 'งานของฉัน', icon: MessageSquare },
-  { id: 'history' as const, label: 'ค้นงานเก่า', icon: HistoryIcon },
-  { id: 'document-tools' as const, label: 'ร่างเอกสาร', icon: FilePenLine },
-  { id: 'media' as const, label: 'สื่อภายใน', icon: Image },
-  { id: 'skills' as const, label: 'Skill', icon: LayoutGrid },
-  { id: 'documents' as const, label: 'เอกสาร', icon: FileText },
-  { id: 'memory' as const, label: 'ความจำ', icon: Brain },
-  { id: 'receipt' as const, label: 'ตรวจใบเสร็จ AFP', icon: Receipt },
+const pages: Page[] = [
+  'settings',
+  'skills',
+  'documents',
+  'memory',
+  'receipt',
+  'document-tools',
+  'media',
+  'history',
+  'help',
 ];
+/** Title and one-line purpose for the page header, as on Desktop. */
+const headers: Record<Exclude<Page, 'chat'>, [string, string]> = {
+  'document-tools': [
+    'เครื่องมือร่างเอกสาร',
+    'ใส่ข้อมูลหรือแนบต้นเรื่อง ให้ AI ช่วยร่าง แล้วตรวจแก้ก่อนส่งออก',
+  ],
+  media: ['สื่อภายใน', 'เตรียมเนื้อหาและ Prompt ภาพสำหรับสื่อสารภายใน ตามสีองค์กรและห้ามสร้างโลโก้'],
+  skills: ['ศูนย์รวม Skill', 'ค้นหา Skill และดูว่ารายการใดพร้อมใช้บนเว็บ'],
+  documents: ['เอกสาร', 'เก็บไฟล์ส่วนตัว หรือเลือกแชร์เฉพาะใน workspace'],
+  memory: ['ความจำ', 'สิ่งที่ผู้ช่วยจำไว้ใช้ในงานถัดไป แก้ไขหรือลบได้เสมอ'],
+  history: ['ค้นงานเก่า', 'ค้นชื่อ บทสนทนา และร่างที่คุณมีสิทธิ์อ่าน'],
+  receipt: ['ตรวจใบเสร็จ AFP', 'ทดลอง · ให้ AI อ่านใบเสร็จ แล้วคุณตรวจเทียบต้นฉบับก่อนใช้'],
+  settings: ['การตั้งค่า', 'บัญชี การเชื่อมต่อ AI, Google Workspace และข้อมูลของคุณ'],
+  help: ['คู่มือและความสามารถ', 'ตรวจได้ว่าเว็บรองรับความสามารถใดของ Desktop แล้ว'],
+};
+const narrow = window.matchMedia('(max-width: 900px)');
+const subscribeNarrow = (onChange: () => void) => {
+  narrow.addEventListener('change', onChange);
+  return () => narrow.removeEventListener('change', onChange);
+};
 export function App() {
   const [demo, setDemo] = useState(new URLSearchParams(location.search).get('demo') === '1');
   const host = useMemo(() => (demo ? demoHost() : webHost()), [demo]);
@@ -81,32 +91,23 @@ export function App() {
     [tenant, setTenant] = useState(''),
     [workspaceId, setWorkspaceId] = useState('');
   const [page, setPage] = useState<Page>(
-      [
-        'settings',
-        'skills',
-        'documents',
-        'memory',
-        'receipt',
-        'document-tools',
-        'media',
-        'history',
-        'help',
-      ].includes(location.pathname.slice(1))
-        ? (location.pathname.slice(1) as Page)
-        : 'chat',
+      pages.includes(location.pathname.slice(1) as Page) ? (location.pathname.slice(1) as Page) : 'chat',
     ),
     [session, setSession] = useState<Conversation | null>(null),
     [skill, setSkill] = useState<Skill | null>(null);
   const [error, setError] = useState<unknown>(null),
     [loading, setLoading] = useState(false),
     [mobile, setMobile] = useState(false),
-    [dialog, setDialog] = useState<'workspace' | 'share' | 'conversation' | null>(null);
-  const [search, setSearch] = useState(''),
-    [update, setUpdate] = useState(false),
+    [dialog, setDialog] = useState<'workspace' | 'share' | 'conversation' | 'update' | null>(null);
+  const [update, setUpdate] = useState(false),
     [online, setOnline] = useState(navigator.onLine);
-  const [collapsed, setCollapsed] = useState(false),
-    [palette, setPalette] = useState(false);
-  const [prepared, setPrepared] = useState<{ sessionId: string; text: string } | null>(null);
+  const [fullSidebar, setFullSidebar] = useState(sidebarChoice.read()),
+    [palette, setPalette] = useState(false),
+    [historyQuery, setHistoryQuery] = useState('');
+  const [theme, setTheme] = useTheme();
+  const isNarrow = useSyncExternalStore(subscribeNarrow, () => narrow.matches);
+  const [artifactSlot, setArtifactSlot] = useState<HTMLDivElement | null>(null);
+  const [prepared, setPrepared] = useState<PreparedText | null>(null);
   const consumePrepared = useCallback(() => setPrepared(null), []);
   const activeTenant = useRef(tenant);
   activeTenant.current = tenant;
@@ -219,10 +220,14 @@ export function App() {
     if (selected.skill_key === 'receipt-audit') changePage('receipt');
     else {
       setSkill(selected);
+      setSession(null);
       changePage('chat');
     }
   };
-  const prepareWork = async (work: PreparedWork) => {
+  const prepareWork = async (
+    work: PreparedWork,
+    options: { submit?: boolean; documents?: string[] } = {},
+  ) => {
     const selected = data?.skills.find(
       (s) =>
         (!s.tenant_id || s.tenant_id === tenant) &&
@@ -251,8 +256,16 @@ export function App() {
     setWorkspaceId('');
     setSession(created);
     setSkill(selected || null);
-    setPrepared({ sessionId: created.id, text: work.message });
+    setPrepared({ sessionId: created.id, text: work.message, ...options });
     changePage('chat');
+  };
+  const newTask = () => {
+    if (workspace) setDialog('conversation');
+    else {
+      setSession(null);
+      setSkill(null);
+      changePage('chat');
+    }
   };
   useEffect(() => {
     if (!signedIn || !data) return;
@@ -264,7 +277,7 @@ export function App() {
         setPalette((v) => !v);
       } else if (k === 'n' && e.altKey) {
         e.preventDefault();
-        setDialog('conversation');
+        newTask();
       } else if (k === 'm' && e.shiftKey) {
         e.preventDefault();
         changePage('memory');
@@ -275,7 +288,7 @@ export function App() {
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [signedIn, data, demo]);
+  }, [signedIn, data, demo, workspace]);
 
   const logout = async () => {
     setSignedIn(false);
@@ -291,21 +304,19 @@ export function App() {
     history.replaceState(null, '', '/');
   };
   const updateApp = async () => {
-    if (
-      !window.confirm(
-        'บันทึกร่างที่แก้ไขก่อนอัปเดต แอปจะเปิดใหม่ งานที่เริ่มแล้วจะยังอยู่ในระบบ ต้องการอัปเดตตอนนี้หรือไม่?',
-      )
-    )
-      return;
     const registration = await navigator.serviceWorker.getRegistration();
     if (registration?.waiting) {
       navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
       registration.waiting.postMessage('activate-update');
     } else location.reload();
   };
+  const toggleSidebar = () => {
+    sidebarChoice.save(!fullSidebar);
+    setFullSidebar(!fullSidebar);
+  };
   if (!authReady)
     return (
-      <main className="login">
+      <main className="login login-wait">
         <Busy label="กำลังตรวจบัญชี" />
       </main>
     );
@@ -313,15 +324,12 @@ export function App() {
     return (
       <main className="login">
         <div className="login-card">
-          <div className="brand-logo">
-            <img className="brand-colour" src="/step-symbol-colour.svg" alt="STeP" />
-            <img className="brand-white" src="/step-symbol-mono-white.svg" alt="STeP" />
-          </div>
-          <p className="eyebrow">MAKE INNOVATION SIMPLE</p>
+          <BrandSymbol />
+          <span className="brand-tagline">MAKE INNOVATION SIMPLE</span>
           <h1>
             พื้นที่ทำงานของคุณ
             <br />
-            พร้อม AI ที่เข้าใจงาน
+            <em>พร้อม AI ที่เข้าใจงาน</em>
           </h1>
           <p>
             เก็บงาน เอกสาร และความจำไว้ด้วยกัน
@@ -357,38 +365,45 @@ export function App() {
           <small>สำหรับบัญชีที่ได้รับเชิญจาก STeP เท่านั้น</small>
         </div>
         <div className="login-art">
-          <div className="art-card">
-            <Brain size={28} />
-            <strong>จำสิ่งที่ช่วยให้ทำงานง่ายขึ้น</strong>
-            <span>ความจำส่วนตัว แก้ไขและลบได้</span>
-          </div>
-          <div className="art-card">
-            <FolderOpen size={28} />
-            <strong>เอกสารอยู่เป็นที่ หาได้เมื่อใช้</strong>
-            <span>อัปโหลดเอง หรือเลือกจาก Google Drive</span>
-          </div>
-          <div className="art-card">
-            <ShieldCheck size={28} />
-            <strong>คุณเลือกเองว่าจะแชร์อะไร</strong>
-            <span>workspace ส่วนตัว พร้อมชวนทีมมาทำงาน</span>
-          </div>
+          <Art scene="teamwork" />
+          <ul className="welcome-trust">
+            <li>
+              <Brain size={16} />
+              <span>
+                <strong>จำสิ่งที่ช่วยให้ทำงานง่ายขึ้น</strong>
+                ความจำส่วนตัว แก้ไขและลบได้
+              </span>
+            </li>
+            <li>
+              <FolderOpen size={16} />
+              <span>
+                <strong>เอกสารอยู่เป็นที่ หาได้เมื่อใช้</strong>
+                อัปโหลดเอง หรือเลือกจาก Google Drive
+              </span>
+            </li>
+            <li>
+              <ShieldCheck size={16} />
+              <span>
+                <strong>คุณเลือกเองว่าจะแชร์อะไร</strong>
+                workspace ส่วนตัว พร้อมชวนทีมมาทำงาน
+              </span>
+            </li>
+          </ul>
         </div>
       </main>
     );
   if (loading && !data)
     return (
-      <main className="login">
+      <main className="login login-wait">
         <Busy label="กำลังเปิดพื้นที่ทำงาน" />
       </main>
     );
   if (!data?.tenants.length)
     return (
-      <main className="login">
+      <main className="login login-wait">
         <div className="login-card">
-          <div className="brand-logo">
-            <img className="brand-colour" src="/step-symbol-colour.svg" alt="STeP" />
-            <img className="brand-white" src="/step-symbol-mono-white.svg" alt="STeP" />
-          </div>
+          <BrandSymbol />
+          <span className="brand-tagline">MAKE INNOVATION SIMPLE</span>
           <h1>บัญชีนี้ยังไม่ได้รับเชิญ</h1>
           <p>{data?.user.email || 'ขอให้ผู้ดูแลเพิ่มบัญชี Google ของคุณในรายชื่อพนักงาน'}</p>
           {Boolean(error) && <ErrorNotice error={error} onDismiss={() => setError(null)} />}
@@ -401,248 +416,245 @@ export function App() {
     );
   const props: ViewProps = { host, data, tenant, workspace, refresh, fail };
   const sessions = data.sessions.filter(
-    (s) =>
-      s.tenant_id === tenant &&
-      (!workspace || s.workspace_id === workspace.id) &&
-      s.title.toLowerCase().includes(search.toLowerCase()),
+    (s) => s.tenant_id === tenant && (!workspace || s.workspace_id === workspace.id),
   );
+  const own = data.memberships.find((m) => m.tenant_id === tenant && m.user_id === data.user.id);
+  const profile = {
+    initial: (data.user.name || data.user.email || 'S').slice(0, 1).toUpperCase(),
+    name: data.user.name || 'บัญชีของฉัน',
+    detail: [
+      data.tenants.find((t) => t.id === tenant)?.name,
+      own?.role === 'owner' ? 'เจ้าขององค์กร' : own?.role === 'admin' ? 'ผู้ดูแลองค์กร' : 'พนักงาน',
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  };
+  const skillCount = data.skills.filter(
+    (s) => (!s.tenant_id || s.tenant_id === tenant) && !s.metadata.developerOnly,
+  ).length;
+  const rail = !fullSidebar && !isNarrow;
+  const menu: MenuGroup[] = [
+    {
+      label: 'งาน',
+      items: [
+        { id: 'new', label: 'เริ่มงานใหม่', hint: mod + 'Alt+N', run: newTask },
+        { id: 'palette', label: 'ค้นหางานและคำสั่ง', hint: mod + 'K', run: () => setPalette(true) },
+        { id: 'receipt', label: 'ตรวจใบเสร็จ AFP', run: () => changePage('receipt') },
+      ],
+    },
+    {
+      label: 'มุมมอง',
+      theme: true,
+      items: isNarrow
+        ? []
+        : [{ id: 'left', label: fullSidebar ? 'ย่อแถบงาน' : 'ขยายแถบงาน', run: toggleSidebar }],
+    },
+    {
+      label: 'เครื่องมือ',
+      items: tools
+        .filter((t) => t.id !== 'receipt')
+        .map((t) => ({
+          id: t.id,
+          label: t.label,
+          hint: t.id === 'memory' ? mod + 'Shift+M' : undefined,
+          run: () => changePage(t.id),
+        })),
+    },
+    {
+      label: 'ช่วยเหลือ',
+      items: [
+        { id: 'settings', label: 'การตั้งค่า', hint: mod + ',', run: () => changePage('settings') },
+        { id: 'help', label: 'คู่มือและความสามารถ', run: () => changePage('help') },
+        { id: 'logout', label: 'ออกจากระบบ', run: () => void logout(), danger: true },
+      ],
+    },
+  ];
+  const header = page === 'chat' ? null : headers[page];
   return (
-    <div className={'app-shell ' + (collapsed ? 'sidebar-collapsed' : '')}>
-      {mobile && <button className="sidebar-scrim" aria-label="ปิดเมนู" onClick={() => setMobile(false)} />}
-      <aside className={'sidebar ' + (mobile ? 'mobile-open' : '')}>
-        <div className="sidebar-brand">
-          <div className="brand-logo">
-            <img className="brand-colour" src="/step-symbol-colour.svg" alt="STeP" />
-            <img className="brand-white" src="/step-symbol-mono-white.svg" alt="STeP" />
-          </div>
-          <span>AI WORKSPACE</span>
-          <button className="icon-button mobile-only" aria-label="ปิดเมนู" onClick={() => setMobile(false)}>
-            <X size={20} />
-          </button>
-        </div>
-        <button className="sidebar-command" onClick={() => setPalette(true)}>
-          <Command size={18} />
-          <span>ค้นหน้าหรือ Skill</span>
-          <kbd>⌘/Ctrl K</kbd>
-        </button>
-        <button className="primary new-task" onClick={() => setDialog('conversation')}>
-          <Plus size={19} />
-          <span>เริ่มงานใหม่</span>
-        </button>
-        <label className="search">
-          <Search size={16} />
-          <input
-            placeholder="ค้นหางานของฉัน"
-            aria-label="ค้นหางานของฉัน"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
-        <nav aria-label="เมนูหลัก">
-          {navigation.map((n) => (
-            <button
-              key={n.id}
-              className={page === n.id ? 'selected' : ''}
-              aria-label={n.label}
-              title={n.label}
-              onClick={() => changePage(n.id)}
-            >
-              <n.icon size={19} />
-              <span>{n.label}</span>
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-history">
-          <p className="section-label">บทสนทนาล่าสุด</p>
-          {sessions.slice(0, 16).map((s) => (
-            <button
-              key={s.id}
-              className={session?.id === s.id ? 'active-history' : ''}
-              onClick={() => {
-                setSession(s);
-                changePage('chat');
-              }}
-            >
-              <MessageSquare size={14} />
-              <span>{s.title}</span>
-            </button>
-          ))}
-          {!sessions.length && <small>งานที่คุณเริ่มจะแสดงตรงนี้</small>}
-        </div>
-        <div className="sidebar-footer">
+    <div className="shell">
+      <TitleBar
+        groups={menu}
+        theme={theme}
+        onTheme={setTheme}
+        title={page === 'chat' ? session?.title || '' : headers[page][0]}
+        sidebarOpen={fullSidebar}
+        onSidebar={toggleSidebar}
+        onMobileMenu={() => setMobile(true)}
+        onPalette={() => setPalette(true)}
+        workspaces={workspaces}
+        workspaceId={workspaceId}
+        onWorkspace={(id) => {
+          setWorkspaceId(id);
+          setSession(null);
+        }}
+        onCreateWorkspace={() => setDialog('workspace')}
+        onShare={workspace?.created_by === data.user.id ? () => setDialog('share') : undefined}
+      />
+      <div className="app">
+        {mobile && (
           <button
-            aria-label="คู่มือและความสามารถ"
-            title="คู่มือและความสามารถ"
-            onClick={() => changePage('help')}
-          >
-            <CircleHelp size={19} />
-            <span>คู่มือและความสามารถ</span>
-          </button>
-          <button className={page === 'settings' ? 'selected' : ''} onClick={() => changePage('settings')}>
-            <Settings size={19} />
-            <span>การตั้งค่า</span>
-          </button>
-          <div className="account">
-            <span className="avatar">{data.user.name?.slice(0, 1) || 'S'}</span>
-            <div>
-              <strong>{data.user.name || 'บัญชีของฉัน'}</strong>
-              <span>{data.tenants.find((t) => t.id === tenant)?.name}</span>
-            </div>
-            <button className="icon-button" aria-label="ออกจากระบบ" onClick={() => void logout()}>
-              <LogOut size={17} />
-            </button>
+            className="sidebar-scrim"
+            tabIndex={-1}
+            aria-hidden="true"
+            onClick={() => setMobile(false)}
+          />
+        )}
+        {rail ? (
+          <SidebarRail
+            page={page}
+            profile={profile}
+            onPage={changePage}
+            onNew={newTask}
+            onPalette={() => setPalette(true)}
+            onExpand={toggleSidebar}
+          />
+        ) : (
+          <Sidebar
+            page={page}
+            sessions={sessions}
+            currentSession={session?.id}
+            skillCount={skillCount}
+            profile={profile}
+            update={update}
+            mobileOpen={mobile}
+            onCloseMobile={() => setMobile(false)}
+            onPage={changePage}
+            onSession={(s) => {
+              setSession(s);
+              changePage('chat');
+            }}
+            onNew={newTask}
+            onPalette={() => setPalette(true)}
+            onSearchAll={(query) => {
+              setHistoryQuery(query);
+              changePage('history');
+            }}
+            onUpdate={() => setDialog('update')}
+          />
+        )}
+        <main className="main-pane">
+          {header && (
+            <header className="topbar">
+              <div className="topbar-title">
+                <span className="topbar-heading">
+                  <strong>{header[0]}</strong>
+                </span>
+                <small>{header[1]}</small>
+              </div>
+            </header>
+          )}
+          <div className={'page ' + (page === 'chat' ? 'chat-page' : '')}>
+            <Suspense fallback={<Busy />}>
+              {page === 'chat' && (
+                <Chat
+                  {...props}
+                  key={tenant + workspaceId}
+                  session={session}
+                  setSession={setSession}
+                  skill={skill}
+                  clearSkill={() => setSkill(null)}
+                  newSession={() => setDialog('conversation')}
+                  prepared={prepared}
+                  consumePrepared={consumePrepared}
+                  onPrepare={prepareWork}
+                  artifactSlot={artifactSlot}
+                />
+              )}
+              {page === 'documents' && <Documents {...props} />}
+              {page === 'memory' && <Memories {...props} />}
+              {page === 'receipt' && <ReceiptView {...props} />}
+              {page === 'settings' && (
+                <SettingsView
+                  {...props}
+                  key={tenant}
+                  initialTab={settingsTab}
+                  theme={theme}
+                  onTheme={setTheme}
+                  onLogout={() => void logout()}
+                  onTenantChange={(id) => {
+                    setSettingsTab('account');
+                    setTenant(id);
+                  }}
+                />
+              )}
+              {page === 'skills' && <SkillsHub {...props} onUse={useSkill} />}
+              {page === 'document-tools' && (
+                <DocumentTools {...props} onPrepare={(work: PreparedWork) => prepareWork(work)} />
+              )}
+              {page === 'media' && (
+                <MediaStudio {...props} onPrepare={(work: PreparedWork) => prepareWork(work)} />
+              )}
+              {page === 'history' && (
+                <History
+                  {...props}
+                  key={tenant + workspaceId + historyQuery}
+                  initialQuery={historyQuery}
+                  onOpen={(s) => {
+                    setSession(s);
+                    changePage('chat');
+                  }}
+                />
+              )}
+              {page === 'help' && <Help onOpen={(p) => changePage(p as Page)} />}
+            </Suspense>
           </div>
-        </div>
-      </aside>
-      <main className="main-shell">
-        <header className="topbar">
-          <div className="workspace-heading">
-            <button className="icon-button mobile-only" aria-label="เปิดเมนู" onClick={() => setMobile(true)}>
-              <Menu size={22} />
-            </button>
-            <button
-              className="icon-button desktop-only"
-              onClick={() => setCollapsed((v) => !v)}
-              aria-label={collapsed ? 'ขยายแถบเมนู' : 'ย่อแถบเมนู'}
-            >
-              {collapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}
-            </button>
-            <FolderOpen size={19} />
-            <select
-              aria-label="เลือก workspace"
-              value={workspaceId}
-              onChange={(e) => {
-                setWorkspaceId(e.target.value);
-                setSession(null);
-              }}
-            >
-              <option value="">พื้นที่ส่วนตัว</option>
-              {workspaces.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-            <button
-              className="icon-button"
-              aria-label="สร้าง workspace"
-              onClick={() => setDialog('workspace')}
-            >
-              <Plus size={18} />
-            </button>
-          </div>
-          <div className="topbar-actions">
-            <ThemeSelect />
-            {demo && <span className="badge demo">ตัวอย่าง · ไม่ใช่ข้อมูลจริง</span>}
-            {workspace?.created_by === data.user.id && (
-              <button onClick={() => setDialog('share')}>
-                <Share2 size={16} />
-                เชิญทีม
-              </button>
-            )}
-            <span className="private-hint">
-              <ShieldCheck size={15} />
-              คุณเลือกสิ่งที่แชร์ได้
+          <footer className="statusbar" aria-label="สถานะ">
+            <span className="status-item" role="status">
+              <span className={'status-dot ' + (online ? 'ok' : 'off')} aria-hidden="true" />
+              {online ? 'พร้อมทำงาน' : 'ออฟไลน์ · เชื่อมต่ออินเทอร์เน็ตเพื่อเปิดข้อมูลและเริ่มงาน'}
             </span>
-          </div>
-        </header>
-        {!online && (
-          <div className="connection-banner" role="status">
-            ขณะนี้ออฟไลน์ · เชื่อมต่ออินเทอร์เน็ตเพื่อเปิดข้อมูลและเริ่มงาน
-          </div>
-        )}
-        {update && (
-          <div className="connection-banner">
-            มีแอปรุ่นใหม่ <button onClick={() => void updateApp()}>อัปเดตเมื่อพร้อม</button>
-          </div>
-        )}
-        {Boolean(error) && (
-          <div className="global-notice">
-            <ErrorNotice
-              error={error}
-              onDismiss={() => setError(null)}
-              onAction={(code) => {
-                setError(null);
-                if (code === 'UNAUTHENTICATED') {
-                  void logout();
-                  return;
-                }
-                if (code === 'GOOGLE_PRIVATE_CONTEXT') {
-                  changePage('chat');
-                  setDialog('conversation');
-                  return;
-                }
-                if (/AI|GOOGLE|HARNESS|SERVER|MEMBER_LIMIT/.test(code)) {
-                  setSettingsTab(
-                    code === 'AI_QUOTA'
-                      ? 'usage'
-                      : code.startsWith('GOOGLE_')
-                        ? 'google'
-                        : code === 'MEMBER_LIMIT'
-                          ? 'team'
-                          : 'ai',
-                  );
-                  changePage('settings');
-                } else if (/STORAGE|DOCUMENT|FILE_INVALID|UPLOAD_PENDING/.test(code)) changePage('documents');
-                else if (code === 'MEMORY_LIMIT') changePage('memory');
-                else if (code === 'ACCESS_DENIED') {
-                  setSession(null);
-                  changePage('chat');
-                } else if (/NETWORK/.test(code)) void refresh().catch(setError);
-              }}
-            />
-          </div>
-        )}
-        <div className={'page ' + (page === 'chat' ? 'chat-page' : '')}>
-          {page === 'chat' && (
-            <Chat
-              {...props}
-              key={tenant + workspaceId}
-              session={session}
-              setSession={setSession}
-              skill={skill}
-              clearSkill={() => setSkill(null)}
-              newSession={() => setDialog('conversation')}
-              prepared={prepared}
-              consumePrepared={consumePrepared}
-              onPrepare={prepareWork}
-            />
-          )}
-          {page === 'documents' && <Documents {...props} />}
-          {page === 'memory' && <Memories {...props} />}
-          {page === 'receipt' && <ReceiptView {...props} />}
-          {page === 'settings' && (
-            <SettingsView
-              {...props}
-              key={tenant}
-              initialTab={settingsTab}
-              onLogout={() => void logout()}
-              onTenantChange={(id) => {
-                setSettingsTab('account');
-                setTenant(id);
-              }}
-            />
-          )}
-          {page === 'skills' && <SkillsHub {...props} onUse={useSkill} />}
-          {page === 'document-tools' && <DocumentTools {...props} onPrepare={prepareWork} />}
-          {page === 'media' && <MediaStudio {...props} onPrepare={prepareWork} />}
-          {page === 'history' && (
-            <History
-              {...props}
-              key={tenant + workspaceId}
-              onOpen={(s) => {
-                setSession(s);
+            {demo && <span className="badge demo">ตัวอย่าง · ไม่ใช่ข้อมูลจริง</span>}
+            <span className="spacer" />
+            <button className="status-item status-button" onClick={() => setPalette(true)}>
+              <Command size={12} />
+              คำสั่ง {mod}K
+            </button>
+          </footer>
+        </main>
+        <div ref={setArtifactSlot} className="artifact-slot" />
+      </div>
+      {Boolean(error) && (
+        <div className="toast-region">
+          <ErrorNotice
+            error={error}
+            onDismiss={() => setError(null)}
+            onAction={(code) => {
+              setError(null);
+              if (code === 'UNAUTHENTICATED') {
+                void logout();
+                return;
+              }
+              if (code === 'GOOGLE_PRIVATE_CONTEXT') {
                 changePage('chat');
-              }}
-            />
-          )}
-          {page === 'help' && <Help onOpen={(p) => changePage(p as Page)} />}
+                setDialog('conversation');
+                return;
+              }
+              if (/AI|GOOGLE|HARNESS|SERVER|MEMBER_LIMIT/.test(code)) {
+                setSettingsTab(
+                  code === 'AI_QUOTA'
+                    ? 'usage'
+                    : code.startsWith('GOOGLE_')
+                      ? 'google'
+                      : code === 'MEMBER_LIMIT'
+                        ? 'team'
+                        : 'ai',
+                );
+                changePage('settings');
+              } else if (/STORAGE|DOCUMENT|FILE_INVALID|UPLOAD_PENDING/.test(code)) changePage('documents');
+              else if (code === 'MEMORY_LIMIT') changePage('memory');
+              else if (code === 'ACCESS_DENIED') {
+                setSession(null);
+                changePage('chat');
+              } else if (/NETWORK/.test(code)) void refresh().catch(setError);
+            }}
+          />
         </div>
-      </main>
+      )}
       {palette && (
         <CommandPalette
           data={data}
           tenant={tenant}
+          sessions={sessions}
           onClose={() => setPalette(false)}
           onPage={(p) => {
             changePage(p as Page);
@@ -652,7 +664,24 @@ export function App() {
             useSkill(s);
             setPalette(false);
           }}
+          onSession={(s) => {
+            setSession(s);
+            changePage('chat');
+            setPalette(false);
+          }}
         />
+      )}
+      {dialog === 'update' && (
+        <Modal title="อัปเดตแอป" onClose={() => setDialog(null)}>
+          <p>บันทึกร่างที่แก้ไขก่อนอัปเดต แอปจะเปิดใหม่ งานที่เริ่มแล้วจะยังอยู่ในระบบ</p>
+          <footer>
+            <button onClick={() => setDialog(null)}>ภายหลัง</button>
+            <button className="primary" onClick={() => void updateApp()}>
+              <Check size={16} />
+              อัปเดตตอนนี้
+            </button>
+          </footer>
+        </Modal>
       )}
       {dialog === 'workspace' && (
         <Modal title="สร้าง workspace" onClose={() => setDialog(null)}>

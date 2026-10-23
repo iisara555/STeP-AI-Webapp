@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
-import { BookOpen, Info, Search } from 'lucide-react';
+import { BookOpen, Info, Search } from './icons.tsx';
 import type { Skill } from '../../packages/harness-core/src/contracts.ts';
-import { Busy, Empty, Modal } from './components.tsx';
+import { Art, Busy, Empty, Modal } from './components.tsx';
 import type { ViewProps } from './App.tsx';
 const scopeText = (value: unknown) => {
   const scope = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
@@ -66,10 +66,10 @@ export function SkillsHub({
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">วิธีทำงานจาก Desktop</p>
-          <h1>Skill</h1>
+          <h1>ศูนย์รวม Skill</h1>
           <p>ค้นหาตามงาน ทีม หรือคำที่ใช้เรียก แล้วตรวจขอบเขตก่อนเริ่ม</p>
         </div>
+        <Art scene="skills" />
       </div>
       <div className="catalog-controls">
         <label className="search">
@@ -99,15 +99,16 @@ export function SkillsHub({
       <div className="skill-grid">
         {shown.map((s) => (
           <article className="skill-card" key={s.id}>
-            <div className="skill-card-icon">
-              <BookOpen size={23} />
-            </div>
             <h2>{s.title}</h2>
             <p>{s.description}</p>
             <code>/{s.skill_key}</code>
             <div className="skill-tags">
               <span className="badge">{s.metadata.webUnsupported ? 'ใช้ใน Desktop' : 'ใช้บนเว็บได้'}</span>
-              <span className="badge">{String(s.metadata.owner || 'common').toUpperCase()}</span>
+              <span className="badge">
+                {s.metadata.owner && s.metadata.owner !== 'common'
+                  ? 'ทีม ' + String(s.metadata.owner).toUpperCase()
+                  : 'ใช้ได้ทุกทีม'}
+              </span>
               {typeof s.metadata.stage === 'string' && (
                 <span className="badge">{s.metadata.stage === 'pilot' ? 'ทดลอง' : s.metadata.stage}</span>
               )}
@@ -126,7 +127,7 @@ export function SkillsHub({
       </div>
       {!shown.length && (
         <Empty
-          icon={<BookOpen size={30} />}
+          art="skills"
           title={skills.length ? 'ไม่พบ Skill ที่ตรงกับคำค้น' : 'กำลังเตรียม Skill ขององค์กร'}
           detail={
             skills.length

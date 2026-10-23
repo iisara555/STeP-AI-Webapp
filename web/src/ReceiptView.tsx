@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, CheckCircle2, Download, FileImage, Receipt, RotateCw, Upload } from 'lucide-react';
+import { Check, CheckCircle2, Download, FileImage, Receipt, RotateCw, ScanText, Upload } from './icons.tsx';
 import type { DocumentRecord, ReceiptResult, Run } from '../../packages/harness-core/src/contracts.ts';
 import { RECEIPT_BUYER, errorView } from '../../packages/harness-core/src/index.ts';
 import type { ViewProps } from './App.tsx';
-import { Busy, Modal } from './components.tsx';
+import { Art, Busy, Modal } from './components.tsx';
 import { prepareReceipt, uploadFile } from './uploads.ts';
 import { saveBlob } from './host.ts';
 const types: Record<ReceiptResult['document_type'], string> = {
@@ -209,18 +209,20 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
       if (token === current.current) fail(e);
     }
   };
+  const askConsent = () =>
+    setConsent({
+      providerName: data.ai?.displayName || 'Google Gemini API',
+      providerConsent: data.ai?.consentId,
+    });
+  const edited = () => {
+    setConfirmed(false);
+    setSaved(false);
+  };
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">อ่านจากต้นฉบับ แล้วตรวจจุดสำคัญ</p>
-          <h1>ตรวจใบเสร็จ AFP</h1>
-          <p>ดูประเภทเอกสาร ข้อมูลที่ครบหรือยังขาด และสิ่งที่ต้องทำต่อ</p>
-        </div>
-        <button className="primary" disabled={busy} onClick={() => input.current?.click()}>
-          <Upload size={17} />
-          เลือกภาพหรือ PDF
-        </button>
+      <div className="receipt-heading">
+        <h1>ตรวจใบเสร็จ AFP</h1>
+        <p>ดูต้นฉบับ แก้ข้อมูลที่อ่านผิด แล้วตรวจยืนยันก่อนใช้ต่อ</p>
       </div>
       <input
         aria-label="เลือกไฟล์อัปโหลด"
@@ -232,13 +234,16 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
           if (e.target.files?.[0]) void upload(e.target.files[0]);
         }}
       />
-      <div className="receipt-layout">
-        <section className="receipt-source">
+      <div className="receipt-grid">
+        <section className="receipt-source" aria-label="ใบเสร็จต้นฉบับ">
           <header>
-            <h2>ต้นฉบับ</h2>
+            <ScanText size={16} />
+            <span>ใบเสร็จต้นฉบับ</span>
             {document?.object_path && (
               <button
+                className="icon-button"
                 aria-label="ดาวน์โหลดต้นฉบับ"
+                title="ดาวน์โหลดต้นฉบับ"
                 onClick={() =>
                   void host
                     .download(document.object_path!)
@@ -246,45 +251,55 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
                     .catch(fail)
                 }
               >
-                <Download size={17} />
+                <Download size={16} />
               </button>
             )}
           </header>
           {document ? (
             <>
               <p className="receipt-filename">{document.name}</p>
-              {preview ? (
-                <div className="receipt-image">
+              <div
+                className="receipt-preview-frame"
+                tabIndex={0}
+                role="region"
+                aria-label="ภาพต้นฉบับ เลื่อนดูได้"
+              >
+                {preview ? (
                   <img src={preview} alt="ต้นฉบับใบเสร็จ" style={{ transform: `rotate(${rotation}deg)` }} />
-                </div>
-              ) : (
-                <div className="receipt-placeholder">
-                  <FileImage size={42} />
-                  <p>เอกสาร PDF · เปิดต้นฉบับจากปุ่มดาวน์โหลดเพื่อตรวจเทียบ</p>
-                </div>
-              )}
+                ) : (
+                  <div className="receipt-placeholder">
+                    <FileImage size={36} />
+                    <p>เอกสาร PDF · เปิดต้นฉบับจากปุ่มดาวน์โหลดเพื่อตรวจเทียบ</p>
+                  </div>
+                )}
+              </div>
               <div className="inline-actions">
                 {localFile.current?.type.startsWith('image/') && (
                   <button disabled={busy} onClick={() => void rotate()}>
-                    <RotateCw size={16} />
+                    <RotateCw size={15} />
                     หมุนภาพ
                   </button>
                 )}
                 <button disabled={busy} onClick={() => input.current?.click()}>
+                  <Upload size={15} />
                   เปลี่ยนไฟล์
                 </button>
               </div>
             </>
           ) : (
-            <button className="upload-area" disabled={busy} onClick={() => input.current?.click()}>
-              <FileImage size={44} />
-              <strong>เลือกใบเสร็จหนึ่งใบต่อไฟล์</strong>
-              <span>
-                ภาพหรือ PDF ไม่เกิน 10 MB
-                <br />
-                ถ่ายให้เห็นทั้งใบและตัวอักษรชัด
-              </span>
-            </button>
+            <>
+              <div className="receipt-empty">
+                <Art scene="receipt" />
+                <p>เลือกรูปหรือ PDF ของใบเสร็จ เพื่อเริ่มตรวจข้อมูล</p>
+              </div>
+              <button className="primary receipt-pick" disabled={busy} onClick={() => input.current?.click()}>
+                <Upload size={16} />
+                เลือกใบเสร็จ
+              </button>
+              <p className="receipt-support">
+                รองรับ PDF, PNG, JPG, WebP ขนาดไม่เกิน 10 MB · หนึ่งใบต่อไฟล์ ถ่ายให้เห็นทั้งใบและตัวอักษรชัด
+              </p>
+            </>
           )}
           {receipts.length > 0 && (
             <label className="existing-file">
@@ -316,9 +331,9 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
             </p>
           ))}
         </section>
-        <section className="receipt-result">
+        <div className="receipt-form">
           {busy ? (
-            <div className="receipt-waiting">
+            <section className="receipt-review-section">
               <Busy
                 label={
                   run?.status === 'queued'
@@ -328,184 +343,155 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
                       : 'กำลังเตรียมภาพ'
                 }
               />
-              <p>ต้นฉบับยังเก็บไว้ ผลที่อ่านได้จะให้คุณตรวจอีกครั้ง</p>
-            </div>
+              <p className="muted">ต้นฉบับยังเก็บไว้ ผลที่อ่านได้จะให้คุณตรวจอีกครั้ง</p>
+            </section>
           ) : result ? (
             <>
-              <div className="result-section">
-                <span className="step-number">1</span>
-                <div>
-                  <h2>ใบเสร็จประเภทไหน</h2>
-                  <select
-                    aria-label="ประเภทใบเสร็จ"
-                    value={result.document_type}
-                    onChange={(e) => {
-                      setResult({
-                        ...result,
-                        document_type: e.target.value as ReceiptResult['document_type'],
-                      });
-                      setConfirmed(false);
-                      setSaved(false);
-                    }}
-                  >
-                    {Object.entries(types).map(([key, title]) => (
-                      <option key={key} value={key}>
-                        {title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="result-section">
-                <span className="step-number">2</span>
-                <div>
-                  <h2>องค์ประกอบครบหรือไม่</h2>
-                  <p className="result-summary">
-                    {result.complete === 'complete'
-                      ? 'พบข้อมูลหลักครบ · รอตรวจเทียบต้นฉบับ'
-                      : result.complete === 'incomplete'
-                        ? 'มีข้อมูลที่ยังขาดหรือไม่ตรง'
-                        : 'ยังต้องตรวจข้อมูลบางจุด'}
-                  </p>
-                  <p className="muted small">
-                    ลายเซ็นผู้รับเงิน:{' '}
-                    {result.signature === 'present'
-                      ? 'พบรอยลายเซ็น'
-                      : result.signature === 'absent'
-                        ? 'ไม่พบ'
-                        : 'ยังระบุไม่ได้'}
-                  </p>
-                  <div className="check-list">
-                    {result.checks.map((check, i) => (
-                      <div key={i} className="receipt-check">
-                        <div>
-                          <strong>{check.field}</strong>
-                          <span className={'check-status ' + check.status}>{statuses[check.status]}</span>
-                        </div>
-                        <input
-                          aria-label={'แก้ไข ' + check.field}
-                          value={check.value || ''}
-                          placeholder={
-                            check.status === 'uncertain' ? 'ตรวจจากต้นฉบับแล้วกรอก' : 'ยังไม่มีข้อมูล'
-                          }
-                          onChange={(e) => {
-                            setResult({
-                              ...result,
-                              checks: result.checks.map((c, n) =>
-                                n === i ? { ...c, value: e.target.value } : c,
-                              ),
-                            });
-                            setConfirmed(false);
-                            setSaved(false);
-                          }}
-                        />
-                        {check.evidence && <small>อ่านได้ว่า: {check.evidence}</small>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="result-section">
-                <span className="step-number">3</span>
-                <div>
-                  <h2>ต้องทำอะไรต่อ</h2>
-                  <ul>
-                    {result.next_steps.map((step, i) => (
-                      <li key={i}>{step}</li>
-                    ))}
-                  </ul>
-                  {result.warnings.map((warning, i) => (
-                    <p className="warning-note" key={i}>
-                      {warning}
-                    </p>
-                  ))}
-                </div>
-              </div>
-              <div className="receipt-confirm">
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={confirmed}
-                    onChange={(e) => {
-                      setConfirmed(e.target.checked);
-                      setSaved(false);
-                    }}
-                  />
-                  ตรวจข้อมูลที่แสดงกับต้นฉบับ และแก้ส่วนที่อ่านผิดแล้ว
-                </label>
-                <button
-                  className="primary"
-                  disabled={!confirmed || busy || saved}
-                  onClick={() => void save()}
+              <section className="receipt-review-section">
+                <h2>ใบเสร็จประเภทไหน</h2>
+                <select
+                  aria-label="ประเภทใบเสร็จ"
+                  value={result.document_type}
+                  onChange={(e) => {
+                    setResult({ ...result, document_type: e.target.value as ReceiptResult['document_type'] });
+                    edited();
+                  }}
                 >
-                  {saved ? (
-                    <>
-                      <CheckCircle2 size={17} />
-                      บันทึกผลตรวจแล้ว
-                    </>
-                  ) : (
-                    <>
-                      <Check size={17} />
-                      บันทึกผลตรวจ
-                    </>
-                  )}
-                </button>
-                <p className="small muted">
-                  ผลตรวจช่วยเตรียมเอกสาร ไม่ใช่การอนุมัติเบิกจ่ายหรือรับรองลายเซ็น
+                  {Object.entries(types).map(([key, title]) => (
+                    <option key={key} value={key}>
+                      {title}
+                    </option>
+                  ))}
+                </select>
+              </section>
+              <section className="receipt-review-section">
+                <h2>องค์ประกอบครบหรือไม่</h2>
+                <p className="result-summary">
+                  {result.complete === 'complete'
+                    ? 'พบข้อมูลหลักครบ · รอตรวจเทียบต้นฉบับ'
+                    : result.complete === 'incomplete'
+                      ? 'มีข้อมูลที่ยังขาดหรือไม่ตรง'
+                      : 'ยังต้องตรวจข้อมูลบางจุด'}
                 </p>
-              </div>
+                <p className="muted small">
+                  ลายเซ็นผู้รับเงิน:{' '}
+                  {result.signature === 'present'
+                    ? 'พบรอยลายเซ็น'
+                    : result.signature === 'absent'
+                      ? 'ไม่พบ'
+                      : 'ยังระบุไม่ได้'}
+                </p>
+                {result.checks.map((check, i) => (
+                  <div key={i} className={'receipt-value-row ' + check.status}>
+                    <div>
+                      <strong>{check.field}</strong>
+                      <span className={'check-status ' + check.status}>{statuses[check.status]}</span>
+                    </div>
+                    <input
+                      aria-label={'แก้ไข ' + check.field}
+                      value={check.value || ''}
+                      placeholder={check.status === 'uncertain' ? 'ตรวจจากต้นฉบับแล้วกรอก' : 'ยังไม่มีข้อมูล'}
+                      onChange={(e) => {
+                        setResult({
+                          ...result,
+                          checks: result.checks.map((c, n) =>
+                            n === i ? { ...c, value: e.target.value } : c,
+                          ),
+                        });
+                        edited();
+                      }}
+                    />
+                    {check.evidence && <small>อ่านได้ว่า: {check.evidence}</small>}
+                  </div>
+                ))}
+              </section>
+              <section className="receipt-review-section">
+                <h2>ทำอะไรต่อ</h2>
+                <ul>
+                  {result.next_steps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ul>
+                {result.warnings.map((warning, i) => (
+                  <p className="warning-note" key={i}>
+                    {warning}
+                  </p>
+                ))}
+                <div className="receipt-confirm">
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={confirmed}
+                      onChange={(e) => {
+                        setConfirmed(e.target.checked);
+                        setSaved(false);
+                      }}
+                    />
+                    ตรวจข้อมูลที่แสดงกับต้นฉบับ และแก้ส่วนที่อ่านผิดแล้ว
+                  </label>
+                  <div className="inline-actions">
+                    <button
+                      className="primary"
+                      disabled={!confirmed || busy || saved}
+                      onClick={() => void save()}
+                    >
+                      {saved ? <CheckCircle2 size={16} /> : <Check size={16} />}
+                      {saved ? 'บันทึกผลตรวจแล้ว' : 'บันทึกผลตรวจ'}
+                    </button>
+                    <button disabled={data.ai?.textOnly} onClick={askConsent}>
+                      ตรวจจากภาพอีกครั้ง
+                    </button>
+                  </div>
+                  <p className="small muted">
+                    ผลตรวจช่วยเตรียมเอกสาร ไม่ใช่การอนุมัติเบิกจ่ายหรือรับรองลายเซ็น
+                  </p>
+                </div>
+              </section>
             </>
           ) : (
-            <div className="receipt-intro">
-              <div className="empty-icon">
-                <Receipt size={32} />
-              </div>
-              <h2>ตรวจเฉพาะสิ่งที่ต้องรู้ก่อนเบิก</h2>
-              <ol>
-                <li>ใบเสร็จประเภทไหน</li>
-                <li>ข้อมูลหลักครบตามเอกสารหรือไม่</li>
-                <li>ต้องแก้ไขหรือเตรียมอะไรเพิ่ม</li>
-              </ol>
-              <button
-                className="primary"
-                disabled={!document || busy || data.ai?.textOnly}
-                onClick={() =>
-                  setConsent({
-                    providerName: data.ai?.displayName || 'Google Gemini API',
-                    providerConsent: data.ai?.consentId,
-                  })
-                }
-              >
-                เริ่มตรวจใบเสร็จ
-              </button>
-            </div>
+            <>
+              <section className="receipt-review-section">
+                <h2>ตรวจเฉพาะสิ่งที่ต้องรู้ก่อนเบิก</h2>
+                <p className="muted">
+                  {document
+                    ? 'ส่งใบเสร็จนี้ให้ AI อ่าน แล้วตรวจผลกับต้นฉบับทีละจุด'
+                    : 'เลือกใบเสร็จด้านซ้าย แล้วระบบจะแสดงจุดที่ต้องตรวจ'}
+                </p>
+                <ol>
+                  <li>ใบเสร็จประเภทไหน</li>
+                  <li>ข้อมูลหลักครบตามเอกสารหรือไม่</li>
+                  <li>ต้องแก้ไขหรือเตรียมอะไรเพิ่ม</li>
+                </ol>
+              </section>
+              <section className="receipt-review-section">
+                <h2>ทำอะไรต่อ</h2>
+                <button
+                  className="primary"
+                  disabled={!document || busy || data.ai?.textOnly}
+                  onClick={askConsent}
+                >
+                  เริ่มตรวจใบเสร็จ
+                </button>
+                <p className="small muted receipt-note">
+                  ผลตรวจช่วยเตรียมเอกสาร ไม่ใช่การอนุมัติเบิกจ่าย เก็บต้นฉบับและยืนยันเงื่อนไขกับ AFP
+                </p>
+              </section>
+            </>
           )}
-          {result && !busy && (
-            <button
-              className="text-button"
-              disabled={data.ai?.textOnly}
-              onClick={() =>
-                setConsent({
-                  providerName: data.ai?.displayName || 'Google Gemini API',
-                  providerConsent: data.ai?.consentId,
-                })
-              }
-            >
-              ตรวจจากภาพอีกครั้ง
-            </button>
-          )}
-        </section>
+          <section className="receipt-review-section">
+            <details>
+              <summary>ข้อมูลผู้ซื้อที่ใช้ตรวจเทียบ</summary>
+              <p className="muted">
+                {RECEIPT_BUYER.name}
+                <br />
+                {RECEIPT_BUYER.address}
+                <br />
+                เลขประจำตัวผู้เสียภาษี 0-9940-00423-17-9
+              </p>
+            </details>
+          </section>
+        </div>
       </div>
-      <details className="buyer-reference">
-        <summary>ข้อมูลผู้ซื้อที่ใช้ตรวจเทียบ</summary>
-        <p>
-          {RECEIPT_BUYER.name}
-          <br />
-          {RECEIPT_BUYER.address}
-          <br />
-          เลขประจำตัวผู้เสียภาษี 0-9940-00423-17-9
-        </p>
-      </details>
       {history.length > 0 && (
         <section className="receipt-history">
           <h2>ผลตรวจล่าสุด</h2>

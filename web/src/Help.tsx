@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CircleHelp, ExternalLink, Search, Download } from 'lucide-react';
+import { ExternalLink, Search, Download } from './icons.tsx';
 import {
   DESKTOP_BASELINE,
   DESKTOP_FEATURES,
@@ -20,11 +20,9 @@ export function Help({ onOpen }: { onOpen: (page: string) => void }) {
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">คู่มือและความสามารถ</p>
           <h1>รู้จัก STeP AI</h1>
           <p>อ้างอิง Desktop {DESKTOP_BASELINE.version} · ตรวจได้ว่าหน้าเว็บรองรับส่วนใดแล้ว</p>
         </div>
-        <CircleHelp size={30} />
       </div>
       <section className="guide-start">
         <h2>เริ่มทำงาน</h2>
@@ -68,8 +66,8 @@ export function Help({ onOpen }: { onOpen: (page: string) => void }) {
           <article key={f.id}>
             <header>
               <div>
-                <small className="muted">{f.category}</small>
                 <h2>{f.title}</h2>
+                <small>{f.category}</small>
               </div>
               <span className="badge">{FEATURE_STATUS[f.status as FeatureStatus]}</span>
             </header>
