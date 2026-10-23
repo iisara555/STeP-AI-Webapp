@@ -17,3 +17,7 @@ supabase/.branches/
 *.age
 *.log
 .DS_Store
+# Impeccable local state: design-hook cache and review captures stay on this machine.
+web/.impeccable/hook.cache.json
+web/.impeccable/review/
+web/.impeccable/questions/

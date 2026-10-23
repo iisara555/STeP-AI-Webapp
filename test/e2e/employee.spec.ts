@@ -2,10 +2,18 @@ import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import JSZip from 'jszip';
 import { readFile } from 'node:fs/promises';
+// Tools live under "เครื่องมือ" in the sidebar, as on Desktop. A tool's name may carry a status badge (ทดลอง).
 async function menu(page: Page, name: string) {
   const open = page.getByRole('button', { name: 'เปิดเมนู', exact: true });
   if (await open.isVisible()) await open.click();
-  await page.getByRole('navigation', { name: 'เมนูหลัก' }).getByRole('button', { name, exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'เครื่องมือ' })
+    .getByRole('button', { name: new RegExp('^' + name) })
+    .click();
+}
+async function theme(page: Page, label: 'สว่าง' | 'มืด' | 'ตามระบบ') {
+  await page.getByRole('button', { name: 'เมนู STeP', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: label, exact: true }).click();
 }
 test('login clearly separates unconfigured access from the synthetic preview', async ({ page }) => {
   await page.goto('/');
@@ -16,10 +24,8 @@ test('login clearly separates unconfigured access from the synthetic preview', a
 });
 test('employee can create a private conversation, review consent and receive a result', async ({ page }) => {
   await page.goto('/?demo=1');
-  const menuButton = page.getByRole('button', { name: 'เปิดเมนู', exact: true });
-  if (await menuButton.isVisible()) await menuButton.click();
-  await page.getByRole('button', { name: 'เริ่มงานใหม่', exact: true }).first().click();
-  await page.getByRole('dialog').getByRole('button', { name: 'เริ่มงาน', exact: true }).click();
+  // As on Desktop, typing on the home screen starts a private task; consent still comes before any AI call.
+  await expect(page.getByRole('heading', { name: /ให้ AI ร่างงานหนัก/ })).toBeVisible();
   await page.getByRole('textbox', { name: 'ข้อความถึง AI' }).fill('ช่วยวางโครงร่างเอกสารตัวอย่าง');
   await page.getByRole('button', { name: 'ส่งข้อความ' }).click();
   const consent = page.getByRole('dialog');
@@ -33,9 +39,10 @@ test('employee can create a private conversation, review consent and receive a r
   await page.getByRole('button', { name: 'ใช้เป็นร่าง' }).click();
   await expect(page.getByRole('textbox', { name: 'ร่างเอกสาร' })).toHaveValue(/นี่คือคำตอบตัวอย่าง/);
   await page.getByRole('button', { name: 'บันทึก', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Word (.docx)', exact: true })).toBeVisible();
+  await expect(page.getByText('ร่าง Markdown · บันทึกแล้ว')).toBeVisible();
   const downloaded = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Word (.docx)', exact: true }).click();
+  await expect(page.getByLabel('รูปแบบไฟล์', { exact: true })).toHaveValue('docx');
+  await page.getByRole('button', { name: 'ส่งออก', exact: true }).click();
   const file = await downloaded;
   expect(file.suggestedFilename()).toMatch(/\.docx$/);
   const archive = await JSZip.loadAsync(await readFile((await file.path())!));
@@ -167,11 +174,71 @@ test('admin can review a free model trial, consent once and clear its temporary 
 test('main screens fit the viewport and pass essential accessibility checks', async ({ page }) => {
   test.setTimeout(90000);
   await page.goto('/?demo=1');
-  for (const tab of ['Skill', 'เอกสาร', 'ความจำ', 'ตรวจใบเสร็จ AFP']) {
+  for (const tab of ['ศูนย์รวม Skill', 'เอกสาร', 'ความจำ', 'ตรวจใบเสร็จ AFP']) {
     await menu(page, tab);
     await expect(page.getByRole('heading', { name: tab, exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
     expect(result.violations.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target) }))).toEqual([]);
   }
+});
+test('dark theme keeps task, notice and receipt states readable', async ({ page }) => {
+  test.setTimeout(90000);
+  const axe = async () =>
+    (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()).violations.map((v) => ({
+      id: v.id,
+      nodes: v.nodes.map((n) => n.target),
+    }));
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/');
+  // The sign-in screen sits on a flat theme surface, so its text contrast is measurable in dark mode too.
+  expect(await axe()).toEqual([]);
+  await page.goto('/?demo=1');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'system');
+  await page.getByRole('textbox', { name: 'ข้อความถึง AI' }).fill('งานสังเคราะห์สำหรับตรวจธีมมืด');
+  await page.getByRole('button', { name: 'ส่งข้อความ' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'เริ่มงาน', exact: true }).click();
+  await expect(page.getByText('นี่คือคำตอบตัวอย่างสำหรับตรวจหน้าจอครับ', { exact: false })).toBeVisible({
+    timeout: 15000,
+  });
+  const open = page.getByRole('button', { name: 'เปิดเมนู', exact: true });
+  if (await open.isVisible()) await open.click();
+  // The opened task carries the selected state and its active marker.
+  await expect(page.locator('.session-open[aria-current="true"]')).toBeVisible();
+  expect(await axe()).toEqual([]);
+  if (await open.isVisible()) await page.getByRole('button', { name: 'ปิดเมนู', exact: true }).click();
+  await menu(page, 'เอกสาร');
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'synthetic-dark.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('ข้อมูลสังเคราะห์'),
+  });
+  await expect(page.locator('.success-notice')).toBeVisible();
+  expect(await axe()).toEqual([]);
+  await menu(page, 'ตรวจใบเสร็จ AFP');
+  // Pages load on first open; upload only once the receipt page itself is showing.
+  await expect(page.getByRole('heading', { name: 'ตรวจใบเสร็จ AFP', exact: true })).toBeVisible();
+  const image = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 600;
+    canvas.height = 800;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, 600, 800);
+    ctx.fillStyle = 'black';
+    ctx.fillText('SYNTHETIC RECEIPT - TEST ONLY', 30, 100);
+    return canvas.toDataURL('image/png').split(',')[1];
+  });
+  await page.getByLabel('เลือกไฟล์อัปโหลด', { exact: true }).setInputFiles({
+    name: 'synthetic-dark-receipt.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(image, 'base64'),
+  });
+  await expect(page.getByRole('button', { name: 'เริ่มตรวจใบเสร็จ', exact: true })).toBeEnabled({
+    timeout: 20000,
+  });
+  await page.getByRole('button', { name: 'เริ่มตรวจใบเสร็จ', exact: true }).click();
+  await page.getByRole('button', { name: 'ยืนยันและเริ่มตรวจ' }).click();
+  await expect(page.locator('.check-status.found').first()).toBeVisible({ timeout: 15000 });
+  expect(await axe()).toEqual([]);
 });
