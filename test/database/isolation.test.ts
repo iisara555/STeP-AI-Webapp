@@ -9,6 +9,49 @@ before(async () => {
 after(async () => {
   await db?.close();
 });
+test('history title, draft and message searches cannot reveal another owner or tenant, including to admins', async () => {
+  const session = crypto.randomUUID();
+  await db.query(
+    `insert into public.sessions(id,tenant_id,owner_id,title,draft) values($1,$2,$3,'synthetic needle','50% literal')`,
+    [session, ids.tenant, ids.alice],
+  );
+  await db.query(
+    `insert into public.messages(tenant_id,session_id,role,body) values($1,$2,'user','synthetic needle')`,
+    [ids.tenant, session],
+  );
+  for (const who of [ids.alice, ids.bob, ids.admin, ids.outsider])
+    await asUser(db, who, async () => {
+      const count = who === ids.alice ? 1 : 0;
+      assert.equal(
+        (
+          await db.query('select id from public.sessions where tenant_id=$1 and title ilike $2', [
+            ids.tenant,
+            '%needle%',
+          ])
+        ).rows.length,
+        count,
+      );
+      assert.equal(
+        (
+          await db.query('select id from public.sessions where tenant_id=$1 and draft ilike $2', [
+            ids.tenant,
+            '%50\\%%',
+          ])
+        ).rows.length,
+        count,
+      );
+      assert.equal(
+        (
+          await db.query('select session_id from public.messages where tenant_id=$1 and body ilike $2', [
+            ids.tenant,
+            '%needle%',
+          ])
+        ).rows.length,
+        count,
+      );
+    });
+  await db.query('delete from public.sessions where id=$1', [session]);
+});
 test('SQL migrations compile in real Postgres with pgvector', async () => {
   const result = await db.query<{ n: number }>(
     "select count(*)::integer n from pg_policies where schemaname='public'",

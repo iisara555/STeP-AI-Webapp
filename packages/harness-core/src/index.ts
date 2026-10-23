@@ -122,6 +122,20 @@ export function boundedContext(parts: string[], maxTokens: number = LIMITS.conte
 }
 export function errorView(code: string): ErrorView {
   const known: Record<string, ErrorView> = {
+    CONTEXT_LIMIT: {
+      title: 'แหล่งข้อมูลบังคับใหญ่เกินบริบทที่รองรับ',
+      detail:
+        'ระบบยังไม่ได้ส่งคำขอนี้ให้ AI ให้ผู้ดูแลตรวจชุด Skill หรือแบ่งงานให้เล็กลง โดยคงแหล่งข้อมูลบังคับให้ครบ',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    HARNESS_INCOMPLETE: {
+      title: 'Skill หรือเอกสารประกอบยังไม่พร้อม',
+      detail:
+        'ให้ผู้ดูแลนำเข้าชุด Harness ที่ตรวจแล้ว ก่อนใช้แบบฟอร์มนี้ คุณยังเก็บร่างและเริ่มบทสนทนาทั่วไปได้',
+      action: 'ดูการตั้งค่า',
+      retry: false,
+    },
     OPENROUTER_NOT_CONFIGURED: {
       title: 'ช่องทดลอง OpenRouter ยังไม่พร้อมใช้',
       detail: 'ให้ผู้ดูแลเซิร์ฟเวอร์ตั้ง OPENROUTER_API_KEY และ OPENROUTER_TRIAL_TENANT_ID สำหรับองค์กรนี้',

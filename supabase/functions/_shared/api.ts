@@ -6,7 +6,12 @@ import {
   selectMemories,
   validateMemory,
 } from '../../../packages/harness-core/src/index.ts';
-import type { Memory, Conversation, DocumentRecord } from '../../../packages/harness-core/src/contracts.ts';
+import type {
+  Memory,
+  Conversation,
+  DocumentRecord,
+  Skill,
+} from '../../../packages/harness-core/src/contracts.ts';
 import {
   authenticate,
   checked,
@@ -29,6 +34,7 @@ import { validFile } from './files.ts';
 import { receiptSchema } from './receipt.ts';
 import { openrouter, trialConfigured } from './openrouter.ts';
 import { aiService, requireProviderConsent } from './ai.ts';
+import { literalSearch } from '../../../packages/harness-core/src/desktop-workflows.ts';
 
 const uuid = z.string().uuid();
 const visibility = z.enum(['private', 'workspace']);
@@ -222,7 +228,13 @@ export async function dispatch(
       return { ok: true };
     }
     case 'session.create': {
-      const p = tenantRequest.extend({ workspace: uuid.nullable(), visibility }).parse(input);
+      const p = tenantRequest
+        .extend({
+          workspace: uuid.nullable(),
+          visibility,
+          title: z.string().trim().min(1).max(160).default('เริ่มงานใหม่'),
+        })
+        .parse(input);
       return checked(
         db
           .from('sessions')
@@ -231,10 +243,44 @@ export async function dispatch(
             owner_id: actor.user.id,
             workspace_id: p.workspace,
             visibility: p.visibility,
+            title: p.title,
           })
           .select()
           .single(),
       );
+    }
+    case 'session.search': {
+      const p = tenantRequest.extend({ query: z.string().trim().min(1).max(100) }).parse(input);
+      const pattern = literalSearch(p.query);
+      // User-scoped queries retain RLS on both messages and sessions. No service client/search provider.
+      const [titles, drafts, messages] = await Promise.all([
+        checked(db.from('sessions').select('id').eq('tenant_id', p.tenant).ilike('title', pattern).limit(50)),
+        checked(db.from('sessions').select('id').eq('tenant_id', p.tenant).ilike('draft', pattern).limit(50)),
+        checked(
+          db.from('messages').select('session_id').eq('tenant_id', p.tenant).ilike('body', pattern).limit(50),
+        ),
+      ]);
+      const ids = [
+        ...new Set([...titles, ...drafts].map((s) => s.id).concat(messages.map((m) => m.session_id))),
+      ];
+      if (!ids.length) return [];
+      return checked(
+        db
+          .from('sessions')
+          .select('*')
+          .eq('tenant_id', p.tenant)
+          .in('id', ids)
+          .order('created_at', { ascending: false })
+          .limit(50),
+      );
+    }
+    case 'skill.read': {
+      const p = tenantRequest.extend({ key: z.string().regex(/^[a-zA-Z0-9_-]{1,120}$/) }).parse(input);
+      const skill = await checked<Skill | null>(
+        db.from('skills').select('*').eq('tenant_id', p.tenant).eq('skill_key', p.key).maybeSingle(),
+      );
+      if (!skill || skill.metadata.developerOnly) throw new Error('ACCESS_DENIED');
+      return skill;
     }
     case 'session.read': {
       const p = resource.parse(input);

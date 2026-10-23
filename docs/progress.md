@@ -1,5 +1,50 @@
 # Progress
 
+## 2026-10-23 · Desktop workflows and complete product reference
+
+- Audited Desktop 0.6.20 at `90ee71ca667c63284afe4996eddc7e8095b9a059`.
+  Added a searchable Thai reference covering 32 feature groups and all 91 top-level
+  renderer modules, with pinned source links and a SHA-256 inventory. Statuses
+  distinguish web support, partial support and capabilities still requiring Desktop.
+- Added the original five document profiles/variants, team starters, internal-media
+  Prompt compiler, Thai dates and Word presentation presets. Forms prepare private
+  drafts/conversations and still require the existing per-request AI consent.
+  Media preparation is local; no image-generation API or external publication is added.
+- Added Skill search/team filters/details, source gaps and command search, title/body/draft
+  history search under user RLS, theme selection before first paint, original symbol
+  artwork, CI colours and a collapsible desktop rail. Word supports Markdown headings,
+  bullets/tables, three A4 presets and page numbers; native rich editing/font embedding
+  and institutional-template acceptance remain separate.
+- Extended private Harness export with 66 non-executable Skill-local references,
+  templates and examples: 106 sources / 48 Skills in the reviewed baseline pack.
+  Paths/symlinks, restricted registry entries, size and credential checks remain enforced.
+  Worker retrieval and the upstream verifier exclude working references from organization
+  knowledge. Mandatory sources remain complete or stop on context limits; missing
+  originals remain explicit gaps. No source bodies or staff records enter public Git.
+- Validation: type/format and production build passed; 38 synthetic unit/API/PWA,
+  27 PostgreSQL (PGlite) and 30 desktop/mobile browser tests passed. Browser checks
+  include Word XML/layout, local media preparation, consent, history, Skill details,
+  responsive layout and WCAG A/AA in both themes. Original private retrieval 61/61
+  and buyer identity 3/3 passed; all 91 upstream module hashes were verified.
+- The production Docker image built with TLS verification and the environment proxy/CA.
+  Its dedicated local container is healthy, non-root (`101:101`) and read-only;
+  static hosting/CSP/PWA/OAuth callback smoke passed. GitHub Actions run 39875584009
+  passed on the reviewed implementation head. These are local/CI checks, not homelab
+  or live provider acceptance.
+- A later CI accessibility check caught an intermediate theme frame with yellow
+  text over a transitioning light background. Button ink/background now switch
+  together; only the border transition remains. Immediate theme checks are retained
+  without sleeps, disabled contrast rules or automatic test retries.
+- Main's existing homelab/backend changes (#4/#5) are integrated. Matching API/worker
+  deployment and operator import of the expanded private pack are still required for
+  the new routes/context. The hosted project remains on the previously recorded
+  function/pack versions; no live inference, Google write, paid usage, source import
+  or real homelab installation was performed for this change.
+- The complete capability reference records remaining work: personal Skill approval,
+  recurring user schedules, Tasks/Gmail writes, learning/maintenance, rich/native Office,
+  browser/Vault/MCP/process tools, voice and image generation. No placeholder action
+  claims these have been ported. See [Desktop details](desktop-reference.md).
+
 ## 2026-10-22 · Homelab pilot preparation
 
 - Added a reproducible multi-stage Docker build and Compose service for the static

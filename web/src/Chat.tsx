@@ -26,6 +26,9 @@ import { ApiError, saveBlob } from './host.ts';
 import { Busy, Empty, Modal, Visibility } from './components.tsx';
 import type { ViewProps } from './App.tsx';
 import { exportWord } from './extract.ts';
+import { startersFor, starterTeams } from '../../packages/harness-core/vendor/desktop/starters.ts';
+import { parseDocumentOutput } from '../../packages/harness-core/vendor/desktop/document-output.ts';
+import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
 type Plan = {
   provider: string;
   providerConsent: string;
@@ -45,12 +48,18 @@ export function Chat({
   skill,
   clearSkill,
   newSession,
+  prepared,
+  consumePrepared,
+  onPrepare,
 }: ViewProps & {
   session: Conversation | null;
   setSession: (s: Conversation | null) => void;
   skill: Skill | null;
   clearSkill: () => void;
   newSession: () => void;
+  prepared: { sessionId: string; text: string } | null;
+  consumePrepared: () => void;
+  onPrepare: (work: PreparedWork) => Promise<void>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]),
     [run, setRun] = useState<Run | null>(null),
@@ -65,16 +74,21 @@ export function Chat({
     [draft, setDraft] = useState('');
   const [source, setSource] = useState<{ title: string; body: string } | null>(null),
     [remember, setRemember] = useState<ChatMessage | null>(null);
+  const [starterTeam, setStarterTeam] = useState(''),
+    [starting, setStarting] = useState(false);
+  const [wordPreset, setWordPreset] = useState<'saraban' | 'report' | 'book'>('report');
+  const draftInput = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null),
     currentSession = useRef(session?.id);
   currentSession.current = session?.id;
   useEffect(() => {
     setMessages([]);
     setRun(null);
-    setText('');
+    setText(prepared && prepared.sessionId === session?.id ? prepared.text : '');
+    if (prepared?.sessionId === session?.id) consumePrepared();
     setDocuments([]);
     setPlan(null);
-    setDraftOpen(false);
+    setDraftOpen(Boolean(prepared?.sessionId === session?.id && session?.draft));
     setDraft(session?.draft || '');
     if (!session) return;
     const id = session.id;
@@ -237,8 +251,9 @@ export function Chat({
   if (!session)
     return (
       <div className="chat-welcome">
-        <div className="welcome-mark">
-          STeP<span>AI</span>
+        <div className="welcome-mark brand-logo">
+          <img className="brand-colour" src="/step-symbol-colour.svg" alt="STeP" />
+          <img className="brand-white" src="/step-symbol-mono-white.svg" alt="STeP" />
         </div>
         <p className="eyebrow">จากคำขอ สู่งานที่ใช้ต่อได้</p>
         <h1>{skill ? skill.title : 'วันนี้อยากให้ช่วยเรื่องอะไร'}</h1>
@@ -251,6 +266,38 @@ export function Chat({
           <Plus size={19} />
           เริ่มงานใหม่
         </button>
+        <section className="team-starters">
+          <label>
+            ตัวอย่างงานตามทีม
+            <select value={starterTeam} onChange={(e) => setStarterTeam(e.target.value)}>
+              <option value="">งานทั่วไป</option>
+              {starterTeams.map((team) => (
+                <option key={team} value={team}>
+                  {team.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          {startersFor(starterTeam).map((starter) => (
+            <button
+              key={starter.th}
+              disabled={starting}
+              onClick={async () => {
+                setStarting(true);
+                try {
+                  await onPrepare({ title: starter.tag.th, draft: '', message: starter.th });
+                } catch (error) {
+                  fail(error);
+                } finally {
+                  setStarting(false);
+                }
+              }}
+            >
+              <small>{starter.tag.th}</small>
+              {starter.th}
+            </button>
+          ))}
+        </section>
         <div className="welcome-features">
           <span>
             <Brain size={19} />
@@ -355,7 +402,12 @@ export function Chat({
                   </button>
                   <button
                     onClick={() => {
-                      setDraft(m.body);
+                      try {
+                        const match = /<document_draft>/.test(m.body);
+                        setDraft(match ? parseDocumentOutput(m.body, 'tor').draft : m.body);
+                      } catch {
+                        setDraft(m.body);
+                      }
                       setDraftOpen(true);
                     }}
                   >
@@ -469,12 +521,39 @@ export function Chat({
               <X size={18} />
             </button>
           </header>
+          <div className="draft-toolbar">
+            <button onClick={() => setDraft((d) => d + '\n\n## หัวข้อ\n')}>หัวข้อ</button>
+            <button onClick={() => setDraft((d) => d + '\n- รายการ\n')}>รายการ</button>
+            <button
+              onClick={() =>
+                setDraft((d) => d + '\n\n| หัวข้อ | รายละเอียด |\n| --- | --- |\n| รายการ | รอยืนยัน |\n')
+              }
+            >
+              ตาราง
+            </button>
+            <label>
+              รูปแบบ Word
+              <select
+                aria-label="รูปแบบ Word"
+                value={wordPreset}
+                onChange={(e) => setWordPreset(e.target.value as typeof wordPreset)}
+              >
+                <option value="saraban">สารบรรณ · 16 pt</option>
+                <option value="report">รายงาน · 14 pt</option>
+                <option value="book">หนังสือ · 16 pt</option>
+              </select>
+            </label>
+          </div>
           <textarea
+            ref={draftInput}
             aria-label="ร่างเอกสาร"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="ใช้คำตอบเป็นร่าง หรือเริ่มพิมพ์เองได้"
           />
+          <p className="small muted draft-note">
+            ร่าง Markdown · Word ยังไม่ฝังฟอนต์หรือตราครุฑ ตรวจรูปแบบกับแบบของหน่วยงานก่อนใช้
+          </p>
           <footer>
             <button
               onClick={() =>
@@ -494,7 +573,7 @@ export function Chat({
             </button>
             <button
               disabled={!draft.trim()}
-              onClick={() => void exportWord(draft, session.title).catch(fail)}
+              onClick={() => void exportWord(draft, session.title, wordPreset).catch(fail)}
             >
               <Download size={15} />
               Word (.docx)
