@@ -1,5 +1,24 @@
 # Progress
 
+## 2026-10-24 · Production rollout of #12 (profile, assistant and answer style)
+
+- Merged #12 after CI passed. Before changing anything, hosted migrations matched the 12 in the repo and
+  the deployed API source matched main file-for-file (only the type-only `contracts.ts` differs).
+- Applied `20261023120000_member_profiles` through the Supabase connector because the CLI had no
+  database password in this session; the history row was then renamed from the connector's timestamp
+  to `20261023120000` so `supabase migration list` matches the repo. Verified on the hosted database:
+  RLS on with read/insert/update policies, no `anon` grants, authenticated updates limited to the
+  data columns (not `tenant_id`/`user_id`), memory kinds include `project`, 0 profile rows. The
+  security advisor raised nothing for the new table.
+- Deployed API and worker version 14 from main `408604d` with Supabase CLI 2.122.0 (`--use-api`,
+  shared import map, `verify_jwt` false). google-callback was unchanged and not redeployed. Smoke: API
+  401 for the homelab origin, 403 for a foreign origin, worker 403 without its secret.
+- Rebuilt the homelab frontend from the same commit; it is healthy and hosting smoke passed over HTTPS.
+  The previous image is tagged `step-ai-webapp:pilot-a78b769` for rollback. The synthetic demo saves a
+  profile and shows it in the sidebar on the live origin.
+- Not yet accepted: saving a profile with a real Google account and a real AI answer using the chosen
+  style.
+
 ## 2026-10-24 · Profile, assistant, answer style and memory types from Desktop
 
 - Settings opens on โปรไฟล์และผู้ช่วย, as Desktop's ทั่วไป: the 56 Desktop avatar drawings (53 offered),
