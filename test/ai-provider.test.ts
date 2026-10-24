@@ -154,3 +154,23 @@ test('worker refuses a provider change after admission without sending context u
   assert.equal(finished[0].error, 'AI_PROVIDER_CHANGED');
   assert.equal(finished[0].answer, null);
 });
+test('a free Gemini key is named, flagged and bound into consent; switching tiers needs new consent', () => {
+  const gemini: Record<string, string> = {
+    GEMINI_API_KEY: 'synthetic-gemini-value',
+    GEMINI_MODEL: 'gemini-synthetic-flash',
+    WORKER_SECRET: 'synthetic-worker-value',
+  };
+  const paid = aiService((key) => gemini[key]);
+  const free = aiService((key) => ({ ...gemini, GEMINI_TIER: 'free' })[key]);
+  assert.equal(paid.freeTier, false);
+  assert.equal(free.freeTier, true);
+  assert.equal(free.configured, true);
+  assert.match(free.displayName, /รุ่นฟรี \(AI Studio\)/);
+  assert.doesNotMatch(paid.displayName, /รุ่นฟรี/);
+  assert.notEqual(free.consentId, paid.consentId);
+  assert.ok(!JSON.stringify(free).includes(gemini.GEMINI_API_KEY));
+  assert.throws(
+    () => requireProviderConsent((key) => ({ ...gemini, GEMINI_TIER: 'free' })[key], paid.consentId),
+    /AI_PROVIDER_CHANGED/,
+  );
+});

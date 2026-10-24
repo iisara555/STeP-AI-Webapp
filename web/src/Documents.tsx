@@ -12,7 +12,7 @@ import {
 } from './icons.tsx';
 import type { DocumentRecord, Run } from '../../packages/harness-core/src/contracts.ts';
 import type { ViewProps } from './App.tsx';
-import { Busy, Empty, Modal, Visibility, bytes, Segmented } from './components.tsx';
+import { Busy, Empty, FreeTierNote, Modal, Visibility, bytes, Segmented } from './components.tsx';
 import { saveBlob } from './host.ts';
 import { uploadFile } from './uploads.ts';
 export function Documents({ host, data, tenant, workspace, refresh, fail }: ViewProps) {
@@ -295,6 +295,7 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
           <p className="muted">
             ข้อมูลที่อ่านจากรูปภาพยังต้องตรวจเทียบกับต้นฉบับ เอกสารยังมีสิทธิ์เข้าถึงเหมือนเดิม
           </p>
+          <FreeTierNote ai={data.ai} />
           <footer>
             <button onClick={() => setConsent(null)}>ยกเลิก</button>
             <button className="primary" disabled={busy} onClick={() => void index()}>

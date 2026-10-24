@@ -16,7 +16,7 @@ import {
 } from './icons.tsx';
 import type { AiService, Membership } from '../../packages/harness-core/src/contracts.ts';
 import type { ViewProps } from './App.tsx';
-import { Art, Busy, Modal, bytes, number } from './components.tsx';
+import { Art, Busy, FreeTierNote, Modal, bytes, number } from './components.tsx';
 import { ThemeChoice, type Theme } from './ThemeSelect.tsx';
 import { OpenRouterTrial } from './OpenRouterTrial.tsx';
 import { ProfileSettings } from './ProfileSettings.tsx';
@@ -212,6 +212,7 @@ export function SettingsView({
             <>
               <h2>เชื่อมต่อ AI</h2>
               <p className="muted">STeP จัดการบริการและวงเงินให้ คุณไม่ต้องตั้งค่า API key เอง</p>
+              <FreeTierNote ai={usage?.ai} />
               <div className="settings-card">
                 <div className="service-status">
                   <span className="service-icon">

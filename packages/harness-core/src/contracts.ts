@@ -8,6 +8,8 @@ export interface AiService {
   consentId: string;
   configured: boolean;
   textOnly: boolean;
+  /** Gemini on a Google AI Studio free key: Google may use what is sent, so every consent says so. */
+  freeTier?: boolean;
 }
 export type RunStatus =
   'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
