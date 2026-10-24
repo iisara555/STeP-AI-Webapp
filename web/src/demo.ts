@@ -77,7 +77,13 @@ export function demoHost(): Host {
           'สรุปการประชุม',
           'เขียน Prompt สร้างภาพ',
         ][index],
-        description: 'Skill สังเคราะห์สำหรับทดสอบขั้นตอนใช้งาน',
+        description: [
+          'ตัวอย่าง · วางขอบเขตงาน คุณสมบัติ และเกณฑ์ตรวจรับของ TOR ให้คนตรวจต่อ',
+          'ตัวอย่าง · จัดหนังสือราชการและบันทึกข้อความตามรูปแบบสารบรรณ',
+          'ตัวอย่าง · เรียงวัตถุประสงค์ กิจกรรม งบประมาณ และตัวชี้วัดของโครงการ',
+          'ตัวอย่าง · สรุปมติ ผู้รับผิดชอบ และกำหนดส่งจากบันทึกการประชุม',
+          'ตัวอย่าง · เตรียม Prompt ภาพตามสี STeP โดยไม่วาดโลโก้',
+        ][index],
         instructions: 'คำแนะนำตัวอย่างเท่านั้น ไม่ใช่เอกสารองค์กร',
         metadata: {
           owner: 'common',
@@ -154,6 +160,7 @@ export function demoHost(): Host {
               title: String(p.title || 'เริ่มงานใหม่'),
               draft: '',
               version: 1,
+              created_at: new Date().toISOString(),
             };
             data.sessions.unshift(row);
             messages[row.id] = [];

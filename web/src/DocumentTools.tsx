@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { FilePenLine } from 'lucide-react';
 import {
   DOCUMENT_TOOLS,
   prepareDocument,
@@ -21,18 +20,17 @@ export function DocumentTools({
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">จาก Desktop · แก้ไขก่อนนำไปใช้</p>
           <h1>เครื่องมือร่างเอกสาร</h1>
           <p>กรอกข้อมูลต้นเรื่อง เตรียมร่าง แล้วเลือกเอกสารประกอบก่อนให้ AI ช่วย</p>
         </div>
-        <FilePenLine size={30} />
       </div>
       <div className="workflow-layout">
         <nav className="workflow-menu" aria-label="ประเภทเอกสาร">
           {DOCUMENT_TOOLS.map((t) => (
             <button
               key={t.id}
-              className={id === t.id ? 'selected' : ''}
+              className={id === t.id ? 'nav-active' : ''}
+              aria-current={id === t.id ? 'true' : undefined}
               onClick={() => {
                 setId(t.id);
                 setVariant(t.variants[0].id);

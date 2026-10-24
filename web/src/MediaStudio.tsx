@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Copy, Download, Image } from 'lucide-react';
+import { Copy, Download } from './icons.tsx';
+import { Art } from './components.tsx';
 import {
   MEDIA_TYPES,
   MEDIA_STYLE_LABELS,
@@ -30,11 +31,10 @@ export function MediaStudio({
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">สื่อสารภายใน · Simple / Service / Sincere</p>
           <h1>สื่อภายใน</h1>
           <p>เตรียมเนื้อหาและ Prompt ด้วยแนวทางเดียวกับ Desktop</p>
         </div>
-        <Image size={30} />
+        <Art scene="media" />
       </div>
       <div className="studio-layout">
         <section className="workflow-form" aria-label="ข้อมูลสื่อภายใน">

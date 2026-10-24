@@ -12,10 +12,11 @@ import {
   ShieldCheck,
   Unlink,
   Users,
-} from 'lucide-react';
+} from './icons.tsx';
 import type { AiService, Membership } from '../../packages/harness-core/src/contracts.ts';
 import type { ViewProps } from './App.tsx';
-import { Busy, Modal, bytes, number } from './components.tsx';
+import { Art, Busy, Modal, bytes, number } from './components.tsx';
+import { ThemeChoice, type Theme } from './ThemeSelect.tsx';
 import { OpenRouterTrial } from './OpenRouterTrial.tsx';
 type GoogleState = { status: string; services: string[] };
 type Usage = {
@@ -34,7 +35,15 @@ export function SettingsView({
   onLogout,
   onTenantChange,
   initialTab,
-}: ViewProps & { onLogout: () => void; onTenantChange: (id: string) => void; initialTab?: string }) {
+  theme,
+  onTheme,
+}: ViewProps & {
+  onLogout: () => void;
+  onTenantChange: (id: string) => void;
+  initialTab?: string;
+  theme: Theme;
+  onTheme: (theme: Theme) => void;
+}) {
   const [tab, setTab] = useState(initialTab || 'account'),
     [google, setGoogle] = useState<GoogleState | null>(null),
     [usage, setUsage] = useState<Usage | null>(null),
@@ -108,10 +117,10 @@ export function SettingsView({
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">บัญชี การเชื่อมต่อ และข้อมูลของคุณ</p>
           <h1>การตั้งค่า</h1>
           <p>ตรวจสถานะและจัดการสิ่งที่แอปเข้าถึงได้</p>
         </div>
+        <Art scene="connections" />
       </div>
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="หมวดการตั้งค่า">
@@ -125,7 +134,8 @@ export function SettingsView({
           ].map((item) => (
             <button
               key={item.key}
-              className={tab === item.key ? 'selected' : ''}
+              className={tab === item.key ? 'nav-active' : ''}
+              aria-current={tab === item.key ? 'page' : undefined}
               onClick={() => setTab(item.key)}
             >
               <item.icon size={18} />
@@ -145,7 +155,9 @@ export function SettingsView({
               <h2>บัญชีและองค์กร</h2>
               <div className="settings-card">
                 <div className="account-details">
-                  <span className="avatar large">{data.user.name?.slice(0, 1) || 'S'}</span>
+                  <span className="avatar-badge large" aria-hidden="true">
+                    {(data.user.name || data.user.email || 'S').slice(0, 1).toUpperCase()}
+                  </span>
                   <div>
                     <h3>{data.user.name || 'บัญชีของคุณ'}</h3>
                     <p>{data.user.email}</p>
@@ -170,6 +182,10 @@ export function SettingsView({
                       ? 'ผู้ดูแลองค์กร'
                       : 'พนักงาน'}
                 </p>
+                <div className="theme-field">
+                  <span aria-hidden="true">ธีมหน้าจอ</span>
+                  <ThemeChoice theme={theme} onChange={onTheme} />
+                </div>
                 <button onClick={onLogout}>
                   <LogOut size={16} />
                   ออกจากระบบในเครื่องนี้

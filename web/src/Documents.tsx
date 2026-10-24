@@ -9,10 +9,10 @@ import {
   Trash2,
   Upload,
   Image as ImageIcon,
-} from 'lucide-react';
+} from './icons.tsx';
 import type { DocumentRecord, Run } from '../../packages/harness-core/src/contracts.ts';
 import type { ViewProps } from './App.tsx';
-import { Busy, Empty, Modal, Visibility, bytes } from './components.tsx';
+import { Busy, Empty, Modal, Visibility, bytes, Segmented } from './components.tsx';
 import { saveBlob } from './host.ts';
 import { uploadFile } from './uploads.ts';
 export function Documents({ host, data, tenant, workspace, refresh, fail }: ViewProps) {
@@ -135,7 +135,6 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">เอกสารอยู่เป็นที่ ใช้ต่อได้</p>
           <h1>เอกสาร</h1>
           <p>เก็บไฟล์ส่วนตัว หรือเลือกแชร์เฉพาะใน workspace</p>
         </div>
@@ -161,18 +160,15 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
         }}
       />
       <div className="filter-bar">
-        <div className="tabs">
-          <button className={filter === 'private' ? 'active' : ''} onClick={() => setFilter('private')}>
-            ส่วนตัว
-          </button>
-          <button
-            className={filter === 'workspace' ? 'active' : ''}
-            disabled={!workspace}
-            onClick={() => setFilter('workspace')}
-          >
-            แชร์ใน workspace
-          </button>
-        </div>
+        <Segmented
+          label="เอกสารที่แสดง"
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: 'private', label: 'ส่วนตัว' },
+            { value: 'workspace', label: 'แชร์ใน workspace', disabled: !workspace },
+          ]}
+        />
         <label className="search">
           <Search size={16} />
           <input
@@ -250,7 +246,7 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
       </div>
       {!rows.length && (
         <Empty
-          icon={<FolderOpen size={34} />}
+          art="workspace"
           title="เริ่มเก็บเอกสารที่ใช้ทำงาน"
           detail="รองรับ PDF รูปภาพ Word Excel PowerPoint และไฟล์ข้อความ ไม่เกิน 10 MB ต่อไฟล์"
         >

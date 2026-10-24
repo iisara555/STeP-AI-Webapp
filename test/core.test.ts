@@ -47,6 +47,9 @@ test('memory rejects secrets and temporary run history before reuse', () => {
   assert.throws(() => validateMemory('งาน', 'PR #1234 ยังทำไม่เสร็จ'), /MEMORY_EPHEMERAL/);
   assert.deepEqual(validateMemory(' รูปแบบ ', ' ตอบสั้น '), { title: 'รูปแบบ', body: 'ตอบสั้น' });
   assert.throws(() => assertSafeText('-----BEGIN PRIVATE KEY-----'), /SECRET_DETECTED/);
+  for (const key of ['sk-' + 's'.repeat(40), 'sk_live_' + 's'.repeat(24), 'ghp_' + 'g'.repeat(36)])
+    assert.throws(() => assertSafeText(key), /SECRET_DETECTED/);
+  assert.equal(assertSafeText('skill-authoring-standard'), 'skill-authoring-standard');
 });
 test('Thai context budget never drops the current query to fit optional references', () => {
   const result = boundedContext(['คำขอปัจจุบัน: ทดสอบ', 'ก'.repeat(60000)], 100);

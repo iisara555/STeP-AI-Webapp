@@ -1,6 +1,6 @@
 // Run locally beside an authorized Desktop checkout. Output is private data.
 import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
-import { resolve, relative, isAbsolute, dirname } from 'node:path';
+import { resolve, relative, isAbsolute, dirname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
@@ -12,7 +12,7 @@ const { values } = parseArgs({ options: { source: { type: 'string' }, out: { typ
 if (!values.source) throw new Error('Use --source /path/to/authorized/STeP-AI-Harness');
 const root = await realpath(resolve(values.source));
 const out = resolve(values.out || '.exports/harness-pack.json');
-const own = relative(process.cwd(), out);
+const own = relative(process.cwd(), out).split(sep).join('/');
 if (!own.startsWith('..') && !isAbsolute(own) && !own.startsWith('.exports/'))
   throw new Error('Exports inside this repository must be under .exports/');
 async function text(path) {

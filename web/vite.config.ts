@@ -20,7 +20,7 @@ export default defineConfig({
           '/step-symbol-colour.svg',
           '/step-symbol-mono-white.svg',
           ...Object.keys(bundle)
-            .filter((n) => /\.(js|css|woff2)$/.test(n))
+            .filter((n) => /\.(js|css|woff2|webp)$/.test(n))
             .map((n) => '/' + n),
         ];
         const template = readFileSync(new URL('./sw-template.js', import.meta.url), 'utf8');

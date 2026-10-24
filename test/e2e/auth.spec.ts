@@ -1,10 +1,13 @@
-import { test, expect, type BrowserContext } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { demoHost } from '../../web/src/demo.ts';
 import type { Snapshot } from '../../packages/harness-core/src/contracts.ts';
 
 test.use({ baseURL: 'http://127.0.0.1:5174' });
 const origin = 'http://127.0.0.1:5174';
 const storageKey = 'step-auth-auth.example.test';
+// The sidebar's tool navigation exists only inside the signed-in workspace. Count DOM nodes, not
+// visibility, because the mobile sidebar stays closed until opened.
+const workspaceNav = (page: Page) => page.locator('nav[aria-label="เครื่องมือ"]');
 
 async function authFixture(context: BrowserContext, options: { signedIn?: boolean; invited?: boolean } = {}) {
   const host = demoHost();
@@ -117,7 +120,7 @@ test('every protected URL sends anonymous visitors to login without requesting w
       new RegExp('/login' + (path === '/' ? '$' : '\\?next=' + encodeURIComponent(path) + '$')),
     );
     await expect(page.getByRole('button', { name: 'ลงชื่อเข้าใช้ด้วย Google' })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'เมนูหลัก' })).toHaveCount(0);
+    await expect(workspaceNav(page)).toHaveCount(0);
   }
   expect(state.snapshots).toBe(0);
 });
@@ -133,9 +136,12 @@ test('Google PKCE login returns to the requested page and exchanges the callback
   await expect(page.getByRole('heading', { name: 'เอกสาร', exact: true })).toBeVisible();
   expect(state.redirect).toBe(origin + '/auth/callback');
   expect(state.exchanges).toBe(1);
+  await expect(workspaceNav(page).first()).toBeAttached();
   const open = page.getByRole('button', { name: 'เปิดเมนู', exact: true });
   if (await open.isVisible()) await open.click();
-  await page.getByRole('button', { name: 'Skill', exact: true }).click();
+  await workspaceNav(page)
+    .getByRole('button', { name: /^ศูนย์รวม Skill/ })
+    .click();
   await expect(page).toHaveURL(origin + '/skills');
   await page.goBack();
   await expect(page.getByRole('heading', { name: 'เอกสาร', exact: true })).toBeVisible();
@@ -148,7 +154,7 @@ test('forged cached identity is rejected before any private data request', async
   state.userStatus = 401;
   await page.goto('/settings');
   await expect(page).toHaveURL(/\/login\?next=%2Fsettings$/);
-  await expect(page.getByRole('navigation', { name: 'เมนูหลัก' })).toHaveCount(0);
+  await expect(workspaceNav(page)).toHaveCount(0);
   expect(state.snapshots).toBe(0);
 });
 
@@ -157,7 +163,7 @@ test('API session rejection returns to login and removes private views', async (
   state.snapshotStatus = 401;
   await page.goto('/memory');
   await expect(page).toHaveURL(/\/login\?next=%2Fmemory$/);
-  await expect(page.getByRole('navigation', { name: 'เมนูหลัก' })).toHaveCount(0);
+  await expect(workspaceNav(page)).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'บัญชีนี้ยังไม่ได้รับเชิญ' })).toHaveCount(0);
 });
 
@@ -165,7 +171,7 @@ test('verified accounts still need a tenant invitation', async ({ page, context 
   await authFixture(context, { signedIn: true, invited: false });
   await page.goto('/documents');
   await expect(page.getByRole('heading', { name: 'บัญชีนี้ยังไม่ได้รับเชิญ' })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'เมนูหลัก' })).toHaveCount(0);
+  await expect(workspaceNav(page)).toHaveCount(0);
 });
 
 test('signing out clears both tabs and browser history cannot reopen private views', async ({
@@ -178,13 +184,12 @@ test('signing out clears both tabs and browser history cannot reopen private vie
   const second = await context.newPage();
   await second.goto(origin + '/memory');
   await expect(second.getByRole('heading', { name: 'ความจำ', exact: true })).toBeVisible();
-  const open = page.getByRole('button', { name: 'เปิดเมนู', exact: true });
-  if (await open.isVisible()) await open.click();
-  await page.getByRole('button', { name: 'ออกจากระบบ', exact: true }).click();
+  await page.getByRole('button', { name: 'เมนู STeP', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'ออกจากระบบ', exact: true }).click();
   await expect(page).toHaveURL(origin + '/login');
   await expect(second).toHaveURL(/\/login\?next=%2Fmemory$/);
   await page.goto('/documents');
-  await expect(page.getByRole('navigation', { name: 'เมนูหลัก' })).toHaveCount(0);
+  await expect(workspaceNav(page)).toHaveCount(0);
 });
 
 test('OAuth errors and missing codes are sanitized and leave protected views closed', async ({

@@ -20,7 +20,7 @@ export const RECEIPT_BUYER = Object.freeze({
   address: 'เลขที่ 155 หมู่ 2 ตำบลแม่เหียะ อำเภอเมือง จังหวัดเชียงใหม่ 50100',
 });
 const SECRETS =
-  /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|ghp|github_pat|AIza)[-_A-Za-z0-9]{20,}|\bAQ\.[A-Za-z0-9_-]{24,}|(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|รหัสผ่าน)\s*[:=]\s*\S{6,})/i;
+  /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk[-_]|ghp_|github_pat_|AIza)[-_A-Za-z0-9]{20,}|\bAQ\.[A-Za-z0-9_-]{24,}|(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|รหัสผ่าน)\s*[:=]\s*\S{6,})/i;
 const EPHEMERAL =
   /\b(?:PR|issue|run|job)\s*#?\d{3,}|\/(?:pull|runs|jobs)\/\d+|(?:ตอนนี้กำลัง|เมื่อกี้|ค้างอยู่ที่)|Traceback|at \S+ \(.+:\d+:\d+\)/i;
 export function assertSafeText(text: string) {
@@ -169,6 +169,13 @@ export function errorView(code: string): ErrorView {
     OPENROUTER_CREDIT_REQUIRED: {
       title: 'OpenRouter ปฏิเสธคำขอตามเงื่อนไขเครดิต',
       detail: 'ตรวจสถานะบัญชีกับ OpenRouter ช่องทดลองนี้ไม่เติมเงินและไม่เปลี่ยนไปใช้โมเดลเสียเงิน',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    AI_EMPTY_REPLY: {
+      title: 'โมเดลไม่ได้ส่งข้อความคำตอบกลับมา',
+      detail:
+        'โมเดลแบบคิดก่อนตอบอาจใช้เพดานคำตอบหมดก่อนเขียนคำตอบ ลองโมเดลอื่นที่ไม่ใช่แบบคิดก่อนตอบ ไม่มีการส่งคำขอซ้ำอัตโนมัติ',
       action: 'ปิดข้อความ',
       retry: false,
     },
