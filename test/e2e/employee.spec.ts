@@ -46,7 +46,10 @@ test('employee can create a private conversation, review consent and receive a r
   const file = await downloaded;
   expect(file.suggestedFilename()).toMatch(/\.docx$/);
   const archive = await JSZip.loadAsync(await readFile((await file.path())!));
-  expect(await archive.file('word/document.xml')!.async('string')).toContain('นี่คือคำตอบตัวอย่าง');
+  // Thai word breaks for Word (on by default, as on Desktop) are zero-width spaces between words.
+  expect((await archive.file('word/document.xml')!.async('string')).replace(/​/g, '')).toContain(
+    'นี่คือคำตอบตัวอย่าง',
+  );
 });
 test('receipt flow keeps the original, asks before OCR and saves an edited review', async ({ page }) => {
   await page.goto('/?demo=1');

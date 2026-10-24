@@ -1,5 +1,33 @@
 # Progress
 
+## 2026-10-24 · Garuda, page layout and Desktop's Word/PDF export
+
+- The draft pane now exports with Desktop's exporter instead of the web's simple Markdown-to-Word:
+  layout roles for every document tool (title, front matter, sender, date, ที่/วันที่ on one line,
+  signature block, first-line indents), the สารบรรณ A4 page (top 2.5, bottom 2, left 3, right 2 cm),
+  Thai page numbers, header/footer text, a table of contents, Thai word breaks, and tables sized for
+  Thai headers and right-aligned figures.
+- ตราครุฑ as Desktop places it: 1.5 cm beside "บันทึกข้อความ" on a memo, 3 cm centred on an external
+  letter, first page only; none on TOR, proposals and minutes; "ไม่ใส่ตราครุฑ" for other agency forms.
+  The image is Desktop's pinned 800 × 800 PNG with its provenance notice; it carries no authority to
+  issue letters, and the pane says the layout must be checked against the agency's form.
+- Fonts: TH Sarabun New (memo) or TH SarabunPSK (other official drafts), selectable. The pinned font
+  files are served by the site and embedded in the Word file, so it opens the same on computers without
+  them. The export result states the font, Garuda height and whether embedding succeeded.
+- PDF goes through the browser's print dialog using Desktop's A4 page HTML with the same fonts. A
+  "หน้ากระดาษ" view shows that page beside the editor before exporting. Markdown export replaces .txt.
+- The export code (including the Garuda) loads only when a draft pane opens; startup JavaScript is
+  unchanged (about 740 kB before and after, split differently). Small IBM Plex font subsets are no longer
+  inlined as `data:` URIs, which the production CSP (`font-src 'self'`) had been blocking.
+- Validation under Node 25.2.1: TypeScript, build, 53 unit/API/PWA tests (new: Garuda bytes, memo,
+  letter and no-Garuda layouts, margins, fonts, PDF page escaping), 29 PostgreSQL tests and 38
+  desktop/mobile Playwright tests (Word with embedded fonts and the Garuda header, page preview, PDF
+  print, axe on the pane in both themes). A one-off run of a production build with the homelab nginx
+  headers showed the preview, fonts, print and Word export work with no CSP violation.
+- Not carried over yet: agency DOCX templates (Desktop's `document-template.ts`), Excel/PowerPoint
+  export, images in drafts, and saving export settings with the task. Requires only a homelab frontend
+  rebuild; no API, worker or migration change.
+
 ## 2026-10-24 · Document drafting as Desktop does it
 
 - Observed: a TOR from เครื่องมือร่างเอกสาร came back as the canned "ยังไม่พบเอกสารองค์กรที่ยืนยันเรื่องนี้"

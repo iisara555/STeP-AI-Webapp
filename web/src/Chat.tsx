@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowUp,
@@ -31,16 +31,20 @@ import type {
 } from '../../packages/harness-core/src/contracts.ts';
 import { errorView } from '../../packages/harness-core/src/index.ts';
 import { saveBlob } from './host.ts';
-import { Art, Busy, FreeTierNote, MEMORY_KINDS, Modal, Visibility } from './components.tsx';
+import { Art, Busy, FreeTierNote, MEMORY_KINDS, Modal, Segmented, Visibility } from './components.tsx';
 import type { ViewProps } from './App.tsx';
-import { exportWord } from './extract.ts';
+import type { ExportChoice } from './DraftExport.tsx';
 import { startersFor, starterTeams } from '../../packages/harness-core/vendor/desktop/starters.ts';
 import { teamLabel } from '../../packages/harness-core/vendor/desktop/teams.ts';
 import { assistantName } from '../../packages/harness-core/src/assistant-profile.ts';
 import { parseDocumentOutput } from '../../packages/harness-core/vendor/desktop/document-output.ts';
 import type { DocumentToolId } from '../../packages/harness-core/vendor/desktop/document-tools.ts';
+import { resolvePresentation } from '../../packages/harness-core/vendor/desktop/document-presentation.ts';
 import { isDocumentTool } from '../../packages/harness-core/src/document-context.ts';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
+// Word, PDF and the page preview load the Markdown reader, Garuda and layout only when a draft is exported or previewed.
+const DraftExport = lazy(() => import('./DraftExport.tsx').then((m) => ({ default: m.DraftExport })));
+const DraftPage = lazy(() => import('./DraftExport.tsx').then((m) => ({ default: m.DraftPage })));
 type Plan = {
   provider: string;
   providerConsent: string;
@@ -118,8 +122,14 @@ export function Chat({
   const [starterTeam, setStarterTeam] = useState(
     memberProfile?.team && starterTeams.includes(memberProfile.team) ? memberProfile.team : '',
   );
-  const [wordPreset, setWordPreset] = useState<'saraban' | 'report' | 'book'>('report'),
-    [format, setFormat] = useState<'docx' | 'txt'>('docx');
+  // Export layout follows the document tool, as on Desktop: official drafts start on the สารบรรณ page with page numbers.
+  const [presentation, setPresentation] = useState(() => resolvePresentation()),
+    [exportChoice, setExportChoice] = useState<ExportChoice>({ font: 'auto', garuda: 'auto' }),
+    [draftView, setDraftView] = useState<'edit' | 'page'>('edit');
+  useEffect(() => {
+    setPresentation(resolvePresentation({}, Boolean(documentTool)));
+    setExportChoice({ font: 'auto', garuda: 'auto' });
+  }, [session?.id, documentTool]);
   const composer = useRef<HTMLTextAreaElement>(null),
     autoPreview = useRef(false);
   const bottom = useRef<HTMLDivElement>(null),
@@ -333,11 +343,6 @@ export function Chat({
       .call<Conversation>('session.draft', { tenant, id: session.id, version: session.version, draft })
       .then((s) => setSession(s))
       .catch(fail);
-  const exportDraft = () => {
-    if (!session || !draft.trim()) return;
-    if (format === 'docx') void exportWord(draft, session.title, wordPreset).catch(fail);
-    else saveBlob(new Blob([draft], { type: 'text/plain;charset=utf-8' }), 'ร่างเอกสาร.txt');
-  };
   const called = memberProfile?.display_name || data.user.name?.split(' ')[0] || '';
   // As on Desktop: the name the employee chose, then their team.
   const greeting =
@@ -708,23 +713,30 @@ export function Chat({
                 <Table size={15} />
                 ตาราง
               </button>
-              <select
-                aria-label="รูปแบบ Word"
-                value={wordPreset}
-                onChange={(e) => setWordPreset(e.target.value as typeof wordPreset)}
-              >
-                <option value="saraban">สารบรรณ · 16 pt</option>
-                <option value="report">รายงาน · 14 pt</option>
-                <option value="book">หนังสือ · 16 pt</option>
-              </select>
+              <Segmented
+                label="มุมมองร่าง"
+                className="segmented draft-view"
+                value={draftView}
+                onChange={setDraftView}
+                options={[
+                  { value: 'edit', label: 'แก้ไข' },
+                  { value: 'page', label: 'หน้ากระดาษ', disabled: !draft.trim() },
+                ]}
+              />
             </div>
-            <textarea
-              className="draft-editor"
-              aria-label="ร่างเอกสาร"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="ใช้คำตอบเป็นร่าง หรือเริ่มพิมพ์เองได้"
-            />
+            {draftView === 'page' && draft.trim() ? (
+              <Suspense fallback={<Busy label="กำลังจัดหน้า" />}>
+                <DraftPage draft={draft} documentTool={documentTool} choice={exportChoice} />
+              </Suspense>
+            ) : (
+              <textarea
+                className="draft-editor"
+                aria-label="ร่างเอกสาร"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="ใช้คำตอบเป็นร่าง หรือเริ่มพิมพ์เองได้"
+              />
+            )}
             <details className="draft-sources">
               <summary>แหล่งอ้างอิงที่ใช้ ({draftSources.length})</summary>
               {draftSources.length ? (
@@ -742,26 +754,35 @@ export function Chat({
                 <p className="small muted">คำตอบในงานนี้ยังไม่ได้อ้างอิงเอกสารหรือความรู้องค์กร</p>
               )}
             </details>
-            <p className="draft-note">Word ยังไม่ฝังฟอนต์หรือตราครุฑ ตรวจรูปแบบกับแบบของหน่วยงานก่อนใช้</p>
-            <footer className="artifact-footer">
-              <button onClick={saveDraft}>
-                <Save size={15} />
-                บันทึก
-              </button>
-              <span className="spacer" />
-              <select
-                aria-label="รูปแบบไฟล์"
-                value={format}
-                onChange={(e) => setFormat(e.target.value as typeof format)}
-              >
-                <option value="docx">Word (.docx)</option>
-                <option value="txt">ข้อความ (.txt)</option>
-              </select>
-              <button className="primary" disabled={!draft.trim()} onClick={exportDraft}>
-                <Download size={15} />
-                ส่งออก
-              </button>
-            </footer>
+            <p className="draft-note">
+              {['memo', 'letter'].includes(documentTool || '')
+                ? 'ตราครุฑและการจัดหน้าเป็นแบบทำงานตามระเบียบงานสารบรรณ ตรวจกับแบบของหน่วยงานก่อนเสนอ'
+                : 'การจัดหน้าเป็นแบบทำงาน ตรวจกับแบบของหน่วยงานก่อนใช้'}
+            </p>
+            <Suspense
+              fallback={
+                <footer className="artifact-footer">
+                  <Busy label="กำลังเตรียมการส่งออก" />
+                </footer>
+              }
+            >
+              <DraftExport
+                draft={draft}
+                title={session.title}
+                documentTool={documentTool}
+                choice={exportChoice}
+                onChoice={setExportChoice}
+                presentation={presentation}
+                onPresentation={setPresentation}
+                onError={fail}
+                leading={
+                  <button onClick={saveDraft}>
+                    <Save size={15} />
+                    บันทึก
+                  </button>
+                }
+              />
+            </Suspense>
           </aside>,
           artifactSlot,
         )}
