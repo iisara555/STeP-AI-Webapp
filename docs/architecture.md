@@ -105,7 +105,7 @@ fallbacks and sets prompt/completion/request/image price ceilings to zero. There
 is no paid-model fallback or purchase action. Provider billing remains external;
 an unexpected nonzero reported cost is surfaced as an error.
 
-Responses are bounded to 512 output tokens with a 20-second upstream deadline,
+Responses are bounded to 2048 output tokens with a 20-second upstream deadline,
 rendered as plain text and held only in component memory. Only token totals,
 elapsed time and optional reported cost accompany the reply; raw provider
 diagnostics and keys never reach clients. Missing cost is not reported as $0.
