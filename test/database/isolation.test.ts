@@ -182,3 +182,65 @@ test('quota reservation and AI budgets fail closed', async () => {
     );
   });
 });
+test('profiles and answer style are owner-only, including for tenant admins', async () => {
+  await asUser(db, ids.alice, async () => {
+    await db.query(
+      `insert into public.member_profiles(tenant_id,user_id,display_name,assistant_name,interaction_style)
+       values($1,$2,'Alice synthetic','Helper','witty')`,
+      [ids.tenant, ids.alice],
+    );
+    await db.query(
+      `update public.member_profiles set personality='concise' where tenant_id=$1 and user_id=$2`,
+      [ids.tenant, ids.alice],
+    );
+    // Ownership columns cannot be rewritten, and nobody can write a row for someone else.
+    await assert.rejects(
+      db.query(`update public.member_profiles set user_id=$1 where user_id=$2`, [ids.bob, ids.alice]),
+    );
+    await assert.rejects(
+      db.query(`insert into public.member_profiles(tenant_id,user_id) values($1,$2)`, [ids.tenant, ids.bob]),
+    );
+    await assert.rejects(
+      db.query(`insert into public.member_profiles(tenant_id,user_id) values($1,$2)`, [
+        ids.otherTenant,
+        ids.alice,
+      ]),
+    );
+    // Values the prompt would carry are bounded by the table as well as the API.
+    await assert.rejects(
+      db.query(`update public.member_profiles set assistant_tone=$1 where user_id=$2`, ['a\nb', ids.alice]),
+    );
+    await assert.rejects(
+      db.query(`update public.member_profiles set interaction_style='shouty' where user_id=$1`, [ids.alice]),
+    );
+  });
+  for (const who of [ids.bob, ids.admin, ids.outsider])
+    await asUser(db, who, async () => {
+      assert.equal((await db.query('select * from public.member_profiles')).rows.length, 0);
+      const changed = await db.query(`update public.member_profiles set display_name='x' where user_id=$1`, [
+        ids.alice,
+      ]);
+      assert.equal(changed.affectedRows || 0, 0);
+    });
+  const row = await db.query<{ personality: string; display_name: string }>(
+    'select personality,display_name from public.member_profiles where user_id=$1',
+    [ids.alice],
+  );
+  assert.deepEqual(row.rows[0], { personality: 'concise', display_name: 'Alice synthetic' });
+  await db.query('delete from public.member_profiles where user_id=$1', [ids.alice]);
+});
+test('memory type can be corrected to project context by its owner only', async () => {
+  const id = crypto.randomUUID();
+  await db.query(
+    `insert into public.memories(id,tenant_id,owner_id,title,body,confirmed) values($1,$2,$3,'synthetic','x',true)`,
+    [id, ids.tenant, ids.alice],
+  );
+  await asUser(db, ids.alice, () => db.query(`update public.memories set kind='project' where id=$1`, [id]));
+  await asUser(db, ids.admin, () => db.query(`update public.memories set kind='feedback' where id=$1`, [id]));
+  assert.equal(
+    (await db.query<{ kind: string }>('select kind from public.memories where id=$1', [id])).rows[0].kind,
+    'project',
+  );
+  await assert.rejects(db.query(`update public.memories set kind='secret' where id=$1`, [id]));
+  await db.query('delete from public.memories where id=$1', [id]);
+});

@@ -31,10 +31,12 @@ import type {
 } from '../../packages/harness-core/src/contracts.ts';
 import { errorView } from '../../packages/harness-core/src/index.ts';
 import { saveBlob } from './host.ts';
-import { Art, Busy, Modal, Visibility } from './components.tsx';
+import { Art, Busy, MEMORY_KINDS, Modal, Visibility } from './components.tsx';
 import type { ViewProps } from './App.tsx';
 import { exportWord } from './extract.ts';
 import { startersFor, starterTeams } from '../../packages/harness-core/vendor/desktop/starters.ts';
+import { teamLabel } from '../../packages/harness-core/vendor/desktop/teams.ts';
+import { assistantName } from '../../packages/harness-core/src/assistant-profile.ts';
 import { parseDocumentOutput } from '../../packages/harness-core/vendor/desktop/document-output.ts';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
 type Plan = {
@@ -43,6 +45,8 @@ type Plan = {
   documents: { id: string; name: string }[];
   memories: { id: string; title: string }[];
   google: boolean;
+  /** True when the employee's own name and answer style travel with the request. */
+  profile?: boolean;
 };
 /** Text handed to a newly created task; `submit` opens the consent preview right away. */
 export type PreparedText = { sessionId: string; text: string; submit?: boolean; documents?: string[] };
@@ -91,7 +95,11 @@ export function Chat({
     [menu, setMenu] = useState(false);
   const [source, setSource] = useState<{ title: string; body: string } | null>(null),
     [remember, setRemember] = useState<ChatMessage | null>(null);
-  const [starterTeam, setStarterTeam] = useState('');
+  const memberProfile = data.profiles?.find((p) => p.tenant_id === tenant);
+  const assistant = assistantName(memberProfile);
+  const [starterTeam, setStarterTeam] = useState(
+    memberProfile?.team && starterTeams.includes(memberProfile.team) ? memberProfile.team : '',
+  );
   const [wordPreset, setWordPreset] = useState<'saraban' | 'report' | 'book'>('report'),
     [format, setFormat] = useState<'docx' | 'txt'>('docx');
   const composer = useRef<HTMLTextAreaElement>(null),
@@ -300,7 +308,11 @@ export function Chat({
     if (format === 'docx') void exportWord(draft, session.title, wordPreset).catch(fail);
     else saveBlob(new Blob([draft], { type: 'text/plain;charset=utf-8' }), 'ร่างเอกสาร.txt');
   };
-  const greeting = data.user.name ? 'สวัสดีครับ คุณ' + data.user.name.split(' ')[0] : 'สวัสดีครับ';
+  const called = memberProfile?.display_name || data.user.name?.split(' ')[0] || '';
+  // As on Desktop: the name the employee chose, then their team.
+  const greeting =
+    (called ? 'สวัสดีครับ คุณ' + called : 'สวัสดีครับ') +
+    (memberProfile?.team ? ' · ' + teamLabel(memberProfile.team) : '');
   const starters = startersFor(starterTeam);
   // Every source the answers in this task cited, once each, so the draft keeps its provenance in view.
   const draftSources = [
@@ -351,7 +363,7 @@ export function Chat({
                         new Blob(
                           [
                             messages
-                              .map((m) => `## ${m.role === 'user' ? 'คุณ' : 'STeP AI'}\n\n${m.body}`)
+                              .map((m) => `## ${m.role === 'user' ? 'คุณ' : assistant}\n\n${m.body}`)
                               .join('\n\n'),
                           ],
                           { type: 'text/markdown;charset=utf-8' },
@@ -410,7 +422,11 @@ export function Chat({
                 <Art scene="chat" className="welcome-illustration" />
               </div>
               <div className="suggestions-label">
-                <span>ลองงานแรกที่คนส่วนใหญ่ใช้บ่อย</span>
+                <span>
+                  {starterTeam
+                    ? 'ลองงานแรกของทีม ' + teamLabel(starterTeam)
+                    : 'ลองงานแรกที่คนส่วนใหญ่ใช้บ่อย'}
+                </span>
                 <select
                   aria-label="ตัวอย่างงานตามทีม"
                   value={starterTeam}
@@ -466,7 +482,7 @@ export function Chat({
             <article
               key={m.id}
               className={'message ' + (m.role === 'user' ? 'user' : 'assistant')}
-              aria-label={m.role === 'user' ? 'คุณ' : 'STeP AI'}
+              aria-label={m.role === 'user' ? 'คุณ' : assistant}
             >
               <div className="message-body">{m.body}</div>
               {m.sources?.length > 0 && (
@@ -511,7 +527,9 @@ export function Chat({
           ))}
           {active && (
             <div className="activity">
-              <Busy label={run?.status === 'queued' ? 'กำลังรอคิว AI' : 'AI กำลังอ่านข้อมูลที่คุณเลือก'} />
+              <Busy
+                label={run?.status === 'queued' ? 'กำลังรอคิว AI' : assistant + ' กำลังอ่านข้อมูลที่คุณเลือก'}
+              />
               <p>คุณกลับมาดูงานนี้ภายหลังได้</p>
             </div>
           )}
@@ -748,6 +766,7 @@ export function Chat({
           <p className="muted">ส่งให้ {plan.provider} เพื่อทำงานตามคำขอนี้</p>
           <ul className="consent-list">
             <li>ข้อความที่พิมพ์และบทสนทนาที่เกี่ยวข้อง</li>
+            {plan.profile && <li>ชื่อเรียก ทีม และสไตล์การตอบที่คุณตั้งไว้</li>}
             {plan.documents.map((d) => (
               <li key={d.id}>เอกสาร · {d.name}</li>
             ))}
@@ -814,7 +833,8 @@ export function Chat({
                   visibility: 'private',
                   title: form.get('title'),
                   body: form.get('body'),
-                  kind: 'preference',
+                  kind: form.get('kind'),
+                  origin: 'chat',
                 });
                 setRemember(null);
                 await refresh();
@@ -830,6 +850,16 @@ export function Chat({
             <label>
               ชื่อความจำ
               <input name="title" maxLength={120} required />
+            </label>
+            <label>
+              ประเภท
+              <select name="kind" defaultValue="preference">
+                {MEMORY_KINDS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               สิ่งที่ต้องการจำ

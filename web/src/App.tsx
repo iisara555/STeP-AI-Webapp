@@ -19,6 +19,7 @@ import { TitleBar, mod, type MenuGroup } from './TitleBar.tsx';
 import { Sidebar, SidebarRail, sidebarChoice, tools } from './Sidebar.tsx';
 import { useTheme } from './ThemeSelect.tsx';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
+import { assistantName } from '../../packages/harness-core/src/assistant-profile.ts';
 // Tool pages load on first open, so the first screen does not wait for the Desktop reference or Word export.
 const Documents = lazy(() => import('./Documents.tsx').then((m) => ({ default: m.Documents })));
 const Memories = lazy(() => import('./Memories.tsx').then((m) => ({ default: m.Memories })));
@@ -83,7 +84,7 @@ export function App() {
   const [demo, setDemo] = useState(new URLSearchParams(location.search).get('demo') === '1');
   const host = useMemo(() => (demo ? demoHost() : webHost()), [demo]);
   const [settingsTab, setSettingsTab] = useState(
-    new URLSearchParams(location.search).has('google') ? 'google' : 'account',
+    new URLSearchParams(location.search).has('google') ? 'google' : 'profile',
   );
   const [signedIn, setSignedIn] = useState(demo),
     [authReady, setAuthReady] = useState(demo || !configured());
@@ -419,15 +420,25 @@ export function App() {
     (s) => s.tenant_id === tenant && (!workspace || s.workspace_id === workspace.id),
   );
   const own = data.memberships.find((m) => m.tenant_id === tenant && m.user_id === data.user.id);
+  const memberProfile = data.profiles?.find((p) => p.tenant_id === tenant);
+  const shownName = memberProfile?.display_name || data.user.name || 'บัญชีของฉัน';
   const profile = {
-    initial: (data.user.name || data.user.email || 'S').slice(0, 1).toUpperCase(),
-    name: data.user.name || 'บัญชีของฉัน',
-    detail: [
-      data.tenants.find((t) => t.id === tenant)?.name,
-      own?.role === 'owner' ? 'เจ้าขององค์กร' : own?.role === 'admin' ? 'ผู้ดูแลองค์กร' : 'พนักงาน',
-    ]
-      .filter(Boolean)
-      .join(' · '),
+    initial: (memberProfile?.display_name || data.user.name || data.user.email || 'S')
+      .slice(0, 1)
+      .toUpperCase(),
+    avatar: memberProfile?.avatar || '',
+    name: shownName,
+    // As on Desktop: the assistant and team once the employee has set them, otherwise the organization and role.
+    detail: memberProfile
+      ? 'ผู้ช่วย ' +
+        assistantName(memberProfile) +
+        (memberProfile.team ? ' · ทีม ' + memberProfile.team.toUpperCase() : '')
+      : [
+          data.tenants.find((t) => t.id === tenant)?.name,
+          own?.role === 'owner' ? 'เจ้าขององค์กร' : own?.role === 'admin' ? 'ผู้ดูแลองค์กร' : 'พนักงาน',
+        ]
+          .filter(Boolean)
+          .join(' · '),
   };
   const skillCount = data.skills.filter(
     (s) => (!s.tenant_id || s.tenant_id === tenant) && !s.metadata.developerOnly,
@@ -572,7 +583,7 @@ export function App() {
                   onTheme={setTheme}
                   onLogout={() => void logout()}
                   onTenantChange={(id) => {
-                    setSettingsTab('account');
+                    setSettingsTab('profile');
                     setTenant(id);
                   }}
                 />

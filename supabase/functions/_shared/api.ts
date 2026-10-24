@@ -35,6 +35,7 @@ import { receiptSchema } from './receipt.ts';
 import { openrouter, trialConfigured } from './openrouter.ts';
 import { aiService, requireProviderConsent } from './ai.ts';
 import { literalSearch } from '../../../packages/harness-core/src/desktop-workflows.ts';
+import { normalizeProfile } from '../../../packages/harness-core/src/assistant-profile.ts';
 
 const uuid = z.string().uuid();
 const visibility = z.enum(['private', 'workspace']);
@@ -92,41 +93,57 @@ export async function contextPlan(
         actor.userDb.from('memories').select('*').eq('tenant_id', input.tenant).eq('confirmed', true),
       )
     : [];
+  const now = Date.now();
   const memoryRows = rows.filter(
     (m) =>
-      (m.visibility === 'private' && m.owner_id === actor.user.id) ||
-      (m.visibility === 'workspace' && m.workspace_id === s.workspace_id),
+      (!m.expires_at || Date.parse(m.expires_at) > now) &&
+      ((m.visibility === 'private' && m.owner_id === actor.user.id) ||
+        (m.visibility === 'workspace' && m.workspace_id === s.workspace_id)),
   );
   const memories = selectMemories(memoryRows as Memory[], input.message, s.visibility);
+  const profile = await checked(
+    actor.userDb
+      .from('member_profiles')
+      .select('user_id')
+      .eq('tenant_id', input.tenant)
+      .eq('user_id', actor.user.id)
+      .maybeSingle(),
+  );
   return {
     session: s,
     documents: docs,
     memories: memories.map((m) => ({ id: m.id, title: m.title, visibility: m.visibility })),
     google: wantsCalendar(input.message),
+    // The employee's own name and answer style travel with the request; the preview says so.
+    profile: Boolean(profile),
   };
 }
 async function snapshot(actor: Actor, env: Environment) {
   await checked(actor.userDb.rpc('accept_invites'));
-  const [tenants, memberships, workspaces, sessions, memories, documents, skills] = await Promise.all([
-    checked(actor.userDb.from('tenants').select('*')),
-    checked(actor.userDb.from('tenant_members').select('*').eq('user_id', actor.user.id)),
-    checked(actor.userDb.from('workspaces').select('*').order('created_at', { ascending: false })),
-    checked(actor.userDb.from('sessions').select('*').order('created_at', { ascending: false }).limit(200)),
-    checked(actor.userDb.from('memories').select('*').order('created_at', { ascending: false }).limit(200)),
-    checked(
-      actor.userDb
-        .from('documents')
-        .select(
-          'id,tenant_id,owner_id,workspace_id,visibility,name,mime,bytes,source_kind,drive_file_id,object_path,status,error_code,created_at',
-        )
-        .is('derived_from', null)
-        .order('created_at', { ascending: false })
-        .limit(200),
-    ),
-    checked(
-      actor.userDb.from('skills').select('id,tenant_id,skill_key,title,description,metadata,source_version'),
-    ),
-  ]);
+  const [tenants, memberships, workspaces, sessions, memories, documents, skills, profiles] =
+    await Promise.all([
+      checked(actor.userDb.from('tenants').select('*')),
+      checked(actor.userDb.from('tenant_members').select('*').eq('user_id', actor.user.id)),
+      checked(actor.userDb.from('workspaces').select('*').order('created_at', { ascending: false })),
+      checked(actor.userDb.from('sessions').select('*').order('created_at', { ascending: false }).limit(200)),
+      checked(actor.userDb.from('memories').select('*').order('created_at', { ascending: false }).limit(200)),
+      checked(
+        actor.userDb
+          .from('documents')
+          .select(
+            'id,tenant_id,owner_id,workspace_id,visibility,name,mime,bytes,source_kind,drive_file_id,object_path,status,error_code,created_at',
+          )
+          .is('derived_from', null)
+          .order('created_at', { ascending: false })
+          .limit(200),
+      ),
+      checked(
+        actor.userDb
+          .from('skills')
+          .select('id,tenant_id,skill_key,title,description,metadata,source_version'),
+      ),
+      checked(actor.userDb.from('member_profiles').select('*').eq('user_id', actor.user.id)),
+    ]);
   return {
     ai: aiService(env),
     user: { id: actor.user.id, email: actor.user.email, name: actor.user.user_metadata?.full_name || '' },
@@ -137,6 +154,7 @@ async function snapshot(actor: Actor, env: Environment) {
     memories,
     documents,
     skills,
+    profiles,
   };
 }
 export async function dispatch(
@@ -333,15 +351,26 @@ export async function dispatch(
           title: z.string().max(120),
           body: z.string().max(4000),
           id: uuid.optional(),
-          kind: z.enum(['preference', 'reference', 'feedback']).default('preference'),
+          kind: z.enum(['preference', 'reference', 'feedback', 'project']).default('preference'),
+          // Days until the memory stops being used; 0 keeps it until deleted, as on Desktop.
+          ttlDays: z.number().int().min(0).max(3650).default(0),
+          // Where a new memory came from, shown beside it as on Desktop.
+          origin: z.enum(['manual', 'chat']).default('manual'),
         })
         .parse(input);
       const safe = validateMemory(p.title, p.body);
+      const expires_at = p.ttlDays ? new Date(Date.now() + p.ttlDays * 86_400_000).toISOString() : null;
       if (p.id)
         return checked(
           db
             .from('memories')
-            .update({ ...safe, confirmed: true, updated_at: new Date().toISOString() })
+            .update({
+              ...safe,
+              kind: p.kind,
+              expires_at,
+              confirmed: true,
+              updated_at: new Date().toISOString(),
+            })
             .eq('tenant_id', p.tenant)
             .eq('id', p.id)
             .eq('owner_id', actor.user.id)
@@ -365,8 +394,47 @@ export async function dispatch(
             workspace_id: p.workspace,
             visibility: p.visibility,
             kind: p.kind,
+            expires_at,
+            origin: p.origin,
             confirmed: true,
           })
+          .select()
+          .single(),
+      );
+    }
+    case 'profile.save': {
+      const p = tenantRequest
+        .extend({
+          display_name: z.string().max(60).default(''),
+          team: z.string().max(20).default(''),
+          avatar: z.string().max(20).default(''),
+          assistant_name: z.string().max(60).default(''),
+          chat_language: z.enum(['auto', 'th', 'en']).default('auto'),
+          personality: z.enum(['coworker', 'professional', 'concise', 'custom']).default('coworker'),
+          assistant_tone: z.string().max(300).default(''),
+          interaction_style: z.enum(['standard', 'witty', 'ob-oon']).default('standard'),
+          language_style: z.enum(['standard', 'northern-thai']).default('standard'),
+        })
+        .parse(input);
+      const profile = normalizeProfile(p);
+      // Names and the custom tone reach the AI prompt, so they follow the same credential checks as messages.
+      assertSafeText([profile.display_name, profile.assistant_name, profile.assistant_tone].join('\n'));
+      await member(actor, p.tenant);
+      const updated_at = new Date().toISOString();
+      // Ownership columns are never updated: change the employee's own row, or create it the first time.
+      const changed = await checked(
+        db
+          .from('member_profiles')
+          .update({ ...profile, updated_at })
+          .eq('tenant_id', p.tenant)
+          .eq('user_id', actor.user.id)
+          .select(),
+      );
+      if (changed.length) return changed[0];
+      return checked(
+        db
+          .from('member_profiles')
+          .insert({ ...profile, tenant_id: p.tenant, user_id: actor.user.id, updated_at })
           .select()
           .single(),
       );

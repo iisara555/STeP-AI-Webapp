@@ -16,6 +16,12 @@ Copied from `iisara555/STeP-AI-Harness` at
   document presentation presets and internal-media Prompt engine. Imports use explicit
   `.ts` extensions for web/server tooling. `starters.ts` uses Thai labels directly and
   exposes the team keys; it never uses team selection for authorization.
+- `desktop/teams.ts` keeps only the team ids and display names from upstream `manifest/teams.yaml`
+  (no starter prompts, paths or routing); a team choice never grants access.
+- `../src/assistant-profile.ts` copies the speaking-style fragments from `desktop/src/speaking-styles.ts`
+  verbatim and the personality tones from `src/modules/user-memory.js`; the web adds only the field
+  bounds and the line that ranks these preferences below the organization rules.
+- `web/src/assets/avatars/` are the unchanged Desktop profile drawings (see its README).
 - Public symbol assets in `web/public/step-symbol-*.svg` are the unchanged Desktop
   artwork; palette and usage come from upstream `DESIGN.md`. No logo is redrawn.
 

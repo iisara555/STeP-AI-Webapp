@@ -1,8 +1,17 @@
 import { useState } from 'react';
-import { Brain, Edit3, Plus, Trash2 } from './icons.tsx';
+import { Edit3, Plus, Trash2 } from './icons.tsx';
 import type { Memory } from '../../packages/harness-core/src/contracts.ts';
 import type { ViewProps } from './App.tsx';
-import { Empty, Modal, Segmented, Visibility } from './components.tsx';
+import { Empty, MEMORY_KINDS, Modal, Segmented, Visibility } from './components.tsx';
+const kindLabel = (kind: Memory['kind']) => MEMORY_KINDS.find(([k]) => k === kind)?.[1] || kind;
+const daysLeft = (iso: string | null) =>
+  iso ? Math.max(0, Math.ceil((Date.parse(iso) - Date.now()) / 86_400_000)) : 0;
+const lifetime = (m: Memory) =>
+  !m.expires_at
+    ? 'ไม่หมดอายุ'
+    : Date.parse(m.expires_at) <= Date.now()
+      ? 'หมดอายุแล้ว · ไม่ถูกใช้'
+      : 'ใช้ได้อีก ' + daysLeft(m.expires_at) + ' วัน';
 export function Memories({ host, data, tenant, workspace, refresh, fail }: ViewProps) {
   const [editing, setEditing] = useState<Memory | 'new' | null>(null),
     [deleting, setDeleting] = useState<Memory | null>(null),
@@ -38,13 +47,15 @@ export function Memories({ host, data, tenant, workspace, refresh, fail }: ViewP
         {rows.map((m) => (
           <article className="memory-card" key={m.id}>
             <div className="card-top">
-              <Brain size={21} />
+              <span className="badge">{kindLabel(m.kind)}</span>
               <Visibility shared={m.visibility === 'workspace'} />
             </div>
             <h2>{m.title}</h2>
             <p>{m.body}</p>
             <footer>
-              <span>{m.confirmed ? 'ยืนยันแล้ว' : 'รอยืนยัน'}</span>
+              <span>
+                {m.origin === 'chat' ? 'จากแชต' : 'พิมพ์เอง'} · {lifetime(m)}
+              </span>
               {m.owner_id === data.user.id && (
                 <div className="inline-actions">
                   <button aria-label={'แก้ไข ' + m.title} onClick={() => setEditing(m)}>
@@ -80,7 +91,8 @@ export function Memories({ host, data, tenant, workspace, refresh, fail }: ViewP
                   visibility: filter,
                   title: f.get('title'),
                   body: f.get('body'),
-                  kind: 'preference',
+                  kind: f.get('kind'),
+                  ttlDays: Number(f.get('ttlDays') || 0),
                 });
                 await refresh();
                 setEditing(null);
@@ -91,6 +103,10 @@ export function Memories({ host, data, tenant, workspace, refresh, fail }: ViewP
           >
             <p className="muted">
               ไม่เก็บรหัสผ่าน API key หรือสถานะงานชั่วคราว การกดบันทึกคือการยืนยันให้ใช้ความจำนี้ในงานถัดไป
+            </p>
+            <p className="muted">
+              ควรบันทึกข้อเท็จจริงที่ไม่ค่อยเปลี่ยน เช่น รูปแบบคำตอบที่ชอบ ข้อตกลงของงาน หรือสิ่งที่เคยแก้ให้
+              ไม่ต้องบันทึกความคืบหน้างานหรือเลขงาน ขั้นตอนการทำงานควรเป็น Skill
             </p>
             <label>
               ชื่อความจำ
@@ -112,6 +128,28 @@ export function Memories({ host, data, tenant, workspace, refresh, fail }: ViewP
                 rows={6}
               />
             </label>
+            <div className="form-grid">
+              <label>
+                ประเภท
+                <select name="kind" defaultValue={editing === 'new' ? 'preference' : editing.kind}>
+                  {MEMORY_KINDS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                อายุความจำ (วัน; 0 = ไม่หมดอายุ)
+                <input
+                  name="ttlDays"
+                  type="number"
+                  min={0}
+                  max={3650}
+                  defaultValue={editing === 'new' ? 0 : daysLeft(editing.expires_at)}
+                />
+              </label>
+            </div>
             <Visibility shared={filter === 'workspace'} />
             <footer>
               <button type="button" onClick={() => setEditing(null)}>

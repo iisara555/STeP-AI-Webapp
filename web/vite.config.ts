@@ -20,7 +20,8 @@ export default defineConfig({
           '/step-symbol-colour.svg',
           '/step-symbol-mono-white.svg',
           ...Object.keys(bundle)
-            .filter((n) => /\.(js|css|woff2|webp)$/.test(n))
+            // Profile pictures load only when shown; the offline shell does not download all 56.
+            .filter((n) => /\.(js|css|woff2|webp)$/.test(n) && !/(^|\/)avatar-\d+/.test(n))
             .map((n) => '/' + n),
         ];
         const template = readFileSync(new URL('./sw-template.js', import.meta.url), 'utf8');
