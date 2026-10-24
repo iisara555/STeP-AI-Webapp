@@ -1,5 +1,22 @@
 # Progress
 
+## 2026-10-24 · Protected routes reconciled with the Desktop-parity shell
+
+- Merged main `a3b3259` (#10/#11) into the protected-route branch. The new shell keeps its lazy-loaded
+  tool pages; its `replaceState` page state is replaced by `web/src/routes.ts`, so pages follow
+  browser history and anonymous visitors go to `/login?next=…`.
+- The Auth browser tests now use the new shell: the Skill page opens from the sidebar's เครื่องมือ
+  navigation, sign-out runs from เมนู STeP, and "no private view" checks look for that navigation in
+  the DOM. The old เมนูหลัก label no longer exists, so those checks would otherwise pass vacuously; the
+  sign-in test first asserts the navigation is present.
+- Validation: TypeScript/Prettier, 41 unit/API/PWA tests, 27 PostgreSQL tests, production build and
+  46 of 48 desktop/mobile Chromium checks passed, including all 16 Auth checks. The two Word download
+  checks fail the same way on unchanged main in the cloud container (Chromium 141 names the file
+  `download`); GitHub CI remains authoritative.
+- The hosted Auth settings this PR waited on are recorded below as configured by the operator. Left:
+  human review, then rebuilding the homelab frontend after merge and repeating the real-account
+  sign-in, reload and sign-out checks there.
+
 ## 2026-10-23 · Homelab rollout of #10 (Desktop-parity interface)
 
 - Merged #10 after CI passed. The second CI run followed a fix for a theme-switch contrast flicker
@@ -88,6 +105,17 @@
   production build, 38 unit/API/PWA and 27 PostgreSQL (PGlite) tests passed under
   Node 25.2.1, outside the declared engine range. Playwright was not run; no UI changed.
   No live AI, Google call, homelab installation or function deployment was performed.
+
+## 2026-10-23 · Protected routes reconciled with Desktop workflows
+
+- Merged the Desktop workflow pages into the protected-route branch. `web/src/routes.ts` is the
+  single page list; `/document-tools`, `/media`, `/history` and `/help` now reload, follow browser
+  history, redirect anonymous visitors to login and survive the Google sign-in return allowlist.
+- Validation: TypeScript/Prettier, 41 unit/API/PWA tests, 27 PostgreSQL (PGlite) tests, production
+  build and 44 of 46 desktop/mobile Chromium checks passed, including all 16 Auth checks covering
+  the ten page URLs. The two Word download checks also fail on unchanged `main` in the cloud
+  container (Chromium 141 reports the file name as `download`); GitHub CI remains authoritative.
+- Hosted Auth settings, Google OAuth credentials and real-account acceptance remain pending, as below.
 
 ## 2026-10-23 · Desktop workflows and complete product reference
 
@@ -184,6 +212,28 @@
   migration, deploying the API/frontend, setting a replacement `OPENROUTER_API_KEY`
   with `OPENROUTER_TRIAL_TENANT_ID`, then real-account authorization and $0 billing
   acceptance. Existing hosting/Google rollout requirements below remain applicable.
+
+## 2026-10-22 · Supabase Auth and protected routes
+
+- Added a public `/login`, PKCE callback handling, and stable URLs for all six workspace screens.
+  Anonymous deep links preserve an allowlisted destination through Google sign-in; reload and
+  browser back/forward follow the URL. The synthetic preview remains a separate Host.
+- Auth.getUser validates restored and refreshed identities before loading workspace data.
+  Account changes and sign-out clear private state; API 401 returns to login. Existing Google
+  identity, invitation, tenant, resource and Storage authorization remain enforced server-side.
+- A single-use callback exchange is shared across React StrictMode initialization effects.
+  Failed/missing callback codes produce sanitized login errors without exposing provider details.
+- Added configured-Auth browser checks with synthetic responses alongside the existing preview
+  checks, plus unit coverage for redirect allowlists, token verification and callback replay.
+- Local verification against main including OpenRouter: TypeScript/Prettier, 27 unit/API/PWA tests,
+  21 PostgreSQL isolation tests, production build, and all 32 Chromium desktop/mobile checks passed.
+  Chromium was installed
+  after an initial missing-browser failure. No real Google identity was used in these checks.
+- Read-only query of the existing hosted project confirmed all 16 public tables have RLS enabled.
+  No hosted Auth settings, database schema, staff records or production deployment changed.
+- Google OAuth credentials, a real Pages origin and real-account acceptance remain required.
+  The Supabase connector has no Auth configuration update tool; the browser Dashboard requires
+  sign-in. Follow [auth-setup.md](auth-setup.md) to complete the controlled setup in the Dashboard.
 
 ## 2026-10-22 · Supabase backend reconciliation
 
