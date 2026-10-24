@@ -1,5 +1,13 @@
 # Progress
 
+## 2026-10-24 · ตกลงขอบเขตยกระดับ Desktop parity
+
+- ผู้ใช้เลือกแก้ทั้ง 5 bugs จาก audit และเพิ่มฟีเจอร์ที่ขาดจาก Desktop โดยแบ่งหลายระยะ
+  เริ่มบันทึกคำศัพท์ใน `CONTEXT.md` และขอบเขต/คำถามที่ยังเปิดใน
+  [แผน Desktop parity](desktop-parity-plan.md)
+- อยู่ระหว่าง grill-with-docs เพื่อกำหนดสถาปัตยกรรมและเกณฑ์รับงาน ยังไม่ได้ตกลงวิธีรองรับ
+  browser/Vault/MCP/process ที่ผูกกับเครื่อง และยังไม่มี runtime fix หรือ deployment ในชุดนี้
+
 ## 2026-10-24 · Audit เทียบ Desktop 0.6.20
 
 - ตรวจ Webapp `a5a99d2` เทียบ Desktop `90ee71c` (main/tag `desktop-v0.6.20` ที่ตรวจจาก GitHub)
