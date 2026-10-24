@@ -25,6 +25,19 @@
 - Not carried over: Desktop's installed output styles, importance, AI-proposed memories, the lessons box,
   English UI and voice.
 
+## 2026-10-23 · Homelab rollout of #10 (Desktop-parity interface)
+
+- Merged #10 after CI passed. The second CI run followed a fix for a theme-switch contrast flicker
+  (button backgrounds no longer animate between themes); CI's first run had caught it at 3.67:1.
+- The homelab frontend was rebuilt from main `a78b769` (source copied with `git archive`) and is
+  healthy behind Tailscale Serve at the same tailnet origin. The previous image is tagged
+  `step-ai-webapp:pilot-8cd4a23` for rollback; earlier source trees were kept, not deleted.
+- Hosting smoke passed over HTTPS (static shell, OAuth callback, PWA cache headers, CSP, missing
+  assets). The served bundle contains the new interface, and the synthetic demo renders without page
+  errors. No Supabase function, migration or secret changed; the contract edit is type-only.
+- Not yet accepted: the new interface with a real Google account, Gemini, receipt OCR and the
+  OpenRouter sandbox after this rollout.
+
 ## 2026-10-23 · Desktop-parity interface and audit fixes
 
 - The web shell now follows Desktop 0.6.20 (`90ee71c`) DESIGN.md: Desktop's theme tokens verbatim,
