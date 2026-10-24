@@ -1,5 +1,21 @@
 # Progress
 
+## 2026-10-24 · Gemini busy responses
+
+- Observed on the hosted pilot: two chat runs (13:46 and 13:56 UTC) failed with `AI_SERVICE_ERROR` within
+  four seconds, with no document attached; the same short request succeeded a minute later. The worker
+  did not record Google's status, so the cause could not be confirmed; a temporary overload (503) of the
+  free-tier model fits the pattern.
+- Gemini failures now log only the step and HTTP status (never prompt, answer or key). 503 UNAVAILABLE,
+  which Google returns when it did not process the request, is retried once after 1.5 s; other failures
+  are not retried. 5xx responses that remain are reported as `AI_BUSY` (บริการ AI ไม่ว่างชั่วคราว,
+  send again later) instead of the admin-facing service error; countTokens 401/403 now report
+  `AI_NOT_CONFIGURED` like generation does.
+- A failed run still keeps its reservation in the monthly budget, as before (7 cents at 75/375).
+- Validation under Node 25.2.1: TypeScript, build, 45 unit/API/PWA tests (new: retry, busy, logging and
+  status mapping), 29 PostgreSQL tests and 36 Playwright tests. Requires redeploying the worker (and the
+  API for the shared code); not yet done.
+
 ## 2026-10-24 · Profile, assistant, answer style and memory types from Desktop
 
 - Settings opens on โปรไฟล์และผู้ช่วย, as Desktop's ทั่วไป: the 56 Desktop avatar drawings (53 offered),

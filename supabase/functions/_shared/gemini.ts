@@ -41,12 +41,41 @@ export async function responseJson(response: Response, max = 1000000) {
     throw new Error('PROVIDER_STREAM_INVALID');
   }
 }
+/** Google's own status for a failed call; only the step and status are logged, never text or keys. */
+function providerError(step: 'count' | 'generate' | 'embed', status: number) {
+  console.warn(JSON.stringify({ provider: 'gemini', step, status }));
+  return new Error(
+    status === 429
+      ? 'AI_RATE_LIMIT'
+      : status === 401 || status === 403
+        ? 'AI_NOT_CONFIGURED'
+        : status >= 500
+          ? 'AI_BUSY'
+          : 'AI_SERVICE_ERROR',
+  );
+}
+export const BUSY_RETRY_MS = 1500;
 export function gemini(env: Environment, fetcher: typeof fetch = fetch) {
   const key = requireEnv(env, 'GEMINI_API_KEY');
   const model = env('GEMINI_MODEL') || 'gemini-3.8-flash';
   if (!/^gemini-[a-z0-9.-]+$/.test(model)) throw new Error('AI_NOT_CONFIGURED');
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}`;
   const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': key };
+  // 503 UNAVAILABLE means Google did not process the request (an overloaded model, common on the free tier),
+  // so one retry neither repeats work nor costs anything. Every other failure is reported as it came.
+  const call = async (step: 'count' | 'generate' | 'embed', url: string, init: RequestInit) => {
+    let response = await fetcher(url, init);
+    if (response.status === 503) {
+      await response.body?.cancel();
+      await new Promise((resolve) => setTimeout(resolve, BUSY_RETRY_MS));
+      response = await fetcher(url, init);
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw providerError(step, response.status);
+    }
+    return response;
+  };
   return {
     async generate(input: GenerateInput): Promise<ModelResult> {
       assertSafeText(input.prompt);
@@ -54,7 +83,7 @@ export function gemini(env: Environment, fetcher: typeof fetch = fetch) {
       if (input.image) parts.push({ inlineData: { mimeType: input.image.mime, data: input.image.data } });
       const contents = [{ role: 'user', parts }];
       const signal = input.signal || AbortSignal.timeout(85000);
-      const counted = await fetcher(endpoint + ':countTokens', {
+      const counted = await call('count', endpoint + ':countTokens', {
         method: 'POST',
         headers,
         signal,
@@ -66,11 +95,10 @@ export function gemini(env: Environment, fetcher: typeof fetch = fetch) {
           },
         }),
       });
-      if (!counted.ok) throw new Error(counted.status === 429 ? 'AI_RATE_LIMIT' : 'AI_SERVICE_ERROR');
       const tokens = await responseJson(counted, 20000);
       if (!Number.isInteger(tokens.totalTokens) || tokens.totalTokens > LIMITS.contextTokens)
         throw new Error('CONTEXT_TOO_LARGE');
-      const response = await fetcher(endpoint + ':generateContent', {
+      const response = await call('generate', endpoint + ':generateContent', {
         method: 'POST',
         headers,
         signal,
@@ -83,14 +111,6 @@ export function gemini(env: Environment, fetcher: typeof fetch = fetch) {
           },
         }),
       });
-      if (!response.ok)
-        throw new Error(
-          response.status === 429
-            ? 'AI_RATE_LIMIT'
-            : response.status === 401 || response.status === 403
-              ? 'AI_NOT_CONFIGURED'
-              : 'AI_SERVICE_ERROR',
-        );
       const data = await responseJson(response);
       const candidate = data.candidates?.[0];
       if (!candidate || !['STOP', 'MAX_TOKENS'].includes(candidate.finishReason))
@@ -118,7 +138,8 @@ export function gemini(env: Environment, fetcher: typeof fetch = fetch) {
       assertSafeText(text);
       const embeddingModel = env('GEMINI_EMBEDDING_MODEL') || 'gemini-embedding-2';
       if (!/^gemini-embedding-[a-z0-9.-]+$/.test(embeddingModel)) throw new Error('AI_NOT_CONFIGURED');
-      const response = await fetcher(
+      const response = await call(
+        'embed',
         `https://generativelanguage.googleapis.com/v1beta/models/${embeddingModel}:embedContent`,
         {
           method: 'POST',
@@ -127,7 +148,6 @@ export function gemini(env: Environment, fetcher: typeof fetch = fetch) {
           body: JSON.stringify({ content: { parts: [{ text }] }, outputDimensionality: 768 }),
         },
       );
-      if (!response.ok) throw new Error('AI_SERVICE_ERROR');
       const data = await responseJson(response, 50000);
       const values = data.embedding?.values;
       if (
