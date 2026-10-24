@@ -3,7 +3,7 @@ import { Check, CheckCircle2, Download, FileImage, Receipt, RotateCw, ScanText, 
 import type { DocumentRecord, ReceiptResult, Run } from '../../packages/harness-core/src/contracts.ts';
 import { RECEIPT_BUYER, errorView } from '../../packages/harness-core/src/index.ts';
 import type { ViewProps } from './App.tsx';
-import { Art, Busy, Modal } from './components.tsx';
+import { Art, Busy, FreeTierNote, Modal } from './components.tsx';
 import { prepareReceipt, uploadFile } from './uploads.ts';
 import { saveBlob } from './host.ts';
 const types: Record<ReceiptResult['document_type'], string> = {
@@ -515,6 +515,7 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
           <p className="muted">
             เก็บต้นฉบับไว้เสมอ ภาพที่ปรับก่อนอ่านเป็นสำเนา ผลที่อ่านได้ยังต้องตรวจเทียบก่อนนำไปใช้
           </p>
+          <FreeTierNote ai={data.ai} />
           <footer>
             <button onClick={() => setConsent(null)}>ยกเลิก</button>
             <button className="primary" onClick={() => void start()}>

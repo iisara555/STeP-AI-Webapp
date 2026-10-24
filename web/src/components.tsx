@@ -225,3 +225,14 @@ export const MEMORY_KINDS: [Memory['kind'], string][] = [
   ['project', 'บริบทโครงการ'],
   ['reference', 'ข้อมูลอ้างอิง'],
 ];
+/** Shown wherever the employee confirms sending data while the organization uses a free Gemini key. */
+export function FreeTierNote({ ai }: { ai?: { freeTier?: boolean } }) {
+  if (!ai?.freeTier) return null;
+  return (
+    <p className="warning-note">
+      ช่วงทดลองใช้ Gemini รุ่นฟรีของ Google AI Studio: Google อาจนำข้อความ ไฟล์ และคำตอบไปปรับปรุงบริการ
+      และอาจให้คนตรวจอ่าน ใช้เฉพาะข้อมูลที่ไม่เป็นความลับหรือข้อมูลสมมติ
+      และอาจถูกจำกัดจำนวนครั้งต่อนาทีหรือต่อวัน
+    </p>
+  );
+}

@@ -50,26 +50,35 @@ before updates. Do not reset the live database. JWT gateway verification is disa
 code verifies Auth.getUser and membership, worker checks a shared secret, and the
 OAuth callback checks single-use expiring state and PKCE.
 
+Trial with a free Google AI Studio key: set `GEMINI_TIER=free` together with that key and a model the
+key lists as free. Free-tier use is an unpaid service under Google's Gemini API terms: Google may use
+prompts, files and answers to improve its products and reviewers may read them. Every consent screen
+and Settings › เชื่อมต่อ AI then says so, and the consent identity changes, so moving to a paid key asks
+staff again. Use only non-confidential or synthetic material during such a trial. Free-tier rate limits
+are low and change; a limit reached surfaces as `AI_RATE_LIMIT`. The in-app budget and rates still gate
+work and estimate usage; they are not a Google invoice.
+
 Set these **server-only Edge Function secrets** in the dashboard or via an ignored
 local environment file. Never put them in `VITE_` or a committed SQL migration.
 
-| Secret                           | Purpose                                                           |
-| -------------------------------- | ----------------------------------------------------------------- |
-| `APP_ORIGIN`                     | Exact HTTPS frontend origin, no trailing slash                    |
-| `AI_PROVIDER`                    | `gemini` (default) or the existing `openrouter_free` worker pilot |
-| `GEMINI_API_KEY`                 | Central paid-tier Gemini key owned by STeP                        |
-| `GEMINI_MODEL`                   | Verified available model, default `gemini-3.8-flash`              |
-| `GEMINI_EMBEDDING_MODEL`         | Available 768-dimensional model, default `gemini-embedding-2`     |
-| `OPENROUTER_API_KEY`             | Separate server-only OpenRouter trial key                         |
-| `OPENROUTER_TRIAL_TENANT_ID`     | Exact tenant UUID authorized for the admin free trial             |
-| `OPENROUTER_MODEL`               | Explicit `:free` model for the optional worker pilot              |
-| `OPENROUTER_PROVIDER`            | Pinned upstream for the optional worker pilot                     |
-| `WORKER_SECRET`                  | At least 32 random bytes, also stored in Vault                    |
-| `CREDENTIAL_ENCRYPTION_KEY`      | Base64 of exactly 32 random bytes                                 |
-| `GOOGLE_WORKSPACE_CLIENT_ID`     | Web OAuth client for Workspace                                    |
-| `GOOGLE_WORKSPACE_CLIENT_SECRET` | Its server-side secret                                            |
-| `GOOGLE_PICKER_API_KEY`          | Picker browser key restricted to actual origin/APIs               |
-| `GOOGLE_PICKER_APP_ID`           | Google Cloud project number, same OAuth project                   |
+| Secret                           | Purpose                                                             |
+| -------------------------------- | ------------------------------------------------------------------- |
+| `APP_ORIGIN`                     | Exact HTTPS frontend origin, no trailing slash                      |
+| `AI_PROVIDER`                    | `gemini` (default) or the existing `openrouter_free` worker pilot   |
+| `GEMINI_API_KEY`                 | Central paid-tier Gemini key owned by STeP                          |
+| `GEMINI_MODEL`                   | Verified available model, default `gemini-3.8-flash`                |
+| `GEMINI_EMBEDDING_MODEL`         | Available 768-dimensional model, default `gemini-embedding-2`       |
+| `GEMINI_TIER`                    | `free` only while trialling a Google AI Studio free key (see below) |
+| `OPENROUTER_API_KEY`             | Separate server-only OpenRouter trial key                           |
+| `OPENROUTER_TRIAL_TENANT_ID`     | Exact tenant UUID authorized for the admin free trial               |
+| `OPENROUTER_MODEL`               | Explicit `:free` model for the optional worker pilot                |
+| `OPENROUTER_PROVIDER`            | Pinned upstream for the optional worker pilot                       |
+| `WORKER_SECRET`                  | At least 32 random bytes, also stored in Vault                      |
+| `CREDENTIAL_ENCRYPTION_KEY`      | Base64 of exactly 32 random bytes                                   |
+| `GOOGLE_WORKSPACE_CLIENT_ID`     | Web OAuth client for Workspace                                      |
+| `GOOGLE_WORKSPACE_CLIENT_SECRET` | Its server-side secret                                              |
+| `GOOGLE_PICKER_API_KEY`          | Picker browser key restricted to actual origin/APIs                 |
+| `GOOGLE_PICKER_APP_ID`           | Google Cloud project number, same OAuth project                     |
 
 Supabase provides URL, service-role and anon keys to functions automatically.
 Operator scripts read local `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or service

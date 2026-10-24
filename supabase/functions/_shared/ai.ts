@@ -25,12 +25,23 @@ export function aiService(env: Environment): AiService {
     };
   }
   const model = env('GEMINI_MODEL') || 'gemini-3.8-flash';
+  // A free AI Studio key is an unpaid service: Google may use prompts and files to improve its products.
+  // The tier is part of the consent identity, so switching tiers asks the employee again.
+  const freeTier = env('GEMINI_TIER') === 'free';
   return {
     provider: 'gemini',
     model,
     upstream: 'google',
-    displayName: `Google Gemini API · ${model}`,
-    consentId: JSON.stringify(['gemini', model, env('GEMINI_EMBEDDING_MODEL') || 'gemini-embedding-2']),
+    displayName: freeTier
+      ? `Google Gemini API · รุ่นฟรี (AI Studio) · ${model}`
+      : `Google Gemini API · ${model}`,
+    consentId: JSON.stringify([
+      'gemini',
+      model,
+      env('GEMINI_EMBEDDING_MODEL') || 'gemini-embedding-2',
+      ...(freeTier ? ['tier=free'] : []),
+    ]),
+    freeTier,
     configured: Boolean(
       provider === 'gemini' &&
       /^gemini-[a-z0-9.-]+$/.test(model) &&

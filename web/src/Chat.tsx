@@ -31,7 +31,7 @@ import type {
 } from '../../packages/harness-core/src/contracts.ts';
 import { errorView } from '../../packages/harness-core/src/index.ts';
 import { saveBlob } from './host.ts';
-import { Art, Busy, MEMORY_KINDS, Modal, Visibility } from './components.tsx';
+import { Art, Busy, FreeTierNote, MEMORY_KINDS, Modal, Visibility } from './components.tsx';
 import type { ViewProps } from './App.tsx';
 import { exportWord } from './extract.ts';
 import { startersFor, starterTeams } from '../../packages/harness-core/vendor/desktop/starters.ts';
@@ -784,6 +784,7 @@ export function Chat({
               อ่าน Google Calendar ของฉันตามช่วงเวลาที่ถาม
             </label>
           )}
+          <FreeTierNote ai={data.ai} />
           <p className="small muted">การอ่านครั้งนี้ไม่อนุญาตให้ส่งอีเมล เปลี่ยนปฏิทิน หรือแชร์ไฟล์</p>
           <footer>
             <button onClick={() => setPlan(null)}>กลับไปแก้ข้อความ</button>
