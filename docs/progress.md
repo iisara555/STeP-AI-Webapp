@@ -1,5 +1,30 @@
 # Progress
 
+## 2026-10-24 · Profile, assistant, answer style and memory types from Desktop
+
+- Settings opens on โปรไฟล์และผู้ช่วย, as Desktop's ทั่วไป: the 56 Desktop avatar drawings (53 offered),
+  the name to be called, main team, assistant name, chat language, the four personality presets,
+  คมคาย (Witty) and ชวนคิด (Ob-Oon), and the ภาษาเหนือ language style, with Desktop's prepared
+  examples (no AI call). The sidebar shows the avatar, name and "ผู้ช่วย … · ทีม …"; the greeting,
+  starters and answer labels use the chosen name, team and assistant.
+- Preferences are stored per employee and tenant in `member_profiles` (migration
+  `20261023120000`). RLS lets only the employee read or change their own row; tenant admins cannot,
+  ownership columns are not updatable, and values are bounded in SQL and the API. Names and the custom
+  tone pass the same credential checks as messages.
+- The worker appends the run owner's preferences after `SYSTEM_RULES`, opening with a line that ranks
+  them below organization rules, sources, authority, approvals and privacy. Speaking-style text is
+  Desktop's verbatim. The consent preview lists "ชื่อเรียก ทีม และสไตล์การตอบที่คุณตั้งไว้" when a
+  profile exists; nothing else about the employee is added to the request.
+- Memories gain Desktop's types (adds บริบทโครงการ), a lifetime in days, their origin (พิมพ์เอง/จากแชต)
+  and Desktop's guidance. The consent preview now leaves out expired memories, matching the worker.
+- Validation under Node 25.2.1: TypeScript, build, 41 unit/API/PWA tests, 29 PostgreSQL tests (new
+  owner-only profile and memory-type checks) and 36 desktop/mobile Playwright tests passed; axe is clean
+  on 40 page/theme/viewport combinations. No live AI or Google call was made.
+- Requires before it works on the homelab: applying the migration to the hosted project and redeploying
+  the API and worker (the frontend alone shows Settings but cannot save). Not yet done.
+- Not carried over: Desktop's installed output styles, importance, AI-proposed memories, the lessons box,
+  English UI and voice.
+
 ## 2026-10-23 · Desktop-parity interface and audit fixes
 
 - The web shell now follows Desktop 0.6.20 (`90ee71c`) DESIGN.md: Desktop's theme tokens verbatim,

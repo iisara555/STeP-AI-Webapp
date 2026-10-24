@@ -13,7 +13,13 @@ import {
   selectMemories,
   untrusted,
 } from '../../../packages/harness-core/src/index.ts';
-import type { Memory, Skill, SourceRef } from '../../../packages/harness-core/src/contracts.ts';
+import type {
+  Memory,
+  MemberProfile,
+  Skill,
+  SourceRef,
+} from '../../../packages/harness-core/src/contracts.ts';
+import { profileRules } from '../../../packages/harness-core/src/assistant-profile.ts';
 import { checked, clients, constantTimeEqual, requireEnv, safeCode, type Environment } from './runtime.ts';
 import { modelClient, requireProviderConsent } from './ai.ts';
 import { calendarEvents, driveText, wantsCalendar } from './google.ts';
@@ -196,8 +202,17 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
           if (history) parts.push(untrusted('บทสนทนาก่อนหน้า', history));
           const prompt = boundedContext(parts, 27000);
           assertSafeText(prompt);
+          // Only the run owner's own preferences, read after worker_payload has checked their membership.
+          const profile = await checked<MemberProfile | null>(
+            service
+              .from('member_profiles')
+              .select('*')
+              .eq('tenant_id', job.tenant_id)
+              .eq('user_id', job.actor_id)
+              .maybeSingle(),
+          );
           const answer = await ai.generate({
-            system: SYSTEM_RULES,
+            system: profile ? SYSTEM_RULES + '\n\n' + profileRules(profile) : SYSTEM_RULES,
             prompt,
             signal: AbortSignal.timeout(80000),
           });
