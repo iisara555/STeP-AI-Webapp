@@ -54,6 +54,8 @@ const start = z.object({
   consent: z.literal(true),
   providerConsent: z.string().min(1).max(1000),
   googleConsent: z.boolean().default(false),
+  // A document tool from the Desktop allowlist; the worker adds its drafting contract, template and references.
+  documentTool: z.enum(['tor', 'memo', 'letter', 'project', 'minutes']).optional(),
 });
 export async function contextPlan(
   actor: Actor,
@@ -320,7 +322,7 @@ export async function dispatch(
           db
             .from('runs')
             .select(
-              'id,tenant_id,actor_id,session_id,document_id,kind,status,partial,result,error_code,created_at',
+              'id,tenant_id,actor_id,session_id,document_id,kind,status,partial,result,error_code,created_at,document_tool:input->>documentTool',
             )
             .eq('tenant_id', p.tenant)
             .eq('session_id', p.id)
@@ -620,6 +622,7 @@ export async function dispatch(
           payload: {
             message: p.message || '',
             skill: p.skill || null,
+            documentTool: p.documentTool || null,
             documentIds: p.documentIds,
             useMemory: p.useMemory,
             consent: true,

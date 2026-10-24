@@ -1,5 +1,59 @@
 # Progress
 
+## 2026-10-24 · Garuda, page layout and Desktop's Word/PDF export
+
+- The draft pane now exports with Desktop's exporter instead of the web's simple Markdown-to-Word:
+  layout roles for every document tool (title, front matter, sender, date, ที่/วันที่ on one line,
+  signature block, first-line indents), the สารบรรณ A4 page (top 2.5, bottom 2, left 3, right 2 cm),
+  Thai page numbers, header/footer text, a table of contents, Thai word breaks, and tables sized for
+  Thai headers and right-aligned figures.
+- ตราครุฑ as Desktop places it: 1.5 cm beside "บันทึกข้อความ" on a memo, 3 cm centred on an external
+  letter, first page only; none on TOR, proposals and minutes; "ไม่ใส่ตราครุฑ" for other agency forms.
+  The image is Desktop's pinned 800 × 800 PNG with its provenance notice; it carries no authority to
+  issue letters, and the pane says the layout must be checked against the agency's form.
+- Fonts: TH Sarabun New (memo) or TH SarabunPSK (other official drafts), selectable. The pinned font
+  files are served by the site and embedded in the Word file, so it opens the same on computers without
+  them. The export result states the font, Garuda height and whether embedding succeeded.
+- PDF goes through the browser's print dialog using Desktop's A4 page HTML with the same fonts. A
+  "หน้ากระดาษ" view shows that page beside the editor before exporting. Markdown export replaces .txt.
+- The export code (including the Garuda) loads only when a draft pane opens; startup JavaScript is
+  unchanged (about 740 kB before and after, split differently). Small IBM Plex font subsets are no longer
+  inlined as `data:` URIs, which the production CSP (`font-src 'self'`) had been blocking.
+- Validation under Node 25.2.1: TypeScript, build, 53 unit/API/PWA tests (new: Garuda bytes, memo,
+  letter and no-Garuda layouts, margins, fonts, PDF page escaping), 29 PostgreSQL tests and 38
+  desktop/mobile Playwright tests (Word with embedded fonts and the Garuda header, page preview, PDF
+  print, axe on the pane in both themes). A one-off run of a production build with the homelab nginx
+  headers showed the preview, fonts, print and Word export work with no CSP violation.
+- Not carried over yet: agency DOCX templates (Desktop's `document-template.ts`), Excel/PowerPoint
+  export, images in drafts, and saving export settings with the task. Requires only a homelab frontend
+  rebuild; no API, worker or migration change.
+
+## 2026-10-24 · Document drafting as Desktop does it
+
+- Observed: a TOR from เครื่องมือร่างเอกสาร came back as the canned "ยังไม่พบเอกสารองค์กรที่ยืนยันเรื่องนี้"
+  reply. Causes: the worker's organization-question guard answered before the Skill was loaded; the
+  web sent only the primary Skill (no drafting contract, supporting Skill, template or references);
+  Skill pointer files to central templates were not followed; 4,096 output tokens cut a TOR short; and
+  the answer was not split into draft and review.
+- A run now records its document tool (`input.documentTool`, validated against Desktop's five tools).
+  The worker loads Desktop's `<document_tool_contract>` (copied verbatim) between organization rules
+  and personal preferences, the supporting Skill `thai-official-documents`, the tool's working template
+  and drafting references by imported path, and follows short pointer files one hop to the central
+  copy. Files the Harness pack lacks are named as gaps the review must record, never filled from
+  general knowledge. A revision sends the current draft as untrusted content.
+- Document runs may answer with up to 8,192 tokens, only as far as the existing reservation covers:
+  the reservation assumes 64k input tokens while context stays capped at 32k. No budget rule changed.
+- The answer uses Desktop's `<document_draft>`/`<document_review>` envelope: the draft opens in the
+  ผลงาน pane, and the conversation shows only the review and what still needs confirmation. The
+  document tool page shows which Skills and template it uses.
+- Validation under Node 25.2.1: TypeScript, build, 48 unit/API/PWA tests (new: context assembly,
+  pointer files, contract order, output cost bound, and a mocked worker run proving a TOR reaches the
+  model with its contract), 29 PostgreSQL tests and 38 desktop/mobile Playwright tests (new: draft goes
+  to the pane, review stays in the chat). No live AI call was made.
+- Known gaps in the imported Harness pack: `docs/thai-data-formatting.md` and
+  `skills/pm/tor-government-writing/references/task-adaptations.md` are not imported; drafts list them.
+- Requires redeploying the API and worker and rebuilding the homelab frontend. No migration. Not yet done.
+
 ## 2026-10-24 · Profile, assistant, answer style and memory types from Desktop
 
 - Settings opens on โปรไฟล์และผู้ช่วย, as Desktop's ทั่วไป: the 56 Desktop avatar drawings (53 offered),

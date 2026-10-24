@@ -335,6 +335,18 @@ export function errorView(code: string): ErrorView {
       action: 'ดูเอกสาร',
       retry: false,
     },
+    DOCUMENT_FONT_UNAVAILABLE: {
+      title: 'โหลดฟอนต์สำหรับฝังในไฟล์ไม่ได้',
+      detail: 'ไฟล์ฟอนต์ไม่ครบหรือไม่ตรงกับที่ตรวจไว้ ปิด “ฝังฟอนต์” ในตั้งค่าส่งออกแล้วส่งออกใหม่ได้',
+      action: 'ลองอีกครั้ง',
+      retry: true,
+    },
+    INVALID_DOCUMENT: {
+      title: 'จัดหน้าร่างนี้ไม่ได้',
+      detail: 'ร่างมีตารางหรือรายการซ้อนลึกเกินที่รองรับ ลดระดับรายการหรือแบ่งตาราง แล้วส่งออกใหม่',
+      action: 'แก้ร่าง',
+      retry: false,
+    },
     DOCUMENT_PAGE_LIMIT: {
       title: 'PDF มีมากกว่า 30 หน้า',
       detail: 'แบ่งเอกสารเป็นไฟล์ละไม่เกิน 30 หน้า แล้วอัปโหลดใหม่',

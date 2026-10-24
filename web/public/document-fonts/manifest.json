@@ -1,0 +1,44 @@
+[
+  {
+    "family": "TH Sarabun New",
+    "files": {
+      "regular": {
+        "file": "sarabun-new-regular.ttf",
+        "sha256": "5f313df437c7b80e1a8ef2afad821279c21010d49a71a9fa571d171de5376858"
+      },
+      "bold": {
+        "file": "sarabun-new-bold.ttf",
+        "sha256": "51fe212af014ee66a8a10d168c543953743125becc61bf649993e6df1bbc89e6"
+      },
+      "italic": {
+        "file": "sarabun-new-italic.ttf",
+        "sha256": "59258e1b84364ec6295e438d87248a2d6bd1408ae9384c7258c1287e7a5d80fb"
+      },
+      "boldItalic": {
+        "file": "sarabun-new-boldItalic.ttf",
+        "sha256": "fadc7ca763697a15cce080fe81825b20b908f3bf7c51da4f19689e74e63565b7"
+      }
+    }
+  },
+  {
+    "family": "TH SarabunPSK",
+    "files": {
+      "regular": {
+        "file": "sarabun-psk-regular.ttf",
+        "sha256": "2936ea292bf2b82c572ed50837dc4a04170076b561bbfc5a9306037a989b470a"
+      },
+      "bold": {
+        "file": "sarabun-psk-bold.ttf",
+        "sha256": "969fe7493a68f136dab33f51fabcbcaa44fe040582bec1a575e707f1850eb06c"
+      },
+      "italic": {
+        "file": "sarabun-psk-italic.ttf",
+        "sha256": "9fd6e9672f5a78edf186591b8a9f376b8c27d0aac37875f818670a075995cec9"
+      },
+      "boldItalic": {
+        "file": "sarabun-psk-boldItalic.ttf",
+        "sha256": "d52e0c8a058afc18f45c50b90f48de5954a46c0868ac826932ba5248b128ffc0"
+      }
+    }
+  }
+]

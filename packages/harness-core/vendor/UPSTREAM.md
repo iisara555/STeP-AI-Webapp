@@ -16,6 +16,24 @@ Copied from `iisara555/STeP-AI-Harness` at
   document presentation presets and internal-media Prompt engine. Imports use explicit
   `.ts` extensions for web/server tooling. `starters.ts` uses Thai labels directly and
   exposes the team keys; it never uses team selection for authorization.
+- `desktop/document-contract.ts` is `documentToolRule` from upstream `desktop/electron/document-tools.ts`,
+  unchanged apart from its import path. The web's context assembly around it is in
+  `../src/document-context.ts`.
+- `desktop/draft.ts`, `desktop/thai-typography.ts` and `desktop/document-layout.ts` are upstream
+  `desktop/src/` files, unchanged apart from `.ts` import extensions.
+- `desktop/garuda-image.ts` is upstream `desktop/electron/garuda-image.ts` with the same pinned PNG bytes;
+  only the decoding uses `atob` instead of Node's `Buffer`. Provenance and sizing are in
+  `docs/third-party-notices/thai-garuda.md` (copied unchanged).
+- `desktop/document-export.ts` is upstream `desktop/electron/export.ts` for the browser. The Word
+  document, table layout and PDF page HTML are unchanged. Changes: imports; `DocumentImage` is declared
+  locally and image bytes are encoded with `btoa`; `pdfHtml` accepts extra `@font-face` rules; the
+  spreadsheet, slide, Markdown-file and agency-template (`document-template.ts`) exports and file writing
+  are removed; `exportDocx`/`exportPdfHtml` replace `exportDocument` and read the Markdown draft with
+  upstream `markdownDocument`.
+- `desktop/document-fonts.ts` is upstream `desktop/electron/document-fonts.ts` with a font loader in place
+  of the file system, Web Crypto hashes and the platform `DOMParser`; the manifest pin, per-file hashes
+  and the package edits are unchanged. The font files themselves are the unchanged upstream
+  `desktop/assets/document-fonts/` set, served from `web/public/document-fonts/` with their licences.
 - `desktop/teams.ts` keeps only the team ids and display names from upstream `manifest/teams.yaml`
   (no starter prompts, paths or routing); a team choice never grants access.
 - `../src/assistant-profile.ts` copies the speaking-style fragments from `desktop/src/speaking-styles.ts`

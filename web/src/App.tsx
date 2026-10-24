@@ -257,7 +257,7 @@ export function App() {
     setWorkspaceId('');
     setSession(created);
     setSkill(selected || null);
-    setPrepared({ sessionId: created.id, text: work.message, ...options });
+    setPrepared({ sessionId: created.id, text: work.message, documentTool: work.documentTool, ...options });
     changePage('chat');
   };
   const newTask = () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowUp,
@@ -31,14 +31,20 @@ import type {
 } from '../../packages/harness-core/src/contracts.ts';
 import { errorView } from '../../packages/harness-core/src/index.ts';
 import { saveBlob } from './host.ts';
-import { Art, Busy, FreeTierNote, MEMORY_KINDS, Modal, Visibility } from './components.tsx';
+import { Art, Busy, FreeTierNote, MEMORY_KINDS, Modal, Segmented, Visibility } from './components.tsx';
 import type { ViewProps } from './App.tsx';
-import { exportWord } from './extract.ts';
+import type { ExportChoice } from './DraftExport.tsx';
 import { startersFor, starterTeams } from '../../packages/harness-core/vendor/desktop/starters.ts';
 import { teamLabel } from '../../packages/harness-core/vendor/desktop/teams.ts';
 import { assistantName } from '../../packages/harness-core/src/assistant-profile.ts';
 import { parseDocumentOutput } from '../../packages/harness-core/vendor/desktop/document-output.ts';
+import type { DocumentToolId } from '../../packages/harness-core/vendor/desktop/document-tools.ts';
+import { resolvePresentation } from '../../packages/harness-core/vendor/desktop/document-presentation.ts';
+import { isDocumentTool } from '../../packages/harness-core/src/document-context.ts';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
+// Word, PDF and the page preview load the Markdown reader, Garuda and layout only when a draft is exported or previewed.
+const DraftExport = lazy(() => import('./DraftExport.tsx').then((m) => ({ default: m.DraftExport })));
+const DraftPage = lazy(() => import('./DraftExport.tsx').then((m) => ({ default: m.DraftPage })));
 type Plan = {
   provider: string;
   providerConsent: string;
@@ -49,7 +55,22 @@ type Plan = {
   profile?: boolean;
 };
 /** Text handed to a newly created task; `submit` opens the consent preview right away. */
-export type PreparedText = { sessionId: string; text: string; submit?: boolean; documents?: string[] };
+export type PreparedText = {
+  sessionId: string;
+  text: string;
+  submit?: boolean;
+  documents?: string[];
+  documentTool?: string;
+};
+/** A document answer's two blocks, as Desktop separates them; null when the answer is ordinary chat. */
+const documentParts = (body: string, tool?: DocumentToolId) => {
+  if (!body.includes('<document_draft>')) return null;
+  try {
+    return parseDocumentOutput(body, tool || 'tor');
+  } catch {
+    return null;
+  }
+};
 const titleFrom = (text: string) => {
   const line = text.trim().split('\n')[0];
   return line.length > 60 ? line.slice(0, 57) + '…' : line || 'งานใหม่';
@@ -95,13 +116,20 @@ export function Chat({
     [menu, setMenu] = useState(false);
   const [source, setSource] = useState<{ title: string; body: string } | null>(null),
     [remember, setRemember] = useState<ChatMessage | null>(null);
+  const [documentTool, setDocumentTool] = useState<DocumentToolId | undefined>();
   const memberProfile = data.profiles?.find((p) => p.tenant_id === tenant);
   const assistant = assistantName(memberProfile);
   const [starterTeam, setStarterTeam] = useState(
     memberProfile?.team && starterTeams.includes(memberProfile.team) ? memberProfile.team : '',
   );
-  const [wordPreset, setWordPreset] = useState<'saraban' | 'report' | 'book'>('report'),
-    [format, setFormat] = useState<'docx' | 'txt'>('docx');
+  // Export layout follows the document tool, as on Desktop: official drafts start on the สารบรรณ page with page numbers.
+  const [presentation, setPresentation] = useState(() => resolvePresentation()),
+    [exportChoice, setExportChoice] = useState<ExportChoice>({ font: 'auto', garuda: 'auto' }),
+    [draftView, setDraftView] = useState<'edit' | 'page'>('edit');
+  useEffect(() => {
+    setPresentation(resolvePresentation({}, Boolean(documentTool)));
+    setExportChoice({ font: 'auto', garuda: 'auto' });
+  }, [session?.id, documentTool]);
   const composer = useRef<HTMLTextAreaElement>(null),
     autoPreview = useRef(false);
   const bottom = useRef<HTMLDivElement>(null),
@@ -115,6 +143,7 @@ export function Chat({
     if (handoff) consumePrepared();
     autoPreview.current = Boolean(handoff?.submit);
     setDocuments(handoff?.documents || []);
+    setDocumentTool(isDocumentTool(handoff?.documentTool) ? handoff.documentTool : undefined);
     setPlan(null);
     setMenu(false);
     setDraftOpen(Boolean(handoff && session?.draft));
@@ -129,6 +158,9 @@ export function Chat({
         setMessages(result.messages);
         setDraft(result.session.draft);
         setSession(result.session);
+        // A reopened drafting task keeps its document tool, recorded on its earlier runs.
+        const tool = handoff?.documentTool || result.runs.find((r) => r.document_tool)?.document_tool;
+        setDocumentTool(isDocumentTool(tool) ? tool : undefined);
         setRun(
           result.runs.find((r) => ['queued', 'running', 'waiting_approval'].includes(r.status)) ||
             result.runs[0] ||
@@ -167,6 +199,13 @@ export function Chat({
           if (!stopped) {
             setMessages(result.messages);
             setSession(result.session);
+            // As on Desktop, a fresh document answer is staged in the draft pane for review; saving stays manual.
+            const answer = [...result.messages].reverse().find((m) => m.role === 'assistant');
+            const staged = documentTool && answer ? documentParts(answer.body, documentTool) : null;
+            if (staged?.draft) {
+              setDraft(staged.draft);
+              setDraftOpen(true);
+            }
             await refresh();
           }
         }
@@ -182,7 +221,7 @@ export function Chat({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [run?.id, tenant, host, session?.id]);
+  }, [run?.id, tenant, host, session?.id, documentTool]);
   useEffect(() => {
     // The home screen opens at its greeting; only a conversation follows its newest turn.
     if (messages.length) bottom.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -244,6 +283,7 @@ export function Chat({
         requestId: crypto.randomUUID(),
         message: text,
         skill: skill?.skill_key,
+        documentTool,
         documentIds: documents,
         useMemory,
         consent: true,
@@ -303,11 +343,6 @@ export function Chat({
       .call<Conversation>('session.draft', { tenant, id: session.id, version: session.version, draft })
       .then((s) => setSession(s))
       .catch(fail);
-  const exportDraft = () => {
-    if (!session || !draft.trim()) return;
-    if (format === 'docx') void exportWord(draft, session.title, wordPreset).catch(fail);
-    else saveBlob(new Blob([draft], { type: 'text/plain;charset=utf-8' }), 'ร่างเอกสาร.txt');
-  };
   const called = memberProfile?.display_name || data.user.name?.split(' ')[0] || '';
   // As on Desktop: the name the employee chose, then their team.
   const greeting =
@@ -484,7 +519,19 @@ export function Chat({
               className={'message ' + (m.role === 'user' ? 'user' : 'assistant')}
               aria-label={m.role === 'user' ? 'คุณ' : assistant}
             >
-              <div className="message-body">{m.body}</div>
+              {m.role === 'assistant' && documentParts(m.body, documentTool) ? (
+                <>
+                  <p className="draft-staged">
+                    <FileText size={14} />
+                    ร่างเอกสารอยู่ในแผงผลงาน · ด้านล่างคือผลตรวจและสิ่งที่ต้องยืนยัน ไม่อยู่ในตัวเอกสาร
+                  </p>
+                  <div className="message-body">
+                    {documentParts(m.body, documentTool)!.review || 'ไม่มีรายการที่ต้องตรวจเพิ่ม'}
+                  </div>
+                </>
+              ) : (
+                <div className="message-body">{m.body}</div>
+              )}
               {m.sources?.length > 0 && (
                 <div className="sources">
                   {m.sources.map((s) => (
@@ -509,12 +556,7 @@ export function Chat({
                   </button>
                   <button
                     onClick={() => {
-                      try {
-                        const match = /<document_draft>/.test(m.body);
-                        setDraft(match ? parseDocumentOutput(m.body, 'tor').draft : m.body);
-                      } catch {
-                        setDraft(m.body);
-                      }
+                      setDraft(documentParts(m.body, documentTool)?.draft ?? m.body);
                       setDraftOpen(true);
                     }}
                   >
@@ -671,23 +713,30 @@ export function Chat({
                 <Table size={15} />
                 ตาราง
               </button>
-              <select
-                aria-label="รูปแบบ Word"
-                value={wordPreset}
-                onChange={(e) => setWordPreset(e.target.value as typeof wordPreset)}
-              >
-                <option value="saraban">สารบรรณ · 16 pt</option>
-                <option value="report">รายงาน · 14 pt</option>
-                <option value="book">หนังสือ · 16 pt</option>
-              </select>
+              <Segmented
+                label="มุมมองร่าง"
+                className="segmented draft-view"
+                value={draftView}
+                onChange={setDraftView}
+                options={[
+                  { value: 'edit', label: 'แก้ไข' },
+                  { value: 'page', label: 'หน้ากระดาษ', disabled: !draft.trim() },
+                ]}
+              />
             </div>
-            <textarea
-              className="draft-editor"
-              aria-label="ร่างเอกสาร"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="ใช้คำตอบเป็นร่าง หรือเริ่มพิมพ์เองได้"
-            />
+            {draftView === 'page' && draft.trim() ? (
+              <Suspense fallback={<Busy label="กำลังจัดหน้า" />}>
+                <DraftPage draft={draft} documentTool={documentTool} choice={exportChoice} />
+              </Suspense>
+            ) : (
+              <textarea
+                className="draft-editor"
+                aria-label="ร่างเอกสาร"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="ใช้คำตอบเป็นร่าง หรือเริ่มพิมพ์เองได้"
+              />
+            )}
             <details className="draft-sources">
               <summary>แหล่งอ้างอิงที่ใช้ ({draftSources.length})</summary>
               {draftSources.length ? (
@@ -705,26 +754,35 @@ export function Chat({
                 <p className="small muted">คำตอบในงานนี้ยังไม่ได้อ้างอิงเอกสารหรือความรู้องค์กร</p>
               )}
             </details>
-            <p className="draft-note">Word ยังไม่ฝังฟอนต์หรือตราครุฑ ตรวจรูปแบบกับแบบของหน่วยงานก่อนใช้</p>
-            <footer className="artifact-footer">
-              <button onClick={saveDraft}>
-                <Save size={15} />
-                บันทึก
-              </button>
-              <span className="spacer" />
-              <select
-                aria-label="รูปแบบไฟล์"
-                value={format}
-                onChange={(e) => setFormat(e.target.value as typeof format)}
-              >
-                <option value="docx">Word (.docx)</option>
-                <option value="txt">ข้อความ (.txt)</option>
-              </select>
-              <button className="primary" disabled={!draft.trim()} onClick={exportDraft}>
-                <Download size={15} />
-                ส่งออก
-              </button>
-            </footer>
+            <p className="draft-note">
+              {['memo', 'letter'].includes(documentTool || '')
+                ? 'ตราครุฑและการจัดหน้าเป็นแบบทำงานตามระเบียบงานสารบรรณ ตรวจกับแบบของหน่วยงานก่อนเสนอ'
+                : 'การจัดหน้าเป็นแบบทำงาน ตรวจกับแบบของหน่วยงานก่อนใช้'}
+            </p>
+            <Suspense
+              fallback={
+                <footer className="artifact-footer">
+                  <Busy label="กำลังเตรียมการส่งออก" />
+                </footer>
+              }
+            >
+              <DraftExport
+                draft={draft}
+                title={session.title}
+                documentTool={documentTool}
+                choice={exportChoice}
+                onChoice={setExportChoice}
+                presentation={presentation}
+                onPresentation={setPresentation}
+                onError={fail}
+                leading={
+                  <button onClick={saveDraft}>
+                    <Save size={15} />
+                    บันทึก
+                  </button>
+                }
+              />
+            </Suspense>
           </aside>,
           artifactSlot,
         )}
