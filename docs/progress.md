@@ -44,6 +44,25 @@
 - Not done here: no deployment, no real-account check. Desktop-only surfaces (tabs for เว็บ/งานเบื้องหลัง,
   model picker, งานตั้งเวลา, avatar pictures) are not imitated because the web has no such capability.
 
+## 2026-10-23 · Function and homelab rollout of #7/#8
+
+- Merged #7 and #8. API and worker were deployed from main `8cd4a23` with Supabase
+  CLI 2.122.0 (`--use-api`, shared import map); both are ACTIVE with `verify_jwt`
+  false. Deployed source matches main file-for-file except the type-only
+  `contracts.ts`. google-callback was unchanged and not redeployed.
+- The first CLI attempt without `--import-map` failed server-side bundling on `zod`
+  and changed nothing; the deployment guide now passes the import map.
+- The deployment guide named the Picker project-number secret `GOOGLE_PICKER_APP_ID`, but the API
+  reads `GOOGLE_PROJECT_NUMBER`; the guide now uses the code's name. If the secret was set under the
+  old name, the operator must add it as `GOOGLE_PROJECT_NUMBER` before Picker can work.
+- Runtime smoke: API 401 for the homelab origin, 403 for a foreign origin, worker 403
+  without its secret; function logs show clean boots.
+- The homelab frontend was rebuilt from the same commit and is healthy; hosting smoke
+  passed and the served bundle contains `AI_EMPTY_REPLY`. The previous image is kept as
+  `step-ai-webapp:pilot-5f7d059` for rollback.
+- Not yet accepted: a successful OpenRouter sandbox/chat reply after this deployment,
+  Workspace connection, Gemini, worker dispatch through Vault and member denial.
+
 ## 2026-10-23 · Homelab origin, first owner and OpenRouter empty replies
 
 - The frontend from main `5f7d059` runs on the homelab (Ubuntu 24.04) as a healthy,
