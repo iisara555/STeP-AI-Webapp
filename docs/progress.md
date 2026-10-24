@@ -5,8 +5,11 @@
 - ผู้ใช้เลือกแก้ทั้ง 5 bugs จาก audit และเพิ่มฟีเจอร์ที่ขาดจาก Desktop โดยแบ่งหลายระยะ
   เริ่มบันทึกคำศัพท์ใน `CONTEXT.md` และขอบเขต/คำถามที่ยังเปิดใน
   [แผน Desktop parity](desktop-parity-plan.md)
-- อยู่ระหว่าง grill-with-docs เพื่อกำหนดสถาปัตยกรรมและเกณฑ์รับงาน ยังไม่ได้ตกลงวิธีรองรับ
-  browser/Vault/MCP/process ที่ผูกกับเครื่อง และยังไม่มี runtime fix หรือ deployment ในชุดนี้
+- ผู้ใช้เลือกเว็บอย่างเดียว ไม่ติดตั้งตัวช่วยบนเครื่องพนักงาน บันทึกใน
+  [ADR 0001](adr/0001-web-only-desktop-parity.md); browser/MCP/process ที่จำเป็นต้องออกแบบ runtime
+  ฝั่งเซิร์ฟเวอร์พร้อมแยกสิทธิ์/ข้อมูล แต่ยังไม่ได้เลือก host/sandbox หรือ provisioning
+- อยู่ระหว่าง grill-with-docs เพื่อกำหนด approval ของ external writes และเกณฑ์รับงาน
+  ยังไม่มี runtime fix หรือ deployment ในชุดนี้
 
 ## 2026-10-24 · Audit เทียบ Desktop 0.6.20
 
