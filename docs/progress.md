@@ -1,5 +1,25 @@
 # Progress
 
+## 2026-10-24 · Audit เทียบ Desktop 0.6.20
+
+- ตรวจ Webapp `a5a99d2` เทียบ Desktop `90ee71c` (main/tag `desktop-v0.6.20` ที่ตรวจจาก GitHub)
+  หน้าตา โปรไฟล์ แบบฟอร์ม Skill และการเตรียม Prompt ใกล้เคียง แต่ editor/Office/history,
+  tool loop, personal Skills, learning และ recurring schedules ยังไม่เทียบเท่า
+  ดู [รายงาน audit](desktop-parity-audit-2026-10-24.md) สำหรับหลักฐานและข้อจำกัด
+- ทำซ้ำได้ด้วยข้อมูลสังเคราะห์: P1 worker ส่งบริบทหลัง revoke/cancel ระหว่างรอ Drive;
+  P2 ร่างหายเมื่อเปลี่ยนหน้า, response บันทึกช้าดึงกลับงานเก่า, แก้ความจำหมดอายุเป็นไม่หมดอายุ
+  และ OCR เลิก polling หลัง network error ครั้งเดียว รายงานนี้ยังไม่ได้แก้ runtime findings เหล่านี้
+- แก้ข้อความ reference ที่ยังบอกว่าไม่มี TTL UI/โปรไฟล์ และค่า sandbox output limit เป็น 2048
+  ไม่เปลี่ยนพฤติกรรมแอปหรือ checkout Desktop
+- ตรวจ hosted แบบอ่านอย่างเดียว: migration ครบ 13 รุ่นรวม member_profiles; API/worker ACTIVE v18
+  และ callback v14; deployed source โปรไฟล์ตรงกับ checkout แต่ Gemini busy retry/AI_BUSY ยังไม่ deployed
+  ไม่อ่านข้อมูลพนักงาน/เอกสาร/grants ไม่ deploy และไม่เรียก AI/Google จริง
+- Validation: build ผ่าน, unit/API/PWA 45/45, PostgreSQL/PGlite 29/29 และ Chromium desktop/mobile
+  36/36 ผ่าน TypeScript ผ่าน แต่ `npm run check` ติด CRLF และ ignored local settings;
+  reference check ติด CRLF เช่นกัน ตรวจ Git-blob SHA-256 แล้วตรงกับ inventory ครบ 91/91
+  ตรวจ `npm run check` และ reference แบบไม่ระบุ source ใน clean LF worktree แล้วผ่าน
+  ผลเหล่านี้ไม่ยืนยัน real-account/deployment acceptance หรือการแก้ findings
+
 ## 2026-10-24 · Gemini busy responses
 
 - Observed on the hosted pilot: two chat runs (13:46 and 13:56 UTC) failed with `AI_SERVICE_ERROR` within
