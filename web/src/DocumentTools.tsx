@@ -5,6 +5,7 @@ import {
   type PreparedWork,
 } from '../../packages/harness-core/src/desktop-workflows.ts';
 import { Busy } from './components.tsx';
+import { skillTitle } from '../../packages/harness-core/src/skill-labels.ts';
 import type { ViewProps } from './App.tsx';
 
 export function DocumentTools({
@@ -57,6 +58,20 @@ export function DocumentTools({
         >
           <h2>{tool.title}</h2>
           <p className="muted">{tool.description}</p>
+          {/* As on Desktop: which Skills and working template this draft follows. */}
+          <details className="document-skill-info">
+            <summary>ขั้นตอนที่ใช้ร่างและตรวจข้อมูล</summary>
+            <p>
+              Skill หลัก: <strong title={tool.skill}>{skillTitle(tool.skill)}</strong>
+              {tool.supportSkills.length > 0 && (
+                <> · ร่วมกับ {tool.supportSkills.map((k) => skillTitle(k)).join(', ')}</>
+              )}
+            </p>
+            <p className="small muted">
+              ใช้โครงสร้าง กติกา และการตรวจแหล่งข้อมูลของ Skill พร้อมแม่แบบ {tool.template.split('/').pop()}{' '}
+              เพื่อร่าง หากยังไม่มีแบบหน่วยงานที่ยืนยันแล้ว ระบบจะระบุไว้ในผลตรวจ
+            </p>
+          </details>
           <label>
             รูปแบบ
             <select value={variant} onChange={(e) => setVariant(e.target.value)}>

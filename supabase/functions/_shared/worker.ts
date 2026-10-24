@@ -20,6 +20,12 @@ import type {
   SourceRef,
 } from '../../../packages/harness-core/src/contracts.ts';
 import { profileRules } from '../../../packages/harness-core/src/assistant-profile.ts';
+import {
+  chatSystem,
+  documentContext,
+  documentOutputTokens,
+  isDocumentTool,
+} from '../../../packages/harness-core/src/document-context.ts';
 import { checked, clients, constantTimeEqual, requireEnv, safeCode, type Environment } from './runtime.ts';
 import { modelClient, requireProviderConsent } from './ai.ts';
 import { calendarEvents, driveText, wantsCalendar } from './google.ts';
@@ -101,6 +107,8 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
     let result: Record<string, unknown>;
     if (job.kind === 'chat') {
       const query = assertSafeText(String(job.input.message || ''));
+      // A document tool or a chosen Skill is guided drafting: it proceeds with its Skill, template and gaps disclosed.
+      const tool = isDocumentTool(job.input.documentTool) ? job.input.documentTool : undefined;
       const registered = context.sources as {
         source_key: string;
         title: string;
@@ -159,7 +167,7 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
         );
         // A chosen, registered Skill (every document form sends one) is guided drafting, not a question to answer
         // from documents. An unknown Skill name does not lift the rule.
-        if (orgQuestion && !found.length && !parts.length && !(job.input.skill && skill)) {
+        if (orgQuestion && !found.length && !parts.length && !tool && !(job.input.skill && skill)) {
           result = {
             text: 'ยังไม่พบเอกสารองค์กรที่ยืนยันเรื่องนี้ครับ กรุณาแนบเอกสารที่เกี่ยวข้อง หรือให้ผู้ดูแลนำเข้าเอกสาร STeP เพิ่มก่อน',
             sources: [],
@@ -171,6 +179,15 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
             const selected = skillContext(skill, registered, query);
             parts.push(...selected.parts);
             sources.push(...selected.sources);
+          }
+          if (tool) {
+            const drafting = documentContext(tool, context.skills as Skill[], registered);
+            parts.push(...drafting.parts);
+            sources.push(...drafting.sources);
+            // After the first answer, revisions start from the saved draft and change only what was asked.
+            const revising = (context.history as { role: string }[]).some((m) => m.role === 'assistant');
+            const current = String(context.session?.draft || '').trim();
+            if (revising && current) parts.push(untrusted('current_draft', current));
           }
           // Required Skill material and the current request must fit before optional context.
           if (estimateTextTokens(parts.join('\n')).estimatedTokens > 27000) throw new Error('CONTEXT_LIMIT');
@@ -249,8 +266,16 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
               .maybeSingle(),
           );
           const answer = await ai.generate({
-            system: profile ? SYSTEM_RULES + '\n\n' + profileRules(profile) : SYSTEM_RULES,
+            system: chatSystem(SYSTEM_RULES, tool, profile ? profileRules(profile) : undefined),
             prompt,
+            // A full document and its review may need more room, within the cost this run reserved.
+            maxOutputTokens: tool
+              ? documentOutputTokens(
+                  Number(context.run?.reserved_cents),
+                  Number(context.run?.input_rate),
+                  Number(context.run?.output_rate),
+                )
+              : undefined,
             signal: AbortSignal.timeout(80000),
           });
           inputTokens += answer.usage.input;

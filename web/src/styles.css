@@ -2999,3 +2999,19 @@ summary {
   background: var(--surface);
   border-top: 1px solid var(--line);
 }
+/* A document answer: the draft sits in the pane, the review stays in the conversation, as on Desktop. */
+.draft-staged {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--accent-ink);
+}
+.document-skill-info {
+  margin: 0 0 14px;
+  font-size: 13px;
+}
+.document-skill-info p {
+  margin: 6px 0;
+}

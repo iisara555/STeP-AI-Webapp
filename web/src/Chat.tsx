@@ -38,6 +38,8 @@ import { startersFor, starterTeams } from '../../packages/harness-core/vendor/de
 import { teamLabel } from '../../packages/harness-core/vendor/desktop/teams.ts';
 import { assistantName } from '../../packages/harness-core/src/assistant-profile.ts';
 import { parseDocumentOutput } from '../../packages/harness-core/vendor/desktop/document-output.ts';
+import type { DocumentToolId } from '../../packages/harness-core/vendor/desktop/document-tools.ts';
+import { isDocumentTool } from '../../packages/harness-core/src/document-context.ts';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
 import type { DraftBook } from './drafts.ts';
 type Plan = {
@@ -50,7 +52,22 @@ type Plan = {
   profile?: boolean;
 };
 /** Text handed to a newly created task; `submit` opens the consent preview right away. */
-export type PreparedText = { sessionId: string; text: string; submit?: boolean; documents?: string[] };
+export type PreparedText = {
+  sessionId: string;
+  text: string;
+  submit?: boolean;
+  documents?: string[];
+  documentTool?: string;
+};
+/** A document answer's two blocks, as Desktop separates them; null when the answer is ordinary chat. */
+const documentParts = (body: string, tool?: DocumentToolId) => {
+  if (!body.includes('<document_draft>')) return null;
+  try {
+    return parseDocumentOutput(body, tool || 'tor');
+  } catch {
+    return null;
+  }
+};
 const titleFrom = (text: string) => {
   const line = text.trim().split('\n')[0];
   return line.length > 60 ? line.slice(0, 57) + '…' : line || 'งานใหม่';
@@ -97,6 +114,7 @@ export function Chat({
     [menu, setMenu] = useState(false);
   const [source, setSource] = useState<{ title: string; body: string } | null>(null),
     [remember, setRemember] = useState<ChatMessage | null>(null);
+  const [documentTool, setDocumentTool] = useState<DocumentToolId | undefined>();
   const memberProfile = data.profiles?.find((p) => p.tenant_id === tenant);
   const assistant = assistantName(memberProfile);
   const [starterTeam, setStarterTeam] = useState(
@@ -138,6 +156,7 @@ export function Chat({
     if (handoff) consumePrepared();
     autoPreview.current = Boolean(handoff?.submit);
     setDocuments(handoff?.documents || []);
+    setDocumentTool(isDocumentTool(handoff?.documentTool) ? handoff.documentTool : undefined);
     setPlan(null);
     setMenu(false);
     setDraftOpen(
@@ -157,6 +176,9 @@ export function Chat({
         setSession((current) =>
           current?.id === id && current.version <= result.session.version ? result.session : current,
         );
+        // A reopened drafting task keeps its document tool, recorded on its earlier runs.
+        const tool = handoff?.documentTool || result.runs.find((r) => r.document_tool)?.document_tool;
+        setDocumentTool(isDocumentTool(tool) ? tool : undefined);
         setRun(
           result.runs.find((r) => ['queued', 'running', 'waiting_approval'].includes(r.status)) ||
             result.runs[0] ||
@@ -208,6 +230,13 @@ export function Chat({
                 ? result.session
                 : current,
             );
+            // As on Desktop, a fresh document answer is staged in the draft pane for review; saving stays manual.
+            const answer = [...result.messages].reverse().find((m) => m.role === 'assistant');
+            const staged = documentTool && answer ? documentParts(answer.body, documentTool) : null;
+            if (staged?.draft) {
+              setDraft(staged.draft);
+              setDraftOpen(true);
+            }
             await refresh();
           }
         }
@@ -223,7 +252,7 @@ export function Chat({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [run?.id, tenant, host, session?.id]);
+  }, [run?.id, tenant, host, session?.id, documentTool]);
   useEffect(() => {
     // The home screen opens at its greeting; only a conversation follows its newest turn.
     if (messages.length) bottom.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -287,6 +316,7 @@ export function Chat({
         requestId: crypto.randomUUID(),
         message: text,
         skill: skill?.skill_key,
+        documentTool,
         documentIds: documents,
         useMemory,
         consent: true,
@@ -543,7 +573,19 @@ export function Chat({
               className={'message ' + (m.role === 'user' ? 'user' : 'assistant')}
               aria-label={m.role === 'user' ? 'คุณ' : assistant}
             >
-              <div className="message-body">{m.body}</div>
+              {m.role === 'assistant' && documentParts(m.body, documentTool) ? (
+                <>
+                  <p className="draft-staged">
+                    <FileText size={14} />
+                    ร่างเอกสารอยู่ในแผงผลงาน · ด้านล่างคือผลตรวจและสิ่งที่ต้องยืนยัน ไม่อยู่ในตัวเอกสาร
+                  </p>
+                  <div className="message-body">
+                    {documentParts(m.body, documentTool)!.review || 'ไม่มีรายการที่ต้องตรวจเพิ่ม'}
+                  </div>
+                </>
+              ) : (
+                <div className="message-body">{m.body}</div>
+              )}
               {m.sources?.length > 0 && (
                 <div className="sources">
                   {m.sources.map((s) => (
@@ -568,12 +610,7 @@ export function Chat({
                   </button>
                   <button
                     onClick={() => {
-                      try {
-                        const match = /<document_draft>/.test(m.body);
-                        setDraft(match ? parseDocumentOutput(m.body, 'tor').draft : m.body);
-                      } catch {
-                        setDraft(m.body);
-                      }
+                      setDraft(documentParts(m.body, documentTool)?.draft ?? m.body);
                       setDraftOpen(true);
                     }}
                   >

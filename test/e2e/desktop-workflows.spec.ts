@@ -47,6 +47,23 @@ test('document form creates an editable private draft and waits for AI consent',
   ).toBeVisible();
   expect(external).toEqual([]);
 });
+test('a drafted document lands in the workbench while the review stays in the conversation', async ({
+  page,
+}) => {
+  await page.goto('/?demo=1');
+  await menu(page, 'เครื่องมือร่างเอกสาร');
+  await page.getByRole('button', { name: 'ร่างบันทึกข้อความ', exact: true }).click();
+  await page.getByRole('textbox', { name: 'เรื่อง', exact: true }).fill('โครงการสังเคราะห์');
+  await page.getByRole('button', { name: 'เตรียมร่างในบทสนทนา' }).click();
+  await page.getByRole('button', { name: 'ปิดร่าง', exact: true }).click();
+  await page.getByRole('button', { name: 'ส่งข้อความ', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'เริ่มงาน', exact: true }).click();
+  await expect(page.getByText('ร่างเอกสารอยู่ในแผงผลงาน', { exact: false })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText('ผลตรวจตัวอย่าง', { exact: false })).toBeVisible();
+  const draft = page.getByRole('textbox', { name: 'ร่างเอกสาร', exact: true });
+  await expect(draft).toHaveValue(/# ขอบเขตของงาน \(ตัวอย่าง\)/);
+  await expect(draft).not.toHaveValue(/ผลตรวจตัวอย่าง|document_review/);
+});
 test('media studio keeps prompt preparation local and offers no fabricated image result', async ({
   page,
 }) => {

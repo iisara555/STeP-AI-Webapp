@@ -1,5 +1,6 @@
 import { estimateTextTokens, rankSources, untrusted } from './index.ts';
 import type { Skill, SourceRef } from './contracts.ts';
+import { pointerTargets } from './document-context.ts';
 export interface RegisteredSource {
   source_key: string;
   title: string;
@@ -55,7 +56,9 @@ export function skillContext(skill: Skill, registered: RegisteredSource[], query
         : candidates.filter((s) => String(s.provenance.path).includes('/templates/')).slice(0, 1)),
     ]),
   ].slice(0, 3);
-  for (const source of selected) {
+  // A short pointer file names the one central copy; load that copy instead of a link the model cannot open.
+  const expanded = [...new Set(selected.flatMap((s) => [s, ...pointerTargets(s, registered)]))].slice(0, 4);
+  for (const source of expanded) {
     const body = source.body.slice(0, 6000);
     add(
       source,

@@ -125,6 +125,8 @@ export interface Run {
   partial: string;
   result: unknown;
   created_at: string;
+  /** The document tool a chat run drafted with, read from its input. */
+  document_tool?: string | null;
 }
 export interface Skill {
   tenant_id?: string;

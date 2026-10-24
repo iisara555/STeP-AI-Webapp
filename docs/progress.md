@@ -1,5 +1,36 @@
 # Progress
 
+## 2026-10-25 · Document drafts follow the Skill, template and drafting contract
+
+- Observed after #25 fixed the canned reply: a TOR run with Skill `tor-government-writing` reached the model
+  but the draft was below standard. Run metadata only (no message text) showed it received just the Skill's
+  own three support files. The Skill's template is a 349-character pointer to the central 16-section
+  template (5,523 characters, present in production) that was never followed; the supporting Skill
+  `thai-official-documents` (layout and drafting checks) and the 14.8k-character TOR master example it
+  points to were not loaded; the answer used 4,092 of 4,096 output tokens, so it was probably cut short;
+  and the answer was not split into draft and review.
+- A run now records its document tool (`input.documentTool`, validated against Desktop's five tools).
+  The worker loads Desktop's `<document_tool_contract>` (copied verbatim) between organization rules
+  and personal preferences, the supporting Skill `thai-official-documents`, the tool's working template
+  and drafting references by imported path, and follows short pointer files one hop to the central
+  copy. Files the Harness pack lacks are named as gaps the review must record, never filled from
+  general knowledge. A revision sends the current draft as untrusted content.
+- Document runs may answer with up to 8,192 tokens, only as far as the existing reservation covers:
+  the reservation assumes 64k input tokens while context stays capped at 32k. No budget rule changed.
+- The answer uses Desktop's `<document_draft>`/`<document_review>` envelope: the draft opens in the
+  ผลงาน pane, and the conversation shows only the review and what still needs confirmation. The
+  document tool page shows which Skills and template it uses.
+- Validation under Node 25.2.1: TypeScript, build, 48 unit/API/PWA tests (new: context assembly,
+  pointer files, contract order, output cost bound, and a mocked worker run proving a TOR reaches the
+  model with its contract), 29 PostgreSQL tests and 38 desktop/mobile Playwright tests (new: draft goes
+  to the pane, review stays in the chat). No live AI call was made.
+- Known gap in the imported Harness pack: `docs/thai-data-formatting.md` (date guide) is not imported, so
+  drafts list it as missing. Every other template and reference the five tools name is in production.
+- Scope: drafting quality only. Garuda, page layout and Word/PDF export stay in #16, held under the
+  ADR 0001 feature freeze.
+- Requires redeploying the worker and the API and rebuilding the homelab frontend (the web sends the
+  document tool). No migration. Not yet done.
+
 ## 2026-10-25 · แบบฟอร์มร่างเอกสารได้ข้อความ "ไม่พบเอกสาร" แทนร่าง
 
 - ทำซ้ำได้บน main ด้วย worker จริงและข้อมูลสังเคราะห์: ข้อความจากแบบฟอร์ม TOR (ทั้ง 2 แบบ), บันทึกข้อความ และข้อเสนอโครงการ

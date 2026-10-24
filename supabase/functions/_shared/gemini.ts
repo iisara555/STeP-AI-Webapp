@@ -10,6 +10,8 @@ export interface GenerateInput {
   json?: boolean;
   image?: { mime: string; data: string };
   signal?: AbortSignal;
+  /** Room for a longer answer, at most 8,192 tokens; the caller keeps it within the run's reserved cost. */
+  maxOutputTokens?: number;
 }
 export interface ModelResult {
   text: string;
@@ -106,7 +108,7 @@ export function gemini(env: Environment, fetcher: typeof fetch = fetch) {
           systemInstruction: { parts: [{ text: input.system }] },
           contents,
           generationConfig: {
-            maxOutputTokens: LIMITS.outputTokens,
+            maxOutputTokens: Math.min(8192, input.maxOutputTokens || LIMITS.outputTokens),
             ...(input.json ? { responseMimeType: 'application/json' } : {}),
           },
         }),
