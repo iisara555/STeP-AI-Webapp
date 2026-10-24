@@ -1,5 +1,21 @@
 # Progress
 
+## 2026-10-24 · Gemini free-tier trial enabled
+
+- Merged #14 and deployed API/worker from main `b9d5f6b` (CLI 2.122.0, `--use-api`, shared import map,
+  `verify_jwt` false); rebuilt the homelab frontend from the same commit. Rollback image:
+  `step-ai-webapp:pilot-408604d`.
+- The operator created a Google AI Studio key in a project without billing and set `GEMINI_API_KEY` from
+  their own terminal; the key never passed through the agent session. Server settings now select
+  `AI_PROVIDER=gemini`, `GEMINI_TIER=free` and `GEMINI_MODEL=gemini-3.6-flash` (a stable model the
+  pricing page lists as free of charge). Values were checked by their SHA-256 digests only.
+- Settings were switched only after the disclosure build was live, so every consent screen names the
+  free AI Studio tier and says Google may use what is sent; use synthetic or non-confidential material.
+- Smoke: API 401 for the homelab origin, 403 for a foreign origin, worker 403 without its secret; hosting
+  smoke passed and the served bundle contains the free-tier notice.
+- Not yet accepted: the tenant budget/rates (set by the owner in Settings), a real chat answer, receipt
+  OCR and document indexing. Embedding free-tier availability for `gemini-embedding-2` is unconfirmed.
+
 ## 2026-10-24 · Profile, assistant, answer style and memory types from Desktop
 
 - Settings opens on โปรไฟล์และผู้ช่วย, as Desktop's ทั่วไป: the 56 Desktop avatar drawings (53 offered),
