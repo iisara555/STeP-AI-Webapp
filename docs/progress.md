@@ -1,5 +1,49 @@
 # Progress
 
+## 2026-10-23 · Homelab rollout of #10 (Desktop-parity interface)
+
+- Merged #10 after CI passed. The second CI run followed a fix for a theme-switch contrast flicker
+  (button backgrounds no longer animate between themes); CI's first run had caught it at 3.67:1.
+- The homelab frontend was rebuilt from main `a78b769` (source copied with `git archive`) and is
+  healthy behind Tailscale Serve at the same tailnet origin. The previous image is tagged
+  `step-ai-webapp:pilot-8cd4a23` for rollback; earlier source trees were kept, not deleted.
+- Hosting smoke passed over HTTPS (static shell, OAuth callback, PWA cache headers, CSP, missing
+  assets). The served bundle contains the new interface, and the synthetic demo renders without page
+  errors. No Supabase function, migration or secret changed; the contract edit is type-only.
+- Not yet accepted: the new interface with a real Google account, Gemini, receipt OCR and the
+  OpenRouter sandbox after this rollout.
+
+## 2026-10-23 · Desktop-parity interface and audit fixes
+
+- The web shell now follows Desktop 0.6.20 (`90ee71c`) DESIGN.md: Desktop's theme tokens verbatim,
+  a 40px title bar (STeP menu with theme, sidebar toggle, workspace switcher, command bar), a 246px
+  sidebar (symbol and MAKE INNOVATION SIMPLE, เริ่มงานใหม่, search, งานทั้งหมด/มีผลงาน, tasks grouped
+  by date, folding เครื่องมือ, การตั้งค่า, profile), a folded icon rail, page headers and a status bar.
+- Chat matches Desktop: greeting and two-line promise with illustration, team starters that fill the
+  composer, and a composer on the home screen. Sending there creates a private task and opens the
+  existing consent preview; no AI call happens before consent. Workspace-shared tasks still start from
+  เริ่มงานใหม่. The draft opens as a right-hand ผลงาน pane with save and Word/text export.
+- Receipt review uses Desktop's layout (original on the left, review sections on the right) and keeps
+  the ทดลอง status. Pages lose their eyebrow labels; the command palette also searches tasks.
+- Desktop's hand-drawn illustrations are reused in empty and waiting states, cropped to WebP with the
+  source and licence note in `web/src/assets/illustrations/README.md`. Sidebar rail icons use Desktop's
+  lucide-animated set (MIT, `motion` 14.1.0) plus brain, folder-open and history from upstream; every
+  other icon plays Desktop's short hover/focus movement. Both stop under reduced motion.
+- Audit fixes: dark-mode contrast for selected tasks, avatars, success/found/missing states, notices and
+  the sign-in screen (lowest measured 5.6:1); `aria-current` on navigation and tab semantics on filters;
+  44px touch targets on coarse pointers; a 12px floor for Thai text; an in-app update dialog instead of
+  `window.confirm`; a keyboard-reachable receipt preview; tool pages load on first open (main bundle
+  188 → 147 KB gzip).
+- Validation under Node 25.2.1: TypeScript, build, 38 unit/API/PWA and 27 PostgreSQL tests, and 32
+  desktop/mobile Playwright tests passed, including a new dark-theme state check. axe (WCAG 2.2 AA and
+  best practice) is clean on 40 page/theme/viewport combinations. `prettier --check` reports only CRLF
+  line endings in this Windows checkout; content formatting passes with `--end-of-line auto`.
+- An independent design review against the Desktop screenshots ran two rounds; its fixes (draft-pane
+  sources, Desktop's grey disabled send, drawer scroll, touch hints, menu and Skill copy) are applied.
+  `web/PRODUCT.md` and `web/DESIGN.md` record the product and the inherited Desktop design.
+- Not done here: no deployment, no real-account check. Desktop-only surfaces (tabs for เว็บ/งานเบื้องหลัง,
+  model picker, งานตั้งเวลา, avatar pictures) are not imitated because the web has no such capability.
+
 ## 2026-10-23 · Function and homelab rollout of #7/#8
 
 - Merged #7 and #8. API and worker were deployed from main `8cd4a23` with Supabase
@@ -8,6 +52,9 @@
   `contracts.ts`. google-callback was unchanged and not redeployed.
 - The first CLI attempt without `--import-map` failed server-side bundling on `zod`
   and changed nothing; the deployment guide now passes the import map.
+- The deployment guide named the Picker project-number secret `GOOGLE_PICKER_APP_ID`, but the API
+  reads `GOOGLE_PROJECT_NUMBER`; the guide now uses the code's name. If the secret was set under the
+  old name, the operator must add it as `GOOGLE_PROJECT_NUMBER` before Picker can work.
 - Runtime smoke: API 401 for the homelab origin, 403 for a foreign origin, worker 403
   without its secret; function logs show clean boots.
 - The homelab frontend was rebuilt from the same commit and is healthy; hosting smoke

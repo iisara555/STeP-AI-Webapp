@@ -1,0 +1,311 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-23T21:00:00+07:00",
+  "title": "Design System: STeP AI (web)",
+  "extensions": {
+    "colorMeta": {
+      "step-yellow": {
+        "role": "primary",
+        "displayName": "STeP Yellow",
+        "canonical": "#ffc709",
+        "tonalRamp": ["#3a2c00", "#5c4600", "#7a5b00", "#a37a00", "#d9a300", "#ffc709", "#ffe38a", "#fff4cc"]
+      },
+      "accent-ink": {
+        "role": "primary",
+        "displayName": "Deep Gold Ink",
+        "canonical": "#7a5b00",
+        "tonalRamp": ["#2a1f00", "#4a3700", "#7a5b00", "#9c7500", "#c29200", "#e0ad1a", "#f2d27a", "#fbecc0"]
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "Yellow Wash",
+        "canonical": "#fff4cc",
+        "tonalRamp": ["#3a3219", "#5a4c22", "#7d6a2c", "#a68d3a", "#cfb35a", "#ecd68f", "#f8e9b4", "#fff4cc"]
+      },
+      "selection": {
+        "role": "primary",
+        "displayName": "Highlighter",
+        "canonical": "#ffe38a",
+        "tonalRamp": ["#3b3006", "#6b5610", "#937718", "#bb9a25", "#e0bc3f", "#f5d466", "#ffe38a", "#fff3c9"]
+      },
+      "step-dark": {
+        "role": "neutral",
+        "displayName": "STeP Dark",
+        "canonical": "#231f20",
+        "tonalRamp": ["#161314", "#1b1819", "#231f20", "#2e2927", "#37312f", "#4e4745", "#645e5f", "#ada6a0"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "canonical": "#fafaf8",
+        "tonalRamp": ["#4e4745", "#645e5f", "#ada6a0", "#cfcac2", "#e7e4de", "#efece5", "#f7f6f3", "#fafaf8"]
+      },
+      "paper": { "role": "neutral", "displayName": "Paper", "canonical": "#ffffff" },
+      "sidebar": { "role": "neutral", "displayName": "Sidebar Linen", "canonical": "#f7f6f3" },
+      "selected": { "role": "neutral", "displayName": "Selected Linen", "canonical": "#efece5" },
+      "muted": { "role": "neutral", "displayName": "Muted Ink", "canonical": "#645e5f" },
+      "line": { "role": "neutral", "displayName": "Hairline", "canonical": "#e7e4de" },
+      "line-strong": { "role": "neutral", "displayName": "Strong Hairline", "canonical": "#cfcac2" },
+      "danger": {
+        "role": "state",
+        "displayName": "Danger",
+        "canonical": "#b3261e",
+        "tonalRamp": ["#3b2321", "#5e1611", "#8a1d17", "#b3261e", "#d4554b", "#f2a197", "#f7cdc8", "#fbeae8"]
+      },
+      "danger-soft": { "role": "state", "displayName": "Danger Wash", "canonical": "#fbeae8" },
+      "success": {
+        "role": "state",
+        "displayName": "Success",
+        "canonical": "#286740",
+        "tonalRamp": ["#24301f", "#173d26", "#1f5233", "#286740", "#4a8a5c", "#98c379", "#cfe3d2", "#e9f2ea"]
+      },
+      "success-soft": { "role": "state", "displayName": "Success Wash", "canonical": "#e9f2ea" },
+      "disabled-bg": { "role": "state", "displayName": "Disabled Fill", "canonical": "#e7e4de" },
+      "disabled-text": { "role": "state", "displayName": "Disabled Text", "canonical": "#645e5f" },
+      "disabled-line": { "role": "state", "displayName": "Disabled Line", "canonical": "#cfcac2" },
+      "dark-surface": {
+        "role": "neutral",
+        "displayName": "Night Surface (dark theme)",
+        "canonical": "#1b1819"
+      },
+      "dark-paper": { "role": "neutral", "displayName": "Night Paper (dark theme)", "canonical": "#231f20" },
+      "dark-sidebar": {
+        "role": "neutral",
+        "displayName": "Night Sidebar (dark theme)",
+        "canonical": "#161314"
+      },
+      "dark-text": {
+        "role": "neutral",
+        "displayName": "Warm White Text (dark theme)",
+        "canonical": "#f4f1ea"
+      },
+      "dark-muted": { "role": "neutral", "displayName": "Night Muted (dark theme)", "canonical": "#ada6a0" },
+      "dark-line": {
+        "role": "neutral",
+        "displayName": "Night Hairline (dark theme)",
+        "canonical": "#37312f"
+      },
+      "dark-selected": {
+        "role": "neutral",
+        "displayName": "Night Selected (dark theme)",
+        "canonical": "#2e2927"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Home welcome promise only; second line highlighted with a yellow-wash underlay. 24px under 670px."
+      },
+      "headline": { "displayName": "Headline", "purpose": "Page h1." },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section headings (h2); h3 at 15px, dialog headers at 18px."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default text; composer and source text at 1.85 line height."
+      },
+      "body-dense": {
+        "displayName": "Body dense",
+        "purpose": "Rows, menus, cards, dialog copy, page subtitles. The most-used size."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Badges, group labels, status bar, chips, captions. 12px is the Thai floor."
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow-soft",
+        "value": "0 1px 2px var(--shadow-soft)",
+        "purpose": "Selected segment in the task filter."
+      },
+      {
+        "name": "composer",
+        "value": "0 1px 2px rgba(35, 31, 32, 0.04), 0 4px 14px rgba(35, 31, 32, 0.04)",
+        "purpose": "Docked composer only."
+      },
+      {
+        "name": "popover",
+        "value": "0 12px 32px var(--shadow-popover)",
+        "purpose": "Title-bar dropdowns, menus, toasts."
+      },
+      {
+        "name": "dialog",
+        "value": "0 24px 64px var(--shadow-dialog)",
+        "purpose": "Modal dialogs over --overlay."
+      },
+      {
+        "name": "active-marker",
+        "value": "inset 3px 0 0 var(--accent)",
+        "purpose": "Signature 'you are here' bar on the current task, tool and focused palette row. Not elevation."
+      },
+      {
+        "name": "editor-focus",
+        "value": "inset 0 0 0 2px var(--focus)",
+        "purpose": "Draft editor focus ring."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-transition",
+        "value": "background 0.15s, border-color 0.15s",
+        "purpose": "Button hover fills."
+      },
+      {
+        "name": "icon-movement",
+        "value": "400ms ease-in-out",
+        "purpose": "icons.tsx adapter: one movement (pulse, turn, add, refresh, nudge) on the control's hover or focus."
+      },
+      {
+        "name": "rail-icons",
+        "value": "motion 14.1.0 (lucide-animated)",
+        "purpose": "Folded rail icons animate on hover or keyboard focus."
+      },
+      { "name": "drawer", "value": "transform 0.18s ease-out", "purpose": "Mobile sidebar drawer." },
+      {
+        "name": "spin",
+        "value": "1s linear infinite (3s under reduced motion)",
+        "purpose": "Loading indicator only."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "prefers-reduced-motion: reduce",
+        "purpose": "Stops all transitions, icon movements and rail animations; spinner slows instead of stopping."
+      }
+    ],
+    "breakpoints": [
+      { "name": "short", "value": "max-height: 760px" },
+      { "name": "narrow-pane", "value": "max-width: 1150px" },
+      { "name": "receipt-stack", "value": "max-width: 980px" },
+      { "name": "drawer", "value": "max-width: 900px" },
+      { "name": "phone", "value": "max-width: 670px" },
+      { "name": "touch", "value": "pointer: coarse" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one yellow action per view, such as เริ่มงานใหม่.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg>เริ่มงานใหม่</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 7px; font: 500 14px/1.5 'IBM Plex Sans Thai', system-ui, sans-serif; padding: 8px 13px; border-radius: 7px; border: 1px solid var(--accent, #ffc709); background: var(--accent, #ffc709); color: var(--on-accent, #231f20); cursor: pointer; transition: background 0.15s, border-color 0.15s; } .ds-btn-primary:hover { filter: brightness(0.95); } .ds-btn-primary:focus-visible { outline: 2px solid var(--focus, #231f20); outline-offset: 2px; }"
+    },
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "See-through button with a hairline; hover adds the 5% ink wash.",
+      "html": "<button class=\"ds-btn\">ส่งออก Word</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 7px; font: 400 14px/1.5 'IBM Plex Sans Thai', system-ui, sans-serif; padding: 8px 13px; border-radius: 7px; border: 1px solid var(--line, #e7e4de); background: transparent; color: var(--text, #231f20); cursor: pointer; transition: background 0.15s, border-color 0.15s; } .ds-btn:hover { background: var(--hover, rgba(35,31,32,0.05)); } .ds-btn:focus-visible { outline: 2px solid var(--focus, #231f20); outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Surface fill, strong hairline, label stacked above.",
+      "html": "<label class=\"ds-field\">ชื่อเอกสาร<input class=\"ds-input\" placeholder=\"เช่น บันทึกข้อความ\"></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; font: 500 13px/1.7 'IBM Plex Sans Thai', system-ui, sans-serif; color: var(--text, #231f20); } .ds-input { font: 400 14px/1.7 'IBM Plex Sans Thai', system-ui, sans-serif; color: var(--text, #231f20); background: var(--surface, #fafaf8); border: 1px solid var(--line-strong, #cfcac2); border-radius: 6px; padding: 8px 10px; } .ds-input::placeholder { color: var(--muted, #645e5f); } .ds-input:focus-visible { outline: 2px solid var(--focus, #231f20); outline-offset: 2px; }"
+    },
+    {
+      "name": "Sidebar Navigation with Active Marker",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Signature move: the current task or tool carries an inset 3px yellow bar on --selected.",
+      "html": "<nav class=\"ds-nav\"><div class=\"ds-nav-group\">เครื่องมือ</div><button class=\"ds-nav-item ds-active\">ตรวจใบเสร็จ</button><button class=\"ds-nav-item\">เอกสาร</button><button class=\"ds-nav-item\">ความจำ</button></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; width: 212px; padding: 8px; background: var(--sidebar, #f7f6f3); font: 400 14px/1.7 'IBM Plex Sans Thai', system-ui, sans-serif; } .ds-nav-group { font-size: 12px; color: var(--muted, #645e5f); letter-spacing: 0.02em; margin: 6px 10px 4px; } .ds-nav-item { text-align: left; border: 0; border-radius: 7px; padding: 6px 10px; background: transparent; color: var(--muted, #645e5f); font: inherit; cursor: pointer; transition: background 0.15s; } .ds-nav-item:hover { background: var(--hover, rgba(35,31,32,0.05)); color: var(--text, #231f20); } .ds-nav-item:focus-visible { outline: 2px solid var(--focus, #231f20); outline-offset: 2px; } .ds-nav-item.ds-active { background: var(--selected, #efece5); color: var(--text, #231f20); box-shadow: inset 3px 0 0 var(--accent, #ffc709); }"
+    },
+    {
+      "name": "Badges",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Pill status labels: neutral, ready (success wash), shared/demo (yellow wash).",
+      "html": "<span class=\"ds-badge\">ร่าง</span> <span class=\"ds-badge ds-ready\">พร้อมใช้</span> <span class=\"ds-badge ds-demo\">ตัวอย่าง · ไม่ใช่ข้อมูลจริง</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; font: 500 12px/1.6 'IBM Plex Sans Thai', system-ui, sans-serif; border-radius: 999px; padding: 1px 9px; background: var(--selected, #efece5); color: var(--muted, #645e5f); white-space: nowrap; } .ds-badge.ds-ready { background: var(--success-soft, #e9f2ea); color: var(--success, #286740); } .ds-badge.ds-demo { background: var(--accent-soft, #fff4cc); color: var(--accent-ink, #7a5b00); }"
+    },
+    {
+      "name": "Settings Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Paper panel with a hairline, 10px corners, no shadow.",
+      "html": "<section class=\"ds-card\"><h3 class=\"ds-card-title\">เชื่อมต่อ Google Workspace</h3><p class=\"ds-card-body\">อ่านปฏิทินและไฟล์ที่คุณเลือกเท่านั้น</p></section>",
+      "css": ".ds-card { background: var(--paper, #fff); border: 1px solid var(--line, #e7e4de); border-radius: 10px; padding: 22px; color: var(--text, #231f20); font-family: 'IBM Plex Sans Thai', system-ui, sans-serif; } .ds-card-title { font-size: 15px; font-weight: 600; margin: 0 0 8px; } .ds-card-body { font-size: 13px; line-height: 1.7; color: var(--muted, #645e5f); margin: 0; }"
+    },
+    {
+      "name": "Composer",
+      "kind": "custom",
+      "refersTo": "composer",
+      "description": "Docked request box: paper textarea in a 10px frame, yellow send square.",
+      "html": "<div class=\"ds-composer\"><textarea class=\"ds-composer-input\" placeholder=\"พิมพ์งานที่ต้องการ\"></textarea><div class=\"ds-composer-tools\"><span class=\"ds-pill\">เอกสาร 2 ไฟล์</span><button class=\"ds-send\" aria-label=\"ส่ง\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m5 12 7-7 7 7\"/><path d=\"M12 19V5\"/></svg></button></div></div>",
+      "css": ".ds-composer { width: 420px; border: 1px solid var(--line-strong, #cfcac2); border-radius: 10px; background: var(--surface, #fafaf8); overflow: hidden; box-shadow: 0 1px 2px rgba(35,31,32,0.04), 0 4px 14px rgba(35,31,32,0.04); font-family: 'IBM Plex Sans Thai', system-ui, sans-serif; } .ds-composer:focus-within { border-color: var(--focus, #231f20); } .ds-composer-input { display: block; width: 100%; min-height: 44px; border: 0; resize: none; padding: 18px 20px; font: 400 14px/1.85 inherit; background: var(--paper, #fff); color: var(--text, #231f20); outline: none; } .ds-composer-tools { display: flex; align-items: center; gap: 4px; padding: 2px 8px 8px; } .ds-pill { font-size: 12px; padding: 4px 8px; border-radius: 8px; color: var(--muted, #645e5f); margin-right: auto; } .ds-send { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 6px; border: 0; border-radius: 8px; background: var(--accent, #ffc709); color: var(--on-accent, #231f20); cursor: pointer; } .ds-send:hover { filter: brightness(0.95); } .ds-send:focus-visible { outline: 2px solid var(--focus, #231f20); outline-offset: 2px; }"
+    },
+    {
+      "name": "Dialog",
+      "kind": "custom",
+      "refersTo": "dialog",
+      "description": "Paper modal, 12px corners, the only deep shadow; footer split by a hairline.",
+      "html": "<div class=\"ds-dialog\"><h2 class=\"ds-dialog-title\">ตรวจสิ่งที่ AI จะอ่าน</h2><p class=\"ds-dialog-body\">AI จะอ่านเอกสาร 2 ไฟล์และความจำ 1 รายการ</p><footer class=\"ds-dialog-footer\"><button class=\"ds-dialog-btn\">ยกเลิก</button><button class=\"ds-dialog-btn ds-dialog-primary\">ส่งให้ AI</button></footer></div>",
+      "css": ".ds-dialog { width: 420px; border: 1px solid var(--line, #e7e4de); border-radius: 12px; box-shadow: 0 24px 64px var(--shadow-dialog, #0004); padding: 22px; background: var(--paper, #fff); color: var(--text, #231f20); font-family: 'IBM Plex Sans Thai', system-ui, sans-serif; } .ds-dialog-title { font-size: 18px; font-weight: 600; margin: 0 0 16px; } .ds-dialog-body { font-size: 13px; line-height: 1.7; margin: 0; } .ds-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line, #e7e4de); } .ds-dialog-btn { font: inherit; font-size: 14px; padding: 8px 13px; border-radius: 7px; border: 1px solid var(--line, #e7e4de); background: transparent; color: inherit; cursor: pointer; } .ds-dialog-btn:hover { background: var(--hover, rgba(35,31,32,0.05)); } .ds-dialog-btn:focus-visible { outline: 2px solid var(--focus, #231f20); outline-offset: 2px; } .ds-dialog-primary { background: var(--accent, #ffc709); border-color: var(--accent, #ffc709); color: var(--on-accent, #231f20); font-weight: 500; } .ds-dialog-primary:hover { background: var(--accent, #ffc709); filter: brightness(0.95); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Desktop, in a Browser",
+    "overview": "This is a new world for the web app, and it is deliberately not a web-native one: it is the STeP AI Desktop design (STeP-AI-Harness `DESIGN.md` and `desktop/src/theme.css` at commit `90ee71ca667c63284afe4996eddc7e8095b9a059`) carried over so staff moving between Desktop and browser find everything where they expect it. Calm, Notion-like ink on paper: warm off-white surfaces, STeP Dark text, hairlines instead of boxes, quiet hover fills, generous Thai line height, and STeP Yellow reserved for the primary action and for \"you are here\".\n\nThe window is a three-pane workspace: a 40px title bar over a 246px sidebar (tasks, folding เครื่องมือ, การตั้งค่า, profile), a main pane with a 78px title header and a 28px status bar, and a draft pane (ฉบับร่าง) that opens beside the conversation. Density is document-like, not dashboard-like: rows and hairlines, few cards.\n\nTokens are Desktop's values verbatim, plus web-only state tokens (`--success`, `--success-soft`, `--danger-soft`) and Desktop's `--disabled-*` trio. Desktop's syntax-highlight, diff, `--shadow-faint` and `--shadow-card` tokens are not used on the web and are not carried.",
+    "keyCharacteristics": [
+      "Ink on paper, hairline structure, tonal layers (sidebar, surface, paper) instead of shadows.",
+      "Yellow is a fill with STeP Dark on it; accent text uses deep gold `--accent-ink`.",
+      "One signature move: the inset 3px yellow active marker.",
+      "Hand-drawn ink illustrations only in empty and waiting states.",
+      "Full light/dark parity; system, light and dark selectable and applied before first paint."
+    ],
+    "rules": [
+      {
+        "name": "The Yellow Is A Fill Rule",
+        "body": "STeP Yellow never appears as text or an icon on a light surface; use `--accent-ink`. Yellow fills always carry `--on-accent`.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two State Colours Rule",
+        "body": "Danger and success (with their soft fills) are the only state colours. Warnings use the yellow wash, not a new orange.",
+        "section": "colors"
+      },
+      {
+        "name": "The Thai Floor Rule",
+        "body": "No Thai text below 12px. 11px is allowed only for Latin-only marks: the `STeP` title-bar mark, the CI line MAKE INNOVATION SIMPLE (0.1em tracking), and keyboard hints (`kbd`, Ctrl K).",
+        "section": "typography"
+      },
+      {
+        "name": "The One Face Rule",
+        "body": "Hierarchy comes from size and weight (400/500/600) in one family, never a second display face.",
+        "section": "typography"
+      },
+      {
+        "name": "The 44px Thumb Rule",
+        "body": "On coarse pointers every button, select, input, summary and pill is at least 44px tall (icon controls also 44px wide; segmented controls 40px), and shortcut hints disappear.",
+        "section": "layout"
+      },
+      {
+        "name": "The Float-Only Shadow Rule",
+        "body": "A shadow means \"this is above the window\". Cards and panes in the frame never cast one.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do take every colour from the CSS custom properties in `src/styles.css`; keep them equal to Desktop's `theme.css` for every token both share.",
+      "Do mark the current item with the inset 3px yellow active marker on `--selected`.",
+      "Do keep yellow to the one primary action per view, the send button, active markers and checked states.",
+      "Do keep Thai text at 12px or larger and body at 14px/1.7.",
+      "Do define every new token in light, dark and system-dark blocks.",
+      "Do make controls 44px on coarse pointers.",
+      "Do use illustrations only in empty and waiting states, decorative, with provenance recorded."
+    ],
+    "donts": [
+      "Don't set STeP Yellow text or icons on light surfaces; use `--accent-ink`.",
+      "Don't add a separate \"web\" look: no extra cards, eyebrows above headings, or topbar controls that Desktop does not have.",
+      "Don't cast shadows from in-frame cards or panes.",
+      "Don't introduce a second typeface or a new state colour.",
+      "Don't animate icons when reduced motion is requested."
+    ]
+  }
+}

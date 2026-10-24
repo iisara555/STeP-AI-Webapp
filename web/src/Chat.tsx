@@ -1,19 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowUp,
+  Blocks,
   BookOpen,
   Brain,
   Check,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Download,
   FileText,
-  MessageSquare,
-  Paperclip,
+  Heading2,
+  List,
   Plus,
+  Save,
+  ShieldCheck,
+  Sparkles,
   Square,
+  Table,
   Trash2,
   X,
-} from 'lucide-react';
+} from './icons.tsx';
 import type {
   ChatMessage,
   Conversation,
@@ -22,8 +30,8 @@ import type {
   SourceRef,
 } from '../../packages/harness-core/src/contracts.ts';
 import { errorView } from '../../packages/harness-core/src/index.ts';
-import { ApiError, saveBlob } from './host.ts';
-import { Busy, Empty, Modal, Visibility } from './components.tsx';
+import { saveBlob } from './host.ts';
+import { Art, Busy, Modal, Visibility } from './components.tsx';
 import type { ViewProps } from './App.tsx';
 import { exportWord } from './extract.ts';
 import { startersFor, starterTeams } from '../../packages/harness-core/vendor/desktop/starters.ts';
@@ -35,6 +43,12 @@ type Plan = {
   documents: { id: string; name: string }[];
   memories: { id: string; title: string }[];
   google: boolean;
+};
+/** Text handed to a newly created task; `submit` opens the consent preview right away. */
+export type PreparedText = { sessionId: string; text: string; submit?: boolean; documents?: string[] };
+const titleFrom = (text: string) => {
+  const line = text.trim().split('\n')[0];
+  return line.length > 60 ? line.slice(0, 57) + '…' : line || 'งานใหม่';
 };
 export function Chat({
   host,
@@ -51,15 +65,17 @@ export function Chat({
   prepared,
   consumePrepared,
   onPrepare,
+  artifactSlot,
 }: ViewProps & {
   session: Conversation | null;
   setSession: (s: Conversation | null) => void;
   skill: Skill | null;
   clearSkill: () => void;
   newSession: () => void;
-  prepared: { sessionId: string; text: string } | null;
+  prepared: PreparedText | null;
   consumePrepared: () => void;
-  onPrepare: (work: PreparedWork) => Promise<void>;
+  onPrepare: (work: PreparedWork, options?: { submit?: boolean; documents?: string[] }) => Promise<void>;
+  artifactSlot: HTMLElement | null;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]),
     [run, setRun] = useState<Run | null>(null),
@@ -71,24 +87,29 @@ export function Chat({
   const [plan, setPlan] = useState<Plan | null>(null),
     [googleConsent, setGoogleConsent] = useState(false),
     [draftOpen, setDraftOpen] = useState(false),
-    [draft, setDraft] = useState('');
+    [draft, setDraft] = useState(''),
+    [menu, setMenu] = useState(false);
   const [source, setSource] = useState<{ title: string; body: string } | null>(null),
     [remember, setRemember] = useState<ChatMessage | null>(null);
-  const [starterTeam, setStarterTeam] = useState(''),
-    [starting, setStarting] = useState(false);
-  const [wordPreset, setWordPreset] = useState<'saraban' | 'report' | 'book'>('report');
-  const draftInput = useRef<HTMLTextAreaElement>(null);
+  const [starterTeam, setStarterTeam] = useState('');
+  const [wordPreset, setWordPreset] = useState<'saraban' | 'report' | 'book'>('report'),
+    [format, setFormat] = useState<'docx' | 'txt'>('docx');
+  const composer = useRef<HTMLTextAreaElement>(null),
+    autoPreview = useRef(false);
   const bottom = useRef<HTMLDivElement>(null),
     currentSession = useRef(session?.id);
   currentSession.current = session?.id;
   useEffect(() => {
+    const handoff = prepared && prepared.sessionId === session?.id ? prepared : null;
     setMessages([]);
     setRun(null);
-    setText(prepared && prepared.sessionId === session?.id ? prepared.text : '');
-    if (prepared?.sessionId === session?.id) consumePrepared();
-    setDocuments([]);
+    setText(handoff ? handoff.text : '');
+    if (handoff) consumePrepared();
+    autoPreview.current = Boolean(handoff?.submit);
+    setDocuments(handoff?.documents || []);
     setPlan(null);
-    setDraftOpen(Boolean(prepared?.sessionId === session?.id && session?.draft));
+    setMenu(false);
+    setDraftOpen(Boolean(handoff && session?.draft));
     setDraft(session?.draft || '');
     if (!session) return;
     const id = session.id;
@@ -105,6 +126,10 @@ export function Chat({
             result.runs[0] ||
             null,
         );
+        if (autoPreview.current && handoff) {
+          autoPreview.current = false;
+          void preview(id, handoff.text, handoff.documents || []);
+        }
       })
       .catch((e) => {
         if (active) fail(e);
@@ -151,7 +176,8 @@ export function Chat({
     };
   }, [run?.id, tenant, host, session?.id]);
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // The home screen opens at its greeting; only a conversation follows its newest turn.
+    if (messages.length) bottom.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [messages.length, run?.status]);
   const active = Boolean(run && ['queued', 'running', 'waiting_approval'].includes(run.status));
   const visibleDocs = data.documents.filter(
@@ -161,22 +187,37 @@ export function Chat({
       (session?.visibility !== 'workspace' ||
         (d.visibility === 'workspace' && d.workspace_id === workspace?.id)),
   );
-  const preview = async () => {
-    if (!session || !text.trim() || active) return;
-    const id = session.id;
+  // Text typed on the home screen starts a private task; the consent preview opens before any AI call.
+  const preview = async (id = session?.id, message = text, documentIds = documents) => {
+    if (!id || !message.trim() || active) return;
     setBusy(true);
     try {
       const result = await host.call<Plan>('context.plan', {
         tenant,
         session: id,
-        message: text,
-        documentIds: documents,
+        message,
+        documentIds,
         useMemory,
       });
       if (currentSession.current === id) {
         setPlan(result);
         setGoogleConsent(false);
       }
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const send = async () => {
+    if (!text.trim() || busy) return;
+    if (session) return preview();
+    setBusy(true);
+    try {
+      await onPrepare(
+        { title: titleFrom(text), draft: '', message: text, skillKey: skill?.skill_key },
+        { submit: true, documents },
+      );
     } catch (e) {
       fail(e);
     } finally {
@@ -248,135 +289,185 @@ export function Chat({
       fail(e);
     }
   };
-  if (!session)
-    return (
-      <div className="chat-welcome">
-        <div className="welcome-mark brand-logo">
-          <img className="brand-colour" src="/step-symbol-colour.svg" alt="STeP" />
-          <img className="brand-white" src="/step-symbol-mono-white.svg" alt="STeP" />
-        </div>
-        <p className="eyebrow">จากคำขอ สู่งานที่ใช้ต่อได้</p>
-        <h1>{skill ? skill.title : 'วันนี้อยากให้ช่วยเรื่องอะไร'}</h1>
-        <p>
-          เริ่มงานส่วนตัว เลือกเอกสารที่เกี่ยวข้อง
-          <br />
-          แล้วให้ AI ช่วยจัดข้อมูลและเตรียมขั้นตอนถัดไป
-        </p>
-        <button className="primary" onClick={newSession}>
-          <Plus size={19} />
-          เริ่มงานใหม่
-        </button>
-        <section className="team-starters">
-          <label>
-            ตัวอย่างงานตามทีม
-            <select value={starterTeam} onChange={(e) => setStarterTeam(e.target.value)}>
-              <option value="">งานทั่วไป</option>
-              {starterTeams.map((team) => (
-                <option key={team} value={team}>
-                  {team.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          </label>
-          {startersFor(starterTeam).map((starter) => (
-            <button
-              key={starter.th}
-              disabled={starting}
-              onClick={async () => {
-                setStarting(true);
-                try {
-                  await onPrepare({ title: starter.tag.th, draft: '', message: starter.th });
-                } catch (error) {
-                  fail(error);
-                } finally {
-                  setStarting(false);
-                }
-              }}
-            >
-              <small>{starter.tag.th}</small>
-              {starter.th}
-            </button>
-          ))}
-        </section>
-        <div className="welcome-features">
-          <span>
-            <Brain size={19} />
-            ใช้ความจำที่คุณเลือก
-          </span>
-          <span>
-            <FileText size={19} />
-            อ้างอิงจากเอกสาร
-          </span>
-          <span>
-            <MessageSquare size={19} />
-            กลับมาทำงานต่อได้
-          </span>
-        </div>
-      </div>
-    );
+  const saveDraft = () =>
+    session &&
+    void host
+      .call<Conversation>('session.draft', { tenant, id: session.id, version: session.version, draft })
+      .then((s) => setSession(s))
+      .catch(fail);
+  const exportDraft = () => {
+    if (!session || !draft.trim()) return;
+    if (format === 'docx') void exportWord(draft, session.title, wordPreset).catch(fail);
+    else saveBlob(new Blob([draft], { type: 'text/plain;charset=utf-8' }), 'ร่างเอกสาร.txt');
+  };
+  const greeting = data.user.name ? 'สวัสดีครับ คุณ' + data.user.name.split(' ')[0] : 'สวัสดีครับ';
+  const starters = startersFor(starterTeam);
+  // Every source the answers in this task cited, once each, so the draft keeps its provenance in view.
+  const draftSources = [
+    ...new Map(messages.flatMap((m) => m.sources || []).map((s) => [s.kind + s.id, s])).values(),
+  ];
   return (
-    <div className={'conversation-layout ' + (draftOpen ? 'with-draft' : '')}>
-      <section className="conversation">
-        <div className="conversation-heading">
-          <div>
-            <h1>{session.title}</h1>
-            <Visibility shared={session.visibility === 'workspace'} />
+    <div className="chat-layout">
+      <div className="conversation-col">
+        <header className="topbar">
+          <div className="topbar-title">
+            <span className="topbar-heading">
+              <strong>{session?.title || (skill ? skill.title : 'เริ่มต้นงานที่อยากทำ')}</strong>
+              {session && (
+                <button
+                  className="icon-button"
+                  aria-label="ตัวเลือกงานนี้"
+                  title="ตัวเลือกงานนี้"
+                  aria-haspopup="menu"
+                  aria-expanded={menu}
+                  onClick={() => setMenu(!menu)}
+                >
+                  <ChevronDown size={16} />
+                </button>
+              )}
+            </span>
+            {menu && session && (
+              <>
+                <button
+                  className="menu-backdrop"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onClick={() => setMenu(false)}
+                />
+                <div
+                  className="title-menu"
+                  role="menu"
+                  aria-label="ตัวเลือกงานนี้"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setMenu(false);
+                  }}
+                >
+                  <button
+                    role="menuitem"
+                    autoFocus
+                    onClick={() => {
+                      setMenu(false);
+                      saveBlob(
+                        new Blob(
+                          [
+                            messages
+                              .map((m) => `## ${m.role === 'user' ? 'คุณ' : 'STeP AI'}\n\n${m.body}`)
+                              .join('\n\n'),
+                          ],
+                          { type: 'text/markdown;charset=utf-8' },
+                        ),
+                        'บทสนทนา.md',
+                      );
+                    }}
+                  >
+                    <Download size={15} />
+                    ส่งออก Markdown
+                  </button>
+                  <hr />
+                  <button
+                    role="menuitem"
+                    className="titlebar-danger"
+                    onClick={() => {
+                      setMenu(false);
+                      setSource({ title: 'ลบงานนี้', body: 'delete-confirm' });
+                    }}
+                  >
+                    <Trash2 size={15} />
+                    ลบงานนี้
+                  </button>
+                </div>
+              </>
+            )}
+            <small>
+              {session ? (
+                <Visibility shared={session.visibility === 'workspace'} />
+              ) : (
+                'จากคำขอ สู่ผลงานที่ใช้ต่อได้'
+              )}
+            </small>
           </div>
-          <div className="inline-actions">
-            <button onClick={() => setDraftOpen((v) => !v)}>
-              <FileText size={16} />
-              {draftOpen ? 'ซ่อนร่าง' : 'ร่างเอกสาร'}
-            </button>
-            <button
-              className="icon-button"
-              aria-label="ส่งออกบทสนทนา"
-              onClick={() =>
-                saveBlob(
-                  new Blob(
-                    [
-                      messages
-                        .map((m) => `## ${m.role === 'user' ? 'คุณ' : 'STeP AI'}\n\n${m.body}`)
-                        .join('\n\n'),
-                    ],
-                    { type: 'text/markdown;charset=utf-8' },
-                  ),
-                  'บทสนทนา.md',
-                )
-              }
-            >
-              <Download size={17} />
-            </button>
-            <button
-              className="icon-button"
-              aria-label="ลบบทสนทนา"
-              onClick={() => setSource({ title: 'ลบบทสนทนา', body: 'delete-confirm' })}
-            >
-              <Trash2 size={17} />
-            </button>
-          </div>
-        </div>
-        <div className="messages" aria-live="polite">
+          {session && (
+            <div className="topbar-actions">
+              <button onClick={() => setDraftOpen((v) => !v)} aria-pressed={draftOpen}>
+                <FileText size={16} />
+                {draftOpen ? 'ซ่อนร่าง' : 'เปิดร่าง'}
+              </button>
+            </div>
+          )}
+        </header>
+        <div className="conversation" aria-live="polite">
           {!messages.length && (
-            <Empty
-              icon={<MessageSquare size={30} />}
-              title="เริ่มจากสิ่งที่อยากให้ช่วย"
-              detail="ระบุงานที่ต้องทำ ผลลัพธ์ที่ต้องการ และเลือกเอกสารที่เกี่ยวข้อง"
-            >
+            <div className="welcome">
+              <div className="welcome-intro">
+                <div className="welcome-heading">
+                  <p className="greet">{greeting}</p>
+                  <h1>
+                    ให้ AI ร่างงานหนัก
+                    <br />
+                    <em>ส่วนคุณตัดสินเรื่องสำคัญ</em>
+                  </h1>
+                </div>
+                <Art scene="chat" className="welcome-illustration" />
+              </div>
+              <div className="suggestions-label">
+                <span>ลองงานแรกที่คนส่วนใหญ่ใช้บ่อย</span>
+                <select
+                  aria-label="ตัวอย่างงานตามทีม"
+                  value={starterTeam}
+                  onChange={(e) => setStarterTeam(e.target.value)}
+                >
+                  <option value="">งานทั่วไป</option>
+                  {starterTeams.map((team) => (
+                    <option key={team} value={team}>
+                      ทีม {team.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="suggestions">
-                {['ช่วยวางโครงร่างเอกสาร', 'ช่วยสรุปเอกสารที่เลือก', 'พรุ่งนี้มีประชุมอะไรบ้าง'].map((s) => (
-                  <button key={s} onClick={() => setText(s)}>
-                    {s}
+                {starters.map((starter) => (
+                  <button
+                    key={starter.th}
+                    onClick={() => {
+                      setText(starter.th);
+                      composer.current?.focus();
+                    }}
+                  >
+                    <Sparkles size={16} />
+                    <span>
+                      <small className="starter-tag">{starter.tag.th}</small>
+                      {starter.th}
+                    </span>
+                    <ChevronRight size={15} />
                   </button>
                 ))}
               </div>
-            </Empty>
+              <p className="welcome-lede">
+                ผู้ช่วยที่รู้จักงานของ STeP สรุปเอกสารยาว ร่างหนังสือ วางแผนโครงการ และตรวจความพร้อมก่อนส่ง
+                ทุกร่างผ่านตาคุณก่อนใช้จริง
+              </p>
+              <ul className="welcome-trust">
+                <li>
+                  <ShieldCheck size={14} />
+                  เห็นข้อมูลที่ AI จะอ่านก่อนยืนยันทุกครั้ง
+                </li>
+                <li>
+                  <Check size={14} />
+                  AI ร่าง คนตรวจและอนุมัติ
+                </li>
+                <li>
+                  <Blocks size={14} />
+                  รู้จักทีมและ Skill ของ STeP
+                </li>
+              </ul>
+            </div>
           )}
           {messages.map((m) => (
             <article
               key={m.id}
-              className={'message ' + (m.role === 'user' ? 'user-message' : 'assistant-message')}
+              className={'message ' + (m.role === 'user' ? 'user' : 'assistant')}
+              aria-label={m.role === 'user' ? 'คุณ' : 'STeP AI'}
             >
-              <div className="message-name">{m.role === 'user' ? 'คุณ' : 'STeP AI'}</div>
               <div className="message-body">{m.body}</div>
               {m.sources?.length > 0 && (
                 <div className="sources">
@@ -394,10 +485,10 @@ export function Chat({
                     onClick={() => void navigator.clipboard.writeText(m.body).catch(fail)}
                     aria-label="คัดลอกคำตอบ"
                   >
-                    <Copy size={15} />
+                    <Copy size={14} />
                   </button>
                   <button onClick={() => setRemember(m)}>
-                    <Brain size={15} />
+                    <Brain size={14} />
                     บันทึกความจำ
                   </button>
                   <button
@@ -411,7 +502,7 @@ export function Chat({
                       setDraftOpen(true);
                     }}
                   >
-                    <FileText size={15} />
+                    <FileText size={14} />
                     ใช้เป็นร่าง
                   </button>
                 </div>
@@ -419,13 +510,13 @@ export function Chat({
             </article>
           ))}
           {active && (
-            <div className="run-progress">
+            <div className="activity">
               <Busy label={run?.status === 'queued' ? 'กำลังรอคิว AI' : 'AI กำลังอ่านข้อมูลที่คุณเลือก'} />
               <p>คุณกลับมาดูงานนี้ภายหลังได้</p>
             </div>
           )}
           {run && ['failed', 'interrupted', 'cancelled'].includes(run.status) && (
-            <div className="run-status">
+            <div className={'run-status ' + (run.status === 'cancelled' ? 'neutral' : '')} role="status">
               <strong>
                 {run.status === 'cancelled'
                   ? 'หยุดงานแล้ว'
@@ -441,23 +532,24 @@ export function Chat({
           )}
           <div ref={bottom} />
         </div>
-        <div className="composer-wrap">
+        <div className="composer-area">
           <form
             className="composer"
             onSubmit={(e) => {
               e.preventDefault();
-              void preview();
+              void send();
             }}
           >
             {skill && (
               <span className="skill-chip">
                 Skill · {skill.title}
                 <button type="button" aria-label="นำ Skill ออก" onClick={clearSkill}>
-                  <X size={14} />
+                  <X size={13} />
                 </button>
               </span>
             )}
             <textarea
+              ref={composer}
               aria-label="ข้อความถึง AI"
               placeholder="พิมพ์สิ่งที่อยากให้ช่วย…"
               value={text}
@@ -466,32 +558,37 @@ export function Chat({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
-                  void preview();
+                  void send();
                 }
               }}
-              rows={3}
+              rows={1}
             />
             <div className="composer-tools">
-              <div className="inline-actions">
-                <button type="button" onClick={() => setShowFiles((v) => !v)}>
-                  <Paperclip size={17} />
-                  {documents.length ? `${documents.length} เอกสาร` : 'เลือกเอกสาร'}
-                </button>
-                {session.visibility === 'private' && (
-                  <label className="checkbox-row compact">
-                    <input
-                      type="checkbox"
-                      checked={useMemory}
-                      onChange={(e) => setUseMemory(e.target.checked)}
-                    />
-                    ใช้ความจำของฉัน
-                  </label>
-                )}
-              </div>
+              <button
+                type="button"
+                className="composer-add"
+                aria-label={documents.length ? `เอกสารที่เลือก ${documents.length} รายการ` : 'เลือกเอกสาร'}
+                title="เลือกเอกสารให้ AI อ่าน"
+                onClick={() => setShowFiles((v) => !v)}
+              >
+                <Plus size={15} />
+                {documents.length ? `${documents.length} เอกสาร` : 'เอกสาร'}
+              </button>
+              {session?.visibility !== 'workspace' && (
+                <label className="pill">
+                  <input
+                    type="checkbox"
+                    checked={useMemory}
+                    onChange={(e) => setUseMemory(e.target.checked)}
+                  />
+                  ใช้ความจำของฉัน
+                </label>
+              )}
+              <span className="spacer" />
               {active ? (
                 <button
                   type="button"
-                  className="stop-button"
+                  className="stop"
                   aria-label="หยุดงาน"
                   disabled={run?.actor_id !== data.user.id}
                   onClick={() =>
@@ -501,38 +598,61 @@ export function Chat({
                       .catch(fail)
                   }
                 >
-                  <Square size={16} />
+                  <Square size={14} />
                 </button>
               ) : (
-                <button className="send-button" aria-label="ส่งข้อความ" disabled={!text.trim() || busy}>
-                  {busy ? <Busy label="" /> : <ArrowUp size={20} />}
+                <button className="send" aria-label="ส่งข้อความ" disabled={!text.trim() || busy}>
+                  {busy ? <Busy label="" /> : <ArrowUp size={17} />}
                 </button>
               )}
             </div>
           </form>
-          <p className="composer-note">ตรวจข้อมูลสำคัญกับเอกสารต้นฉบับก่อนนำไปใช้</p>
+          <p className="composer-note">
+            {!session && workspace
+              ? `ข้อความจากหน้านี้เริ่มงานส่วนตัว · กด “เริ่มงานใหม่” เพื่อแชร์ใน ${workspace.name}`
+              : 'ตรวจข้อมูลและร่างก่อนนำไปใช้ · ประวัติเก็บในบัญชี STeP ของคุณ'}
+          </p>
         </div>
-      </section>
-      {draftOpen && (
-        <aside className="draft-panel">
-          <header>
-            <h2>ร่างเอกสาร</h2>
-            <button className="icon-button" onClick={() => setDraftOpen(false)} aria-label="ปิดร่าง">
-              <X size={18} />
-            </button>
-          </header>
-          <div className="draft-toolbar">
-            <button onClick={() => setDraft((d) => d + '\n\n## หัวข้อ\n')}>หัวข้อ</button>
-            <button onClick={() => setDraft((d) => d + '\n- รายการ\n')}>รายการ</button>
-            <button
-              onClick={() =>
-                setDraft((d) => d + '\n\n| หัวข้อ | รายละเอียด |\n| --- | --- |\n| รายการ | รอยืนยัน |\n')
-              }
-            >
-              ตาราง
-            </button>
-            <label>
-              รูปแบบ Word
+      </div>
+      {draftOpen &&
+        session &&
+        artifactSlot &&
+        createPortal(
+          <aside className="artifact-pane" aria-label="ผลงาน">
+            <header className="artifact-header">
+              <FileText size={17} />
+              <strong>ผลงาน</strong>
+              <button className="icon-button" onClick={() => setDraftOpen(false)} aria-label="ปิดร่าง">
+                <X size={17} />
+              </button>
+            </header>
+            <div className="draft-title">
+              <span>{session.title}</span>
+              <small>
+                {!draft.trim()
+                  ? 'ยังไม่มีร่าง · ใช้คำตอบเป็นร่าง หรือพิมพ์เองได้'
+                  : draft === session.draft
+                    ? 'ร่าง Markdown · บันทึกแล้ว'
+                    : 'ร่าง Markdown · ยังไม่บันทึก'}
+              </small>
+            </div>
+            <div className="draft-toolbar" role="toolbar" aria-label="จัดรูปแบบร่าง">
+              <button onClick={() => setDraft((d) => d + '\n\n## หัวข้อ\n')}>
+                <Heading2 size={15} />
+                หัวข้อ
+              </button>
+              <button onClick={() => setDraft((d) => d + '\n- รายการ\n')}>
+                <List size={15} />
+                รายการ
+              </button>
+              <button
+                onClick={() =>
+                  setDraft((d) => d + '\n\n| หัวข้อ | รายละเอียด |\n| --- | --- |\n| รายการ | รอยืนยัน |\n')
+                }
+              >
+                <Table size={15} />
+                ตาราง
+              </button>
               <select
                 aria-label="รูปแบบ Word"
                 value={wordPreset}
@@ -542,53 +662,54 @@ export function Chat({
                 <option value="report">รายงาน · 14 pt</option>
                 <option value="book">หนังสือ · 16 pt</option>
               </select>
-            </label>
-          </div>
-          <textarea
-            ref={draftInput}
-            aria-label="ร่างเอกสาร"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="ใช้คำตอบเป็นร่าง หรือเริ่มพิมพ์เองได้"
-          />
-          <p className="small muted draft-note">
-            ร่าง Markdown · Word ยังไม่ฝังฟอนต์หรือตราครุฑ ตรวจรูปแบบกับแบบของหน่วยงานก่อนใช้
-          </p>
-          <footer>
-            <button
-              onClick={() =>
-                void host
-                  .call<Conversation>('session.draft', {
-                    tenant,
-                    id: session.id,
-                    version: session.version,
-                    draft,
-                  })
-                  .then((s) => setSession(s))
-                  .catch(fail)
-              }
-            >
-              <Check size={15} />
-              บันทึก
-            </button>
-            <button
-              disabled={!draft.trim()}
-              onClick={() => void exportWord(draft, session.title, wordPreset).catch(fail)}
-            >
-              <Download size={15} />
-              Word (.docx)
-            </button>
-            <button
-              disabled={!draft.trim()}
-              onClick={() =>
-                saveBlob(new Blob([draft], { type: 'text/plain;charset=utf-8' }), 'ร่างเอกสาร.txt')
-              }
-            >
-              ข้อความ (.txt)
-            </button>
-          </footer>
-        </aside>
-      )}
+            </div>
+            <textarea
+              className="draft-editor"
+              aria-label="ร่างเอกสาร"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="ใช้คำตอบเป็นร่าง หรือเริ่มพิมพ์เองได้"
+            />
+            <details className="draft-sources">
+              <summary>แหล่งอ้างอิงที่ใช้ ({draftSources.length})</summary>
+              {draftSources.length ? (
+                <ul>
+                  {draftSources.map((s) => (
+                    <li key={s.kind + s.id}>
+                      <button onClick={() => void openSource(s)}>
+                        <BookOpen size={12} />
+                        {s.title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="small muted">คำตอบในงานนี้ยังไม่ได้อ้างอิงเอกสารหรือความรู้องค์กร</p>
+              )}
+            </details>
+            <p className="draft-note">Word ยังไม่ฝังฟอนต์หรือตราครุฑ ตรวจรูปแบบกับแบบของหน่วยงานก่อนใช้</p>
+            <footer className="artifact-footer">
+              <button onClick={saveDraft}>
+                <Save size={15} />
+                บันทึก
+              </button>
+              <span className="spacer" />
+              <select
+                aria-label="รูปแบบไฟล์"
+                value={format}
+                onChange={(e) => setFormat(e.target.value as typeof format)}
+              >
+                <option value="docx">Word (.docx)</option>
+                <option value="txt">ข้อความ (.txt)</option>
+              </select>
+              <button className="primary" disabled={!draft.trim()} onClick={exportDraft}>
+                <Download size={15} />
+                ส่งออก
+              </button>
+            </footer>
+          </aside>,
+          artifactSlot,
+        )}
       {showFiles && (
         <Modal title="เอกสารที่ให้ AI อ่านในงานนี้" onClose={() => setShowFiles(false)}>
           <p className="muted">

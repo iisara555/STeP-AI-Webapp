@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Brain, Edit3, Plus, Trash2 } from 'lucide-react';
+import { Brain, Edit3, Plus, Trash2 } from './icons.tsx';
 import type { Memory } from '../../packages/harness-core/src/contracts.ts';
 import type { ViewProps } from './App.tsx';
-import { Empty, Modal, Visibility } from './components.tsx';
+import { Empty, Modal, Segmented, Visibility } from './components.tsx';
 export function Memories({ host, data, tenant, workspace, refresh, fail }: ViewProps) {
   const [editing, setEditing] = useState<Memory | 'new' | null>(null),
     [deleting, setDeleting] = useState<Memory | null>(null),
@@ -17,7 +17,6 @@ export function Memories({ host, data, tenant, workspace, refresh, fail }: ViewP
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">จำเฉพาะสิ่งที่ช่วยงาน</p>
           <h1>ความจำ</h1>
           <p>แก้ไขหรือลบได้เสมอ ความจำส่วนตัวจะไม่ติดไปกับบทสนทนาที่แชร์</p>
         </div>
@@ -26,18 +25,15 @@ export function Memories({ host, data, tenant, workspace, refresh, fail }: ViewP
           เพิ่มความจำ
         </button>
       </div>
-      <div className="tabs">
-        <button className={filter === 'private' ? 'active' : ''} onClick={() => setFilter('private')}>
-          ส่วนตัว
-        </button>
-        <button
-          disabled={!workspace}
-          className={filter === 'workspace' ? 'active' : ''}
-          onClick={() => setFilter('workspace')}
-        >
-          แชร์ใน workspace
-        </button>
-      </div>
+      <Segmented
+        label="ความจำที่แสดง"
+        value={filter}
+        onChange={setFilter}
+        options={[
+          { value: 'private', label: 'ส่วนตัว' },
+          { value: 'workspace', label: 'แชร์ใน workspace', disabled: !workspace },
+        ]}
+      />
       <div className="card-grid">
         {rows.map((m) => (
           <article className="memory-card" key={m.id}>
@@ -65,7 +61,7 @@ export function Memories({ host, data, tenant, workspace, refresh, fail }: ViewP
       </div>
       {!rows.length && (
         <Empty
-          icon={<Brain size={32} />}
+          art="idea"
           title={filter === 'private' ? 'ยังไม่มีความจำส่วนตัว' : 'ยังไม่มีความจำที่แชร์'}
           detail="เริ่มจากความชอบที่ใช้ต่อได้ เช่น รูปแบบคำตอบหรือโครงสร้างเอกสารที่ต้องการ"
         />

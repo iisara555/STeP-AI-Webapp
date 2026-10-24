@@ -79,6 +79,8 @@ export interface Conversation {
   title: string;
   version: number;
   draft: string;
+  /** Returned by the sessions table; the sidebar groups tasks by it. */
+  created_at?: string;
 }
 export interface SourceRef {
   id: string;

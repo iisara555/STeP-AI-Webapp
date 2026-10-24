@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { Search, MessageSquare } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Search, MessageSquare } from './icons.tsx';
 import type { Conversation } from '../../packages/harness-core/src/contracts.ts';
 import type { ViewProps } from './App.tsx';
 import { Busy, Empty, Visibility } from './components.tsx';
@@ -10,11 +10,28 @@ export function History({
   workspace,
   fail,
   onOpen,
-}: ViewProps & { onOpen: (session: Conversation) => void }) {
-  const [query, setQuery] = useState(''),
+  initialQuery = '',
+}: ViewProps & { onOpen: (session: Conversation) => void; initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery),
     [results, setResults] = useState<Conversation[] | null>(null),
     [busy, setBusy] = useState(false);
   const generation = useRef(0);
+  const search = async (value: string) => {
+    const current = ++generation.current;
+    setBusy(true);
+    try {
+      const found = await host.call<Conversation[]>('session.search', { tenant, query: value });
+      if (current === generation.current) setResults(found);
+    } catch (error) {
+      fail(error);
+    } finally {
+      if (current === generation.current) setBusy(false);
+    }
+  };
+  // A search started from the sidebar runs on arrival.
+  useEffect(() => {
+    if (initialQuery.trim()) void search(initialQuery);
+  }, []);
   const rows = (results || data.sessions).filter(
     (s) => s.tenant_id === tenant && (!workspace || s.workspace_id === workspace.id),
   );
@@ -22,25 +39,15 @@ export function History({
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">กลับมาทำงานต่อ</p>
           <h1>ค้นงานเก่า</h1>
           <p>ค้นชื่อ บทสนทนา และร่างที่คุณมีสิทธิ์อ่าน โดยไม่ส่งคำค้นให้ AI</p>
         </div>
       </div>
       <form
         className="catalog-controls"
-        onSubmit={async (e) => {
+        onSubmit={(e) => {
           e.preventDefault();
-          const current = ++generation.current;
-          setBusy(true);
-          try {
-            const value = await host.call<Conversation[]>('session.search', { tenant, query });
-            if (current === generation.current) setResults(value);
-          } catch (error) {
-            fail(error);
-          } finally {
-            if (current === generation.current) setBusy(false);
-          }
+          void search(query);
         }}
       >
         <label className="search">
