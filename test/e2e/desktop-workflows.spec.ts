@@ -30,16 +30,49 @@ test('document form creates an editable private draft and waits for AI consent',
   await expect(draft).toHaveValue(/โครงการสังเคราะห์/);
   await expect(page.getByRole('button', { name: 'ใช้เป็นร่าง' })).toHaveCount(0);
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await draft.fill('# หัวเรื่อง\n\n- ข้อแรก\n\n| รายการ | จำนวน |\n| --- | --- |\n| ทดสอบ | 2 |');
-  await page.getByLabel('รูปแบบ Word', { exact: true }).selectOption('saraban');
+  await draft.fill(
+    '# บันทึกข้อความ\n\nเรื่อง ทดสอบ\n\n## หัวเรื่อง\n\n- ข้อแรก\n\n| รายการ | จำนวน |\n| --- | --- |\n| ทดสอบ | 2 |',
+  );
+  // A memo starts on the สารบรรณ page with Thai page numbers and the 1.5 cm Garuda, as on Desktop.
+  await page.getByRole('button', { name: 'ตั้งค่าส่งออก', exact: true }).click();
+  await expect(page.getByLabel('การจัดหน้า', { exact: true })).toHaveValue('saraban');
+  await expect(page.getByLabel('รูปแบบเลขหน้า', { exact: true })).toHaveValue('thai');
+  await expect(page.getByLabel('ตราครุฑ', { exact: true })).toHaveValue('auto');
   const downloaded = page.waitForEvent('download');
   await page.getByRole('button', { name: 'ส่งออก', exact: true }).click();
   const zip = await JSZip.loadAsync(await readFile((await (await downloaded).path())!));
-  const xml = await zip.file('word/document.xml')!.async('string');
+  const xml = (await zip.file('word/document.xml')!.async('string')).replace(/​/g, '');
+  const header = (await zip.file('word/header1.xml')!.async('string')).replace(/​/g, '');
+  expect(header).toContain('บันทึกข้อความ');
+  expect(header).toContain('cx="540000"');
   expect(xml).toContain('หัวเรื่อง');
   expect(xml).toContain('<w:tbl>');
-  expect(xml).toContain('Heading1');
+  expect(xml).toContain('Heading2');
   expect(xml).toContain('w:left="1701"');
+  // The pinned TH Sarabun New faces are embedded, so the file opens the same on a computer without them.
+  expect(Object.keys(zip.files).filter((n) => /^word\/fonts\/.+\.odttf$/.test(n))).toHaveLength(4);
+  expect(await zip.file('word/settings.xml')!.async('string')).toContain('w:embedTrueTypeFonts w:val="1"');
+  await expect(page.getByRole('status').getByText('ฝังฟอนต์ครบแล้ว', { exact: false })).toBeVisible();
+  await expect(page.getByText('ตราครุฑสูง 1.5 ซม. (เฉพาะหน้าแรก)')).toBeVisible();
+  await page.getByRole('tab', { name: 'หน้ากระดาษ', exact: true }).click();
+  const sheet = page.frameLocator('iframe[title="ตัวอย่างหน้ากระดาษ"]');
+  await expect(sheet.getByRole('img', { name: 'ตราครุฑ' })).toBeVisible();
+  await expect(sheet.getByText('ทดสอบ', { exact: true }).first()).toBeVisible();
+  await page.getByLabel('ตราครุฑ', { exact: true }).selectOption('none');
+  await expect(sheet.getByRole('img', { name: 'ตราครุฑ' })).toHaveCount(0);
+  await page.getByRole('tab', { name: 'แก้ไข', exact: true }).click();
+  // PDF goes through the browser's print dialog with the same A4 page; headless Chromium prints without a dialog.
+  await page.getByLabel('รูปแบบไฟล์', { exact: true }).selectOption('pdf');
+  await page.getByRole('button', { name: 'ส่งออก', exact: true }).click();
+  await expect(page.getByText('เลือก “บันทึกเป็น PDF” ในหน้าพิมพ์', { exact: false })).toBeVisible();
+  await expect(page.getByText('ไม่ใส่ตราครุฑ', { exact: true }).last()).toBeVisible();
+  for (const mode of ['มืด', 'สว่าง'] as const) {
+    await theme(page, mode);
+    expect(
+      (await new AxeBuilder({ page }).include('.artifact-pane').withTags(['wcag2a', 'wcag2aa']).analyze())
+        .violations,
+    ).toEqual([]);
+  }
   await page.getByRole('button', { name: 'ปิดร่าง', exact: true }).click();
   await page.getByRole('button', { name: 'ส่งข้อความ', exact: true }).click();
   await expect(
