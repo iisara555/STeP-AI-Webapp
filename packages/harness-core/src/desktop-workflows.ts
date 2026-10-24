@@ -1,6 +1,13 @@
 import { DOCUMENT_TOOLS, documentRequest, documentTool } from '../vendor/desktop/document-tools.ts';
 export { DOCUMENT_TOOLS };
-export type PreparedWork = { title: string; draft: string; message: string; skillKey?: string };
+export type PreparedWork = {
+  title: string;
+  draft: string;
+  message: string;
+  skillKey?: string;
+  /** The Desktop document tool this conversation drafts with. */
+  documentTool?: string;
+};
 
 /** Form input stays local until the employee prepares a conversation, then reviews AI consent. */
 export function prepareDocument(id: string, values: Record<string, string>, variant: string): PreparedWork {
@@ -14,7 +21,7 @@ export function prepareDocument(id: string, values: Record<string, string>, vari
     tool.fields
       .map((f) => `## ${f.label}\n${values[f.key]?.trim() || `[รอยืนยัน: ${f.label}]`}`)
       .join('\n\n');
-  return { title: tool.title, draft, message, skillKey: tool.skill };
+  return { title: tool.title, draft, message, skillKey: tool.skill, documentTool: tool.id };
 }
 
 /** A literal ILIKE pattern; punctuation never becomes PostgREST filter syntax. */
