@@ -12,7 +12,13 @@
 - Validation (Windows, ข้อมูลสังเคราะห์, ไม่มีการเรียก AI/Google จริง): `tsc --noEmit` ผ่าน, build ผ่าน,
   unit/API/PWA 62/62 (ใหม่ 17 รวม worker-revocation), PostgreSQL/PGlite 29/29, Playwright desktop/mobile 56/56
   `prettier --check` ยังรายงาน 57 ไฟล์จาก CRLF ใน checkout นี้ (ไฟล์ที่ไม่ได้แตะก็ติด) ไม่ใช่ปัญหาเนื้อหา
-- ยังไม่ทำ: deploy API/worker (hosted ยังเป็นเวอร์ชันก่อนแก้นี้ รวมถึง Gemini busy retry) และ real-account acceptance
+- Deploy 2026-10-25: operator deploy `api` และ `worker` จาก main `e381eb8` ด้วย
+  `supabase functions deploy … --no-verify-jwt --use-api --import-map supabase/functions/deno.json`
+  ตอนนี้ทั้งสองเป็น v19 ACTIVE (`verify_jwt=false` ตามเดิม) `google-callback` ยัง v14 เพราะไม่ได้แก้
+  ครั้งแรกที่ไม่ใส่ `--import-map` bundle ล้มเหลวที่ `zod` และไม่มีการเปลี่ยนเวอร์ชัน
+  v19 รวม Gemini busy retry/`AI_BUSY` จากรอบก่อนด้วย ตรวจเฉพาะรายการฟังก์ชัน/เวอร์ชัน/สถานะ
+  ไม่ได้เทียบ source ที่ deploy และไม่ได้เรียก API จริง
+- ยังไม่ทำ: real-account acceptance (Google, Gemini, การ revoke ระหว่างงานจริง) และเทียบ source ที่ deploy
 
 ## 2026-10-24 · Audit เทียบ Desktop 0.6.20
 
