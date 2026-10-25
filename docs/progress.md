@@ -11,6 +11,27 @@
   ส่วนแผน web-only parity ใน #19 ถูกแทนด้วย ADR 0001 แล้ว
 - เปลี่ยนเฉพาะเอกสาร ไม่มี deploy หรือ secret
 
+## 2026-10-25 · Protected routes reconciled with the Desktop-parity shell and draft protection
+
+- Merged main `7aaa7d6` (through #23) into the protected-route branch. The shell keeps its lazy-loaded
+  tool pages; its `replaceState` page state is replaced by `web/src/routes.ts`, so pages follow
+  browser history and anonymous visitors go to `/login?next=…`.
+- Main's unsaved-draft protection is kept: an account change clears drafts and the discard prompt
+  inside the verified-identity handler, and sign-out still asks before discarding a draft, then
+  clears the return path and opens `/login`.
+- The Auth browser tests use the new shell: the Skill page opens from the sidebar's เครื่องมือ
+  navigation, sign-out runs from เมนู STeP, and "no private view" checks look for that navigation in
+  the DOM. The old เมนูหลัก label no longer exists, so those checks would otherwise pass vacuously; the
+  sign-in test first asserts the navigation is present.
+- Validation (cloud container, Node 22.22.0): TypeScript/Prettier, 65 unit/API/PWA tests, 29 PostgreSQL
+  tests, 3 engine tests, production build and 70 of 72 desktop/mobile Chromium checks, including all
+  16 Auth checks and the draft regression suites. The two Word download checks fail the same way on
+  unchanged main in this container (Chromium 141 names the file `download`); GitHub CI remains
+  authoritative.
+- The Supabase system is under feature freeze (ADR 0001); this is pilot sign-in hardening, for the owner
+  to accept or close. Left: human review, then rebuilding the homelab frontend after merge and
+  repeating real-account sign-in, reload and sign-out there.
+
 ## 2026-10-25 · ระยะ 2: engine ของ Desktop รันแบบ headless
 
 - เพิ่ม submodule `harness/` ที่ `desktop-v0.6.20` (`90ee71c`) และ `server/` ที่สร้าง `WorkService` ของ Desktop
@@ -269,6 +290,17 @@
   Node 25.2.1, outside the declared engine range. Playwright was not run; no UI changed.
   No live AI, Google call, homelab installation or function deployment was performed.
 
+## 2026-10-23 · Protected routes reconciled with Desktop workflows
+
+- Merged the Desktop workflow pages into the protected-route branch. `web/src/routes.ts` is the
+  single page list; `/document-tools`, `/media`, `/history` and `/help` now reload, follow browser
+  history, redirect anonymous visitors to login and survive the Google sign-in return allowlist.
+- Validation: TypeScript/Prettier, 41 unit/API/PWA tests, 27 PostgreSQL (PGlite) tests, production
+  build and 44 of 46 desktop/mobile Chromium checks passed, including all 16 Auth checks covering
+  the ten page URLs. The two Word download checks also fail on unchanged `main` in the cloud
+  container (Chromium 141 reports the file name as `download`); GitHub CI remains authoritative.
+- Hosted Auth settings, Google OAuth credentials and real-account acceptance remain pending, as below.
+
 ## 2026-10-23 · Desktop workflows and complete product reference
 
 - Audited Desktop 0.6.20 at `90ee71ca667c63284afe4996eddc7e8095b9a059`.
@@ -364,6 +396,28 @@
   migration, deploying the API/frontend, setting a replacement `OPENROUTER_API_KEY`
   with `OPENROUTER_TRIAL_TENANT_ID`, then real-account authorization and $0 billing
   acceptance. Existing hosting/Google rollout requirements below remain applicable.
+
+## 2026-10-22 · Supabase Auth and protected routes
+
+- Added a public `/login`, PKCE callback handling, and stable URLs for all six workspace screens.
+  Anonymous deep links preserve an allowlisted destination through Google sign-in; reload and
+  browser back/forward follow the URL. The synthetic preview remains a separate Host.
+- Auth.getUser validates restored and refreshed identities before loading workspace data.
+  Account changes and sign-out clear private state; API 401 returns to login. Existing Google
+  identity, invitation, tenant, resource and Storage authorization remain enforced server-side.
+- A single-use callback exchange is shared across React StrictMode initialization effects.
+  Failed/missing callback codes produce sanitized login errors without exposing provider details.
+- Added configured-Auth browser checks with synthetic responses alongside the existing preview
+  checks, plus unit coverage for redirect allowlists, token verification and callback replay.
+- Local verification against main including OpenRouter: TypeScript/Prettier, 27 unit/API/PWA tests,
+  21 PostgreSQL isolation tests, production build, and all 32 Chromium desktop/mobile checks passed.
+  Chromium was installed
+  after an initial missing-browser failure. No real Google identity was used in these checks.
+- Read-only query of the existing hosted project confirmed all 16 public tables have RLS enabled.
+  No hosted Auth settings, database schema, staff records or production deployment changed.
+- Google OAuth credentials, a real Pages origin and real-account acceptance remain required.
+  The Supabase connector has no Auth configuration update tool; the browser Dashboard requires
+  sign-in. Follow [auth-setup.md](auth-setup.md) to complete the controlled setup in the Dashboard.
 
 ## 2026-10-22 · Supabase backend reconciliation
 
