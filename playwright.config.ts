@@ -13,12 +13,25 @@ export default defineConfig({
       args: ['--no-sandbox'],
     },
   },
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://127.0.0.1:5173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 30000,
-  },
+  webServer: [
+    {
+      command: 'npm run dev',
+      url: 'http://127.0.0.1:5173',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30000,
+      env: { VITE_SUPABASE_URL: '', VITE_SUPABASE_PUBLISHABLE_KEY: '' },
+    },
+    {
+      command: 'npm run dev -w web -- --port 5174 --strictPort',
+      url: 'http://127.0.0.1:5174',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30000,
+      env: {
+        VITE_SUPABASE_URL: 'https://auth.example.test',
+        VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_synthetic_test_only',
+      },
+    },
+  ],
   projects: [
     { name: 'desktop', use: { browserName: 'chromium', viewport: { width: 1440, height: 1000 } } },
     {

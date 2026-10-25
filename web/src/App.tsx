@@ -19,6 +19,19 @@ import { TitleBar, mod, type MenuGroup } from './TitleBar.tsx';
 import { Sidebar, SidebarRail, sidebarChoice, tools } from './Sidebar.tsx';
 import { useTheme } from './ThemeSelect.tsx';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
+import { exchangeCodeOnce, verifiedIdentity } from './auth.ts';
+import {
+  currentRoute,
+  loginPath,
+  navigate,
+  pagePaths,
+  returnPath,
+  returnPathKey,
+  routePage,
+  subscribeRoute,
+  type Page,
+} from './routes.ts';
+export type { Page } from './routes.ts';
 import { assistantName } from '../../packages/harness-core/src/assistant-profile.ts';
 import { DraftBook } from './drafts.ts';
 // Tool pages load on first open, so the first screen does not wait for the Desktop reference or Word export.
@@ -31,17 +44,6 @@ const DocumentTools = lazy(() => import('./DocumentTools.tsx').then((m) => ({ de
 const MediaStudio = lazy(() => import('./MediaStudio.tsx').then((m) => ({ default: m.MediaStudio })));
 const Help = lazy(() => import('./Help.tsx').then((m) => ({ default: m.Help })));
 const History = lazy(() => import('./History.tsx').then((m) => ({ default: m.History })));
-export type Page =
-  | 'chat'
-  | 'skills'
-  | 'documents'
-  | 'memory'
-  | 'receipt'
-  | 'settings'
-  | 'document-tools'
-  | 'media'
-  | 'history'
-  | 'help';
 export interface ViewProps {
   host: Host;
   data: Snapshot;
@@ -50,17 +52,6 @@ export interface ViewProps {
   refresh: () => Promise<void>;
   fail: (error: unknown) => void;
 }
-const pages: Page[] = [
-  'settings',
-  'skills',
-  'documents',
-  'memory',
-  'receipt',
-  'document-tools',
-  'media',
-  'history',
-  'help',
-];
 /** Title and one-line purpose for the page header, as on Desktop. */
 const headers: Record<Exclude<Page, 'chat'>, [string, string]> = {
   'document-tools': [
@@ -82,7 +73,11 @@ const subscribeNarrow = (onChange: () => void) => {
   return () => narrow.removeEventListener('change', onChange);
 };
 export function App() {
+  const route = useSyncExternalStore(subscribeRoute, currentRoute);
+  const pathname = route.split('?')[0];
+  const page = routePage(pathname);
   const [demo, setDemo] = useState(new URLSearchParams(location.search).get('demo') === '1');
+  const authEntry = useMemo(() => new URL(location.href), [demo]);
   const host = useMemo(() => (demo ? demoHost() : webHost()), [demo]);
   const [settingsTab, setSettingsTab] = useState(
     new URLSearchParams(location.search).has('google') ? 'google' : 'profile',
@@ -92,10 +87,7 @@ export function App() {
   const [data, setData] = useState<Snapshot | null>(null),
     [tenant, setTenant] = useState(''),
     [workspaceId, setWorkspaceId] = useState('');
-  const [page, setPage] = useState<Page>(
-      pages.includes(location.pathname.slice(1) as Page) ? (location.pathname.slice(1) as Page) : 'chat',
-    ),
-    [session, setSession] = useState<Conversation | null>(null),
+  const [session, setSession] = useState<Conversation | null>(null),
     [skill, setSkill] = useState<Skill | null>(null);
   const [error, setError] = useState<unknown>(null),
     [loading, setLoading] = useState(false),
@@ -144,60 +136,104 @@ export function App() {
     }
     if (!configured()) return;
     let active = true;
+    let initializing = true;
+    let validation = 0;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
     const db = supabase();
+    const applyIdentity = (next: string) => {
+      if (next !== authenticatedUser.current) {
+        authenticatedUser.current = next;
+        epoch.current++;
+        draftScope.current.clear();
+        setDiscardAction(null);
+        setAuthGeneration((v) => v + 1);
+        setData(null);
+        setSession(null);
+        setTenant('');
+        setWorkspaceId('');
+        setDialog(null);
+        setError(null);
+      }
+      setSignedIn(Boolean(next));
+    };
+    const validate = async () => {
+      const current = ++validation;
+      try {
+        const id = await verifiedIdentity(db);
+        if (active && current === validation) applyIdentity(id);
+      } catch (e) {
+        if (active && current === validation) {
+          applyIdentity('');
+          setError(e);
+        }
+      } finally {
+        if (active && current === validation) setAuthReady(true);
+      }
+    };
     const initialize = async () => {
       try {
-        if (location.pathname === '/settings' && new URLSearchParams(location.search).has('google')) {
-          const result = new URLSearchParams(location.search).get('google') || '';
-          history.replaceState(null, '', '/settings');
+        if (authEntry.pathname === '/settings' && authEntry.searchParams.has('google')) {
+          const result = authEntry.searchParams.get('google') || '';
+          navigate('/settings', true);
           if (result !== 'connected')
             throw new ApiError(/^[A-Z_]{3,60}$/.test(result) ? result : 'GOOGLE_LOGIN_FAILED');
         }
-        if (location.pathname === '/auth/callback') {
-          const code = new URLSearchParams(location.search).get('code');
-          if (code) {
-            const result = await db.auth.exchangeCodeForSession(code);
-            if (result.error) throw new ApiError('GOOGLE_LOGIN_FAILED');
+        if (authEntry.pathname === '/auth/callback') {
+          const params = authEntry.searchParams;
+          const code = params.get('code');
+          if (params.has('error') || !code) throw new ApiError('GOOGLE_LOGIN_FAILED');
+          await exchangeCodeOnce(db, code);
+          if (active) {
+            const destination = returnPath(sessionStorage.getItem(returnPathKey));
+            sessionStorage.removeItem(returnPathKey);
+            navigate(destination, true);
           }
-          history.replaceState(null, '', '/');
         }
-        const {
-          data: { session },
-        } = await db.auth.getSession();
-        if (active) setSignedIn(Boolean(session));
+        if (active) await validate();
       } catch (e) {
-        if (active) setError(e);
+        if (active) {
+          applyIdentity('');
+          sessionStorage.removeItem(returnPathKey);
+          navigate('/login', true);
+          setError(e);
+        }
       } finally {
+        initializing = false;
         if (active) setAuthReady(true);
       }
     };
     void initialize();
     const {
       data: { subscription },
-    } = db.auth.onAuthStateChange((_event, s) => {
-      if (active) {
-        const next = s?.user.id || '';
-        if (next !== authenticatedUser.current) {
-          authenticatedUser.current = next;
-          epoch.current++;
-          draftScope.current.clear();
-          setDiscardAction(null);
-          setAuthGeneration((v) => v + 1);
-          setData(null);
-          setSession(null);
-          setTenant('');
-          setWorkspaceId('');
-          setDialog(null);
-          setError(null);
-        }
-        setSignedIn(Boolean(s));
+    } = db.auth.onAuthStateChange((event, s) => {
+      if (!active || event === 'INITIAL_SESSION') return;
+      if (!s) {
+        validation++;
+        applyIdentity('');
+        setAuthReady(true);
+      } else if (!initializing) {
+        if (s.user.id !== authenticatedUser.current) applyIdentity('');
+        setAuthReady(false);
+        // Supabase callbacks run under an Auth lock. Validate after releasing it.
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          void validate();
+        }, 0);
+        timers.add(timer);
       }
     });
     return () => {
       active = false;
+      for (const timer of timers) clearTimeout(timer);
       subscription.unsubscribe();
     };
-  }, [demo]);
+  }, [demo, authEntry]);
+  useEffect(() => {
+    if (!authReady) return;
+    if (!signedIn && pathname !== '/login') navigate(loginPath(pathname), true);
+    else if (signedIn && pathname === '/login')
+      navigate(returnPath(new URLSearchParams(location.search).get('next')), true);
+  }, [authReady, signedIn, pathname, route]);
   const refresh = useCallback(async () => {
     const current = epoch.current;
     const snapshot = await loadSnapshot(host);
@@ -206,12 +242,12 @@ export function App() {
     setTenant((t) => (snapshot.tenants.some((x) => x.id === t) ? t : snapshot.tenants[0]?.id || ''));
   }, [host]);
   useEffect(() => {
-    if (!signedIn) return;
+    if (!signedIn || !authReady) return;
     setLoading(true);
     void refresh()
       .catch(setError)
       .finally(() => setLoading(false));
-  }, [signedIn, refresh, authGeneration]);
+  }, [signedIn, authReady, refresh, authGeneration]);
   useEffect(() => {
     const on = () => setOnline(true),
       off = () => setOnline(false),
@@ -230,14 +266,13 @@ export function App() {
     setSession(null);
     setSkill(null);
     setWorkspaceId('');
-    setError(null);
+    if (tenant) setError(null);
   }, [tenant]);
   const workspaces = data?.workspaces.filter((w) => w.tenant_id === tenant) || [];
   const workspace = workspaces.find((w) => w.id === workspaceId) || null;
   const changePage = (p: Page) => {
-    setPage(p);
     setMobile(false);
-    history.replaceState(null, '', (p === 'chat' ? '/' : '/' + p) + (demo ? '?demo=1' : ''));
+    navigate(pagePaths[p] + (demo ? '?demo=1' : ''));
   };
   const fail = useCallback((e: unknown) => setError(e), []);
   const useSkill = (selected: Skill) => {
@@ -327,7 +362,8 @@ export function App() {
     await host.signOut().catch(() => {});
     setSignedIn(false);
     setDemo(false);
-    history.replaceState(null, '', '/');
+    sessionStorage.removeItem(returnPathKey);
+    navigate('/login', true);
   };
   const logout = () => protectDrafts(() => void endSession());
   const applyUpdate = async () => {
@@ -385,7 +421,7 @@ export function App() {
               setDemo(true);
               setSignedIn(true);
               setError(null);
-              history.replaceState(null, '', '/?demo=1');
+              navigate('/?demo=1');
             }}
           >
             ดูตัวอย่างหน้าจอ
