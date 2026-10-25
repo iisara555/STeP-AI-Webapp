@@ -38,8 +38,12 @@ export default defineConfig({
       },
     },
   ],
+  // Lazy export code would otherwise make the dev server discover these on first use and reload the page.
+  optimizeDeps: { include: ['docx', 'jszip', 'mdast-util-from-markdown'] },
   build: {
     chunkSizeWarningLimit: 700,
+    // The CSP allows fonts from this site only (font-src 'self'), so small font subsets are never inlined as data URIs.
+    assetsInlineLimit: (file) => (/\.(?:woff2?|ttf)$/.test(file) ? false : undefined),
     rollupOptions: {
       output: {
         manualChunks(id) {
