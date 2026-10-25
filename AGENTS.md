@@ -2,6 +2,9 @@
 
 This repository is the centralized PWA. The Electron application remains in
 `iisara555/STeP-AI-Harness`; do not change that checkout as part of web work.
+Direction: [ADR 0001](docs/adr/0001-server-engine-direction.md). The Desktop engine will enter only as a
+submodule pinned to a `desktop-v*` tag; never copy engine code here, change it through a Harness PR.
+The Supabase stack is in feature freeze: bug fixes and pilot needs only.
 
 - Work on a branch and open a PR. Do not push directly to main.
 - Read `docs/progress.md` and `docs/architecture.md` before changing behavior.

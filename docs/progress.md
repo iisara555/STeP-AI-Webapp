@@ -1,5 +1,20 @@
 # Progress
 
+## 2026-10-25 · ทิศทางใหม่: engine ของ Desktop บน server องค์กร
+
+- บันทึกการตัดสินใจใน [ADR 0001](adr/0001-server-engine-direction.md): เว็บเป็นตัวกลาง งานจริงรันบน engine ของ Desktop
+  (git submodule ของ Harness ที่ release tag) บน hardware ที่องค์กรจะซื้อ 1 ผู้ใช้ = 1 engine process + SQLite
+  มี gateway ทำ login/เพดาน/admin/audit และ router proxy เลือกระหว่าง API กับ local LLM
+- ระบบ Supabase ปัจจุบัน **feature freeze**: แก้เฉพาะ bug และสิ่งที่ pilot ต้องใช้
+- เจ้าของโครงการรายงานว่าใช้งานจริงด้วยบัญชีจริงได้แล้ว: Google login, เชื่อม Drive/เลือกไฟล์, แชต Gemini กับเอกสาร STeP,
+  ร่างและ export Word, OCR ใบเสร็จจริง agent ไม่ได้ตรวจซ้ำและไม่ได้เห็นหลักฐาน (log/ภาพหน้าจอ) ด้วยตัวเอง
+  ยังไม่ได้ทดสอบ: ถอนสิทธิ์หรือยกเลิกระหว่างงานด้วยบัญชีจริง
+- รอเจ้าของโครงการก่อนเปิด pilot 3–5 คน: ทดสอบการถอนสิทธิ์ด้วยบัญชีที่สอง (งานต้องจบด้วย `ACCESS_DENIED`
+  และไม่มีคำตอบ), ให้กลุ่มผู้ดูแลองค์กรเป็น Owner ของ Google Cloud project, หนังสืออนุมัติใช้ Gemini free tier
+  กับเอกสารที่ไม่ลับ และเชิญผู้ใช้ pilot
+- ถัดไป (agent): headless spike ของ engine และ benchmark local LLM คู่ขนาน ตามลำดับงานใน ADR
+- เปลี่ยนเฉพาะเอกสาร ไม่มีการเปลี่ยนโค้ด, deploy หรือ secret
+
 ## 2026-10-25 · แก้ findings จาก audit runtime
 
 - P1 worker: ก่อนส่งบริบทไป AI ทุกครั้ง (หลังรอ Drive/Storage, หลัง countTokens และระหว่าง backoff 503
