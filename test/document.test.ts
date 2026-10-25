@@ -11,6 +11,7 @@ import { SYSTEM_RULES, estimateTextTokens } from '../packages/harness-core/src/i
 import type { Skill } from '../packages/harness-core/src/contracts.ts';
 import { aiService } from '../supabase/functions/_shared/ai.ts';
 import { processOne } from '../supabase/functions/_shared/worker.ts';
+import { documentTool } from '../packages/harness-core/vendor/desktop/document-tools.ts';
 
 const support = (key: string, path: string, body: string): RegisteredSource => ({
   source_key: key,
@@ -309,4 +310,79 @@ test('outside drafting, support files stay cut at 6,000 characters', () => {
   const { parts } = skillContext(jobSkills[0], registered, 'คอมพิวเตอร์ AI Computer');
   assert.doesNotMatch(parts.join('\n'), /\[ท้ายตัวอย่าง\]/);
   assert.match(parts.join('\n'), /\[แสดงข้อความบางส่วน\]/);
+});
+
+test('drafting tools load the TOR content guide and the official-letter writing guide', () => {
+  assert.ok(documentTool('tor')!.references.includes(`${PM}/references/tor-content-by-type.md`));
+  for (const id of ['memo', 'letter'])
+    assert.ok(documentTool(id)!.references.includes(`${COMMON}/references/saraban-writing-guide.md`), id);
+});
+
+test('a drafting guide keeps its final sections through either context path, once in the worker', async () => {
+  const { registered, jobSkills } = productionSized();
+  const guide = file(
+    `${PM}/references/tor-content-by-type.md`,
+    0,
+    thaiText(10684, 'type-guide') + ' [ท้ายคู่มือคุณสมบัติและค่าปรับ]',
+  );
+  registered.push(guide);
+  (jobSkills[0].metadata.support_source_keys as string[]).push(guide.source_key);
+  const query = `ร่าง TOR ${guide.provenance.path}`;
+  const selected = skillContext(jobSkills[0], registered, query, { fullExamples: true, maxTokens: 45000 });
+  assert.match(selected.parts.join('\n'), /\[ท้ายคู่มือคุณสมบัติและค่าปรับ\]/);
+  const direct = documentContext('tor', jobSkills, registered);
+  assert.match(direct.parts.join('\n'), /\[ท้ายคู่มือคุณสมบัติและค่าปรับ\]/);
+  const { finished, prompt } = await runTor(registered, jobSkills, query);
+  assert.equal(finished[0].error, null);
+  assert.match(prompt, /\[ท้ายคู่มือคุณสมบัติและค่าปรับ\]/);
+  assert.equal(prompt.split(`<reference name="${guide.source_key}">`).length - 1, 1);
+  assert.ok(estimateTextTokens(prompt).estimatedTokens <= 48000);
+});
+
+test('memo and letter keep the end of the 14k writing guide and expose missing imports', () => {
+  const guide = file(
+    `${COMMON}/references/saraban-writing-guide.md`,
+    0,
+    thaiText(13908, 'saraban-guide') + ' [ท้ายคู่มือหน้าต่อและตรวจก่อนส่ง]',
+  );
+  for (const id of ['memo', 'letter'] as const) {
+    const { parts, sources } = documentContext(id, skills, [guide]);
+    assert.match(parts.join('\n'), /\[ท้ายคู่มือหน้าต่อและตรวจก่อนส่ง\]/);
+    assert.equal(sources.filter((s) => s.id === guide.source_key).length, 1);
+    const missing = documentContext(id, skills, []);
+    assert.match(missing.parts.join('\n'), /ยังไม่มีในระบบ: .*saraban-writing-guide\.md/);
+  }
+});
+
+test('a bounded TOR context reads type-specific content before optional general references', () => {
+  const { registered, jobSkills } = productionSized();
+  const guide = file(
+    `${PM}/references/tor-content-by-type.md`,
+    0,
+    thaiText(10684, 'type-guide') + ' [ท้ายคู่มือคุณสมบัติและค่าปรับ]',
+  );
+  const mandatory = documentContext('tor', jobSkills, registered, { budgetTokens: 0 });
+  const budgetTokens =
+    estimateTextTokens(mandatory.parts.join('\n')).estimatedTokens +
+    estimateTextTokens(guide.body).estimatedTokens +
+    1000;
+  const { parts, sources } = documentContext('tor', jobSkills, [...registered, guide], { budgetTokens });
+  const text = parts.join('\n');
+  assert.match(text, /\[ท้ายคู่มือคุณสมบัติและค่าปรับ\]/);
+  assert.ok(
+    sources.some((s) => s.id === central.source_key || s.title.endsWith('tor-16-sections-template.md')),
+  );
+  assert.match(text, /ข้ามเพราะบริบทเต็ม: .*tor-drafting-guide\.md/);
+});
+
+test('oversized drafting references remain bounded and explicitly marked as partial', () => {
+  const guide = file(`${PM}/references/tor-drafting-guide.md`, 0, 'x'.repeat(16000) + ' [นอกขอบเขตไฟล์]');
+  const selected = skill('tor-government-writing', [guide.source_key]);
+  for (const context of [
+    skillContext(selected, [guide], String(guide.provenance.path), { fullExamples: true }),
+    documentContext('tor', skills, [guide]),
+  ]) {
+    assert.doesNotMatch(context.parts.join('\n'), /\[นอกขอบเขตไฟล์\]/);
+    assert.match(context.parts.join('\n'), /\[แสดงข้อความบางส่วน\]/);
+  }
 });

@@ -1,6 +1,6 @@
 import { estimateTextTokens, rankSources, untrusted } from './index.ts';
 import type { Skill, SourceRef } from './contracts.ts';
-import { pointerTargets } from './document-context.ts';
+import { pointerTargets, WORKING_FILE_CHARS } from './document-context.ts';
 export interface RegisteredSource {
   source_key: string;
   title: string;
@@ -10,15 +10,14 @@ export interface RegisteredSource {
 }
 export interface SkillContextOptions {
   /**
-   * A drafting run reads a chosen worked example in full (Desktop's agent opens the whole file); otherwise
-   * every support file is cut at 6,000 characters.
+   * A drafting run reads each chosen support file up to 16,000 characters (Desktop opens the whole file);
+   * otherwise every support file is cut at 6,000 characters.
    */
   fullExamples?: boolean;
   /** Estimated tokens the Skill's material may use before the run stops with CONTEXT_LIMIT. */
   maxTokens?: number;
 }
-const EXAMPLE_CHARS = 16000,
-  SUPPORT_CHARS = 6000;
+const SUPPORT_CHARS = 6000;
 /** Skill-local working examples never become organization policies or approval evidence. */
 export function skillContext(
   skill: Skill,
@@ -84,8 +83,7 @@ export function skillContext(
   // A short pointer file names the one central copy; load that copy instead of a link the model cannot open.
   const expanded = [...new Set(selected.flatMap((s) => [s, ...pointerTargets(s, registered)]))].slice(0, 4);
   for (const source of expanded) {
-    const example = options.fullExamples && String(source.provenance.path).includes('/examples/');
-    const body = source.body.slice(0, example ? EXAMPLE_CHARS : SUPPORT_CHARS);
+    const body = source.body.slice(0, options.fullExamples ? WORKING_FILE_CHARS : SUPPORT_CHARS);
     add(
       source,
       `เอกสารประกอบ Skill / แบบทำงาน ไม่ใช่ข้อกำหนดที่ได้รับอนุมัติ\n${body}${body.length < source.body.length ? '\n[แสดงข้อความบางส่วน]' : ''}`,

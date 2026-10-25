@@ -1,5 +1,26 @@
 # Progress
 
+## 2026-10-25 · เชื่อมคู่มือ TOR และหนังสือราชการจาก Harness ที่ merge แล้ว
+
+- Harness #233/#234 รวมแล้ว และ #235 merge เป็น `2874bf1` หลัง CI ทุกระบบผ่าน ไม่มี PR เปิดค้างในทั้งสอง repo
+  ก่อนเปิด PR ของชุดแก้นี้ ไม่แก้ checkout Desktop และไม่เลื่อน engine pin จาก `desktop-v0.6.20`
+- แก้งานค้างที่อ้าง `WORKING_FILE_CHARS` โดยยังไม่ประกาศค่า (ทำให้ document tests ล้ม 6 ข้อ) และให้เส้นทาง
+  Skill กับเครื่องมือร่างอ่านไฟล์ประกอบได้ถึง 16,000 ตัวอักษร ส่วนแชตทั่วไปยัง 6,000 ไฟล์ที่ยาวกว่ายังแจ้งว่าบางส่วน
+- เพิ่มเฉพาะ path ของ `tor-content-by-type.md` ให้ TOR และ `saraban-writing-guide.md` ให้บันทึก/หนังสือ
+  ตาม upstream พร้อม provenance ไม่มีเนื้อหาคู่มือหรือเอกสารองค์กรเข้า Git คู่มือ TOR ได้ลำดับก่อนแหล่งอ้างอิงทั่วไป
+  ภายในงบบริบทเดิม ไฟล์ที่ไม่พอยังต้องแจ้งใน `document_review` เพดานจริง 32,000 token ยังตรวจด้วย `countTokens`
+- ตรวจ pack ใหม่แบบ private: 108 sources / 48 Skills ที่ `2874bf1`, retrieval 61/61 และ buyer identity 3/3
+  ผ่าน worker จริงด้วย provider จำลองพบว่าคู่มือใหม่ของ TOR/บันทึก/หนังสือเข้าครบและครั้งเดียว TOR คอมพิวเตอร์ AI
+  ยังข้าม `tor-drafting-guide.md` และ `procurement-source-map.md` เมื่อบริบทเต็ม ส่วนบันทึก/หนังสือไม่ข้าม
+- แก้ `check-server-types.mjs` ให้เรียก compiler ด้วย Node โดยตรงแทน `npx` ที่ spawn ไม่ได้บน Windows
+  และรายงานข้อผิดพลาดการเริ่ม process แทนการล้มตอนอ่าน stdout
+- Validation: check, build, unit/API/PWA 94/94, PostgreSQL 29/29 และ Playwright desktop/mobile 76/76
+  ใช้ข้อมูลสังเคราะห์ ไม่เรียก AI/Google จริง engine pin ผ่าน แต่ engine isolation test บน Windows ยังล้มที่
+  POSIX directory mode (Windows ไม่รองรับ 0700 แบบ Linux) จึงต้องผ่าน Linux CI ก่อน merge ห้ามข้าม isolation test
+- ยังต้อง rollout: deploy API/worker, rebuild หน้าเว็บ homelab และ import pack ใหม่ ก่อนหน้านี้ตรวจ source ของ
+  worker v24 แล้วตรง main `1a857b7` ทุกไฟล์ที่ใช้งาน (ยกเว้น type-only contracts) มี pack เดิมสำหรับย้อนกลับ
+  `docs/thai-data-formatting.md` ยังไม่ถูก export และยังต้องทดสอบคุณภาพร่างกับบัญชีจริงหลัง deploy
+
 ## 2026-10-25 · หน่วยงานเจ้าของเรื่องเริ่มเป็นองค์กรของผู้ใช้
 
 - เจ้าของโครงการรายงาน: หน่วยงานรับผิดชอบเป็น STeP อยู่แล้ว ไม่ควรถูกปล่อยเป็น `[รอยืนยัน: หน่วยงานเจ้าของเรื่อง]`
