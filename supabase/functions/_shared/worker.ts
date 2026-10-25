@@ -33,12 +33,12 @@ import { imageBase64 } from './files.ts';
 import { normalizeReceipt } from './receipt.ts';
 import { skillContext } from '../../../packages/harness-core/src/skill-context.ts';
 const textSchema = z.object({ text: z.string().max(200000), truncated: z.boolean() });
-// The estimator counts a Thai character as 0.9 token, about twice what Gemini reports (a measured run: roughly
-// 15,000 estimated, 8,211 counted). Chat keeps that margin. A drafting run needs the template, checks and guides in
-// full, so its estimated budget is wider (40,000 stays within 32,000 counted tokens unless a document counts above 0.8 per
-// estimated token); the true limit is still enforced by countTokens before every call.
+// The estimator counts a Thai character as 0.9 token, about twice what Gemini reports (measured runs: about 15,000
+// estimated for 8,211 counted, and about 31,000 for 17,372). Chat keeps that margin. A drafting run needs the template,
+// checks, guides and a whole worked example, so its estimated budget is wider: 48,000 is about 27,000 counted at the
+// measured rate. The true 32,000-token limit is still enforced by countTokens before every call (CONTEXT_TOO_LARGE).
 const CONTEXT_TOKENS = 27000;
-const DOCUMENT_CONTEXT_TOKENS = 40000;
+const DOCUMENT_CONTEXT_TOKENS = 48000;
 // Estimated tokens a document run keeps free for organization answers, memories and history after its working files.
 const DOCUMENT_OPTIONAL_TOKENS = 3000;
 // Fail closed if material already assembled into a prompt was removed, expired or replaced.
@@ -185,7 +185,12 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
           // The user's query precedes optional references so budget trimming never drops it.
           parts.unshift(`คำขอปัจจุบัน: ${query}`);
           if (skill) {
-            const selected = skillContext(skill, registered, query);
+            const selected = skillContext(
+              skill,
+              registered,
+              query,
+              tool ? { fullExamples: true, maxTokens: contextBudget - DOCUMENT_OPTIONAL_TOKENS } : {},
+            );
             parts.push(...selected.parts);
             sources.push(...selected.sources);
           }

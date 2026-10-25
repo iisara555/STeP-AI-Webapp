@@ -222,7 +222,12 @@ const productionSized = () => {
       link('common/thai-official-documents/examples/tor-goods-ai-computer-master-example.md'),
     ),
     file(`${COMMON}/templates/tor-16-sections-template.md`, 5523),
-    file(`${COMMON}/examples/tor-goods-ai-computer-master-example.md`, 14811),
+    file(
+      `${COMMON}/examples/tor-goods-ai-computer-master-example.md`,
+      0,
+      ('ครุภัณฑ์คอมพิวเตอร์ปัญญาประดิษฐ์ AI Computer ' + thaiText(14811, 'master-example')).slice(0, 14790) +
+        ' [ท้ายตัวอย่าง]',
+    ),
     file(`${COMMON}/references/drafting-checks.md`, 3806),
     file(`${COMMON}/references/thai-layout.md`, 2955),
   ];
@@ -282,4 +287,26 @@ test('files the chosen Skill already loaded are not loaded again', () => {
   const guide = registered.find((s) => s.source_key.endsWith('tor-drafting-guide-md'))!;
   const { parts } = documentContext('tor', jobSkills, registered, { loaded: [guide.source_key] });
   assert.ok(!parts.join('\n').includes(`${PM}/references/tor-drafting-guide.md ·`));
+});
+
+test('a TOR for an AI computer reads the matching worked example in full, as Desktop does', async () => {
+  const { registered, jobSkills } = productionSized();
+  const { finished, prompt } = await runTor(
+    registered,
+    jobSkills,
+    'ร่าง TOR (ซื้อพัสดุ / ครุภัณฑ์) คอมพิวเตอร์สำหรับประมวลผลงาน AI ประสิทธิภาพสูง',
+  );
+  assert.equal(finished[0].error, null);
+  const example = keyOf(registered, `${COMMON}/examples/tor-goods-ai-computer-master-example.md`);
+  assert.equal(prompt.split(`<reference name="${example}">`).length - 1, 1);
+  // The whole example, not the first 6,000 characters.
+  assert.match(prompt, /\[ท้ายตัวอย่าง\]/);
+  assert.ok(estimateTextTokens(prompt).estimatedTokens <= 48000);
+});
+
+test('outside drafting, support files stay cut at 6,000 characters', () => {
+  const { registered, jobSkills } = productionSized();
+  const { parts } = skillContext(jobSkills[0], registered, 'คอมพิวเตอร์ AI Computer');
+  assert.doesNotMatch(parts.join('\n'), /\[ท้ายตัวอย่าง\]/);
+  assert.match(parts.join('\n'), /\[แสดงข้อความบางส่วน\]/);
 });
