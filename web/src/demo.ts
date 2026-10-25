@@ -2,7 +2,15 @@
 // deployment and never connected to production Auth, Storage or Gemini.
 import type { Host } from './host.ts';
 import { ApiError } from './host.ts';
-import type { Snapshot, ChatMessage, Run, ReceiptResult } from '../../packages/harness-core/src/contracts.ts';
+import type {
+  Snapshot,
+  ChatMessage,
+  Run,
+  ReceiptResult,
+  Memory,
+  MemberProfile,
+} from '../../packages/harness-core/src/contracts.ts';
+import { normalizeProfile } from '../../packages/harness-core/src/assistant-profile.ts';
 const tenant = '10000000-0000-4000-8000-000000000001',
   user = '20000000-0000-4000-8000-000000000001',
   workspace = '30000000-0000-4000-8000-000000000001';
@@ -43,6 +51,7 @@ export function demoHost(): Host {
       },
     ],
     sessions: [],
+    profiles: [],
     memories: [
       {
         id: crypto.randomUUID(),
@@ -204,9 +213,23 @@ export function demoHost(): Host {
               provider: 'Google Gemini API · ตัวอย่าง',
               providerConsent: 'synthetic-demo-consent',
               documents: data.documents.filter((d) => (p.documentIds as string[]).includes(d.id)),
-              memories: p.useMemory ? data.memories.map((m) => ({ id: m.id, title: m.title })) : [],
+              memories: p.useMemory
+                ? data.memories
+                    .filter((m) => !m.expires_at || Date.parse(m.expires_at) > Date.now())
+                    .map((m) => ({ id: m.id, title: m.title }))
+                : [],
               google: /ประชุม|ปฏิทิน/.test(String(p.message)),
+              profile: Boolean(data.profiles?.some((x) => x.tenant_id === tenant)),
             };
+          case 'profile.save': {
+            const row: MemberProfile = {
+              ...normalizeProfile(p as Partial<MemberProfile>),
+              tenant_id: tenant,
+              user_id: user,
+            };
+            data.profiles = [row, ...(data.profiles || []).filter((x) => x.tenant_id !== tenant)];
+            return row;
+          }
           case 'run.start': {
             if (p.providerConsent !== data.ai?.consentId) throw new ApiError('AI_PROVIDER_CHANGED');
             const session = data.sessions.find((s) => s.id === p.session);
@@ -288,9 +311,15 @@ export function demoHost(): Host {
               : null;
           case 'memory.save': {
             const existing = data.memories.find((m) => m.id === p.id);
+            const kind = (p.kind as Memory['kind']) || 'preference';
+            const expires_at = Number(p.ttlDays)
+              ? new Date(Date.now() + Number(p.ttlDays) * 86_400_000).toISOString()
+              : null;
             if (existing) {
               existing.title = String(p.title);
               existing.body = String(p.body);
+              existing.kind = kind;
+              if (p.ttlDays !== undefined) existing.expires_at = expires_at;
               return { ...existing };
             }
             const row = {
@@ -301,10 +330,10 @@ export function demoHost(): Host {
               visibility: p.visibility as 'private' | 'workspace',
               title: String(p.title),
               body: String(p.body),
-              kind: 'preference' as const,
+              kind,
               confirmed: true,
-              origin: 'manual',
-              expires_at: null,
+              origin: p.origin === 'chat' ? 'chat' : 'manual',
+              expires_at,
               created_at: new Date().toISOString(),
             };
             data.memories.unshift(row);

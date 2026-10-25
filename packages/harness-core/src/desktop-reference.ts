@@ -201,7 +201,7 @@ export const DESKTOP_FEATURES: Feature[] = [
     category: 'ความรู้',
     status: 'partial',
     desktop: 'ส่วนตัว/โครงการ/ทีม ข้อเสนอจากหลักฐานผู้ใช้ TTL ความสำคัญ ตรวจ privacy และรายการดูแลความจำ',
-    web: 'เพิ่ม แก้ไข ลบ และเลือกใช้ความจำส่วนตัว/ที่แชร์ ยืนยันก่อนเก็บ มีวันหมดอายุในโมเดล; ยังไม่มี autodream, TTL editor และ upkeep board',
+    web: 'เพิ่ม แก้ไข ลบ และเลือกใช้ความจำส่วนตัว/ที่แชร์ ยืนยันก่อนเก็บ เลือกประเภทและอายุความจำแบบ Desktop บอกที่มา; ยังไม่มีความสำคัญ (importance), ข้อเสนอจาก AI, ขอบเขตทีม และ upkeep board',
     sources: ['desktop/src/memory.tsx', 'desktop/src/maintenance.tsx', 'docs/desktop-context-memory.md'],
     target: 'memory',
   },
@@ -385,7 +385,7 @@ export const DESKTOP_FEATURES: Feature[] = [
     category: 'การใช้งาน',
     status: 'partial',
     desktop: 'โปรไฟล์/อวตาร persona speaking style ภาษาไทย/อังกฤษ และเสียงตามบริการที่รองรับ',
-    web: 'ชื่อจากบัญชีที่ล็อกอิน UI ภาษาไทย; ยังไม่มีอวตารส่วนตัว speaking style ไฟล์ persona UI อังกฤษ และเสียง',
+    web: 'ชื่อเรียก ทีมหลัก อวตารชุดเดียวกับ Desktop ชื่อผู้ช่วย ภาษาในแชต สไตล์การพูด และสำเนียงภาษาเหนือ ส่งไปกับคำขอหลังกฎองค์กรและแจ้งในหน้ายืนยัน; ยังไม่มีรูปแบบคำตอบที่ติดตั้ง (output style), UI อังกฤษ และเสียง',
     sources: [
       'desktop/src/settings.tsx',
       'desktop/src/avatars.tsx',

@@ -4,3 +4,4 @@ node_modules
 packages/harness-core/vendor
 test-results
 playwright-report
+harness

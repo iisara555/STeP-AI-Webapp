@@ -11,13 +11,15 @@ import {
   Play,
   ShieldCheck,
   Unlink,
+  UserRound,
   Users,
 } from './icons.tsx';
 import type { AiService, Membership } from '../../packages/harness-core/src/contracts.ts';
 import type { ViewProps } from './App.tsx';
-import { Art, Busy, Modal, bytes, number } from './components.tsx';
+import { Art, Busy, FreeTierNote, Modal, bytes, number } from './components.tsx';
 import { ThemeChoice, type Theme } from './ThemeSelect.tsx';
 import { OpenRouterTrial } from './OpenRouterTrial.tsx';
+import { ProfileSettings } from './ProfileSettings.tsx';
 type GoogleState = { status: string; services: string[] };
 type Usage = {
   runs: { input_tokens: number; output_tokens: number; reserved_cents: number; status: string }[];
@@ -44,7 +46,7 @@ export function SettingsView({
   theme: Theme;
   onTheme: (theme: Theme) => void;
 }) {
-  const [tab, setTab] = useState(initialTab || 'account'),
+  const [tab, setTab] = useState(initialTab || 'profile'),
     [google, setGoogle] = useState<GoogleState | null>(null),
     [usage, setUsage] = useState<Usage | null>(null),
     [members, setMembers] = useState<Membership[]>([]),
@@ -125,6 +127,7 @@ export function SettingsView({
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="หมวดการตั้งค่า">
           {[
+            { key: 'profile', title: 'โปรไฟล์และผู้ช่วย', icon: UserRound },
             { key: 'account', title: 'บัญชีและองค์กร', icon: Users },
             { key: 'ai', title: 'เชื่อมต่อ AI', icon: Brain },
             { key: 'google', title: 'Google Workspace', icon: Link2 },
@@ -149,6 +152,18 @@ export function SettingsView({
             <p className="success-notice" role="status">
               {notice}
             </p>
+          )}
+          {tab === 'profile' && (
+            <ProfileSettings
+              key={tenant}
+              host={host}
+              data={data}
+              tenant={tenant}
+              workspace={null}
+              refresh={refresh}
+              fail={fail}
+              onSaved={() => setNotice('บันทึกโปรไฟล์และผู้ช่วยแล้ว')}
+            />
           )}
           {tab === 'account' && (
             <>
@@ -197,6 +212,7 @@ export function SettingsView({
             <>
               <h2>เชื่อมต่อ AI</h2>
               <p className="muted">STeP จัดการบริการและวงเงินให้ คุณไม่ต้องตั้งค่า API key เอง</p>
+              <FreeTierNote ai={usage?.ai} />
               <div className="settings-card">
                 <div className="service-status">
                   <span className="service-icon">

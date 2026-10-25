@@ -46,6 +46,7 @@ import {
   Trash2 as StillTrash2,
   Unlink as StillUnlink,
   Upload as StillUpload,
+  UserRound as StillUserRound,
   Users as StillUsers,
   X as StillX,
 } from 'lucide-react';
@@ -174,5 +175,6 @@ export const Table = /* @__PURE__ */ animated(StillTable, 'Table', 'pulse');
 export const Trash2 = /* @__PURE__ */ animated(StillTrash2, 'Trash2', 'turn');
 export const Unlink = /* @__PURE__ */ animated(StillUnlink, 'Unlink', 'turn');
 export const Upload = /* @__PURE__ */ animated(StillUpload, 'Upload', 'up');
+export const UserRound = /* @__PURE__ */ animated(StillUserRound, 'UserRound', 'pulse');
 export const Users = /* @__PURE__ */ animated(StillUsers, 'Users', 'pulse');
 export const X = /* @__PURE__ */ animated(StillX, 'X', 'add');

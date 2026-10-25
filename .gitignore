@@ -21,3 +21,4 @@ supabase/.branches/
 web/.impeccable/hook.cache.json
 web/.impeccable/review/
 web/.impeccable/questions/
+.data/

@@ -2900,3 +2900,102 @@ summary {
   border-radius: 999px;
   color: var(--muted);
 }
+/* Drawn avatars are black ink on paper: keep the paper in both themes, like a photo. */
+.avatar-badge {
+  overflow: hidden;
+}
+.avatar-badge.has-picture {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.avatar-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* Profile and assistant settings, as on Desktop. */
+.profile-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.avatar-section {
+  margin-bottom: 16px;
+}
+.avatar-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 4px;
+}
+.avatar-option {
+  justify-self: center;
+  padding: 3px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  line-height: 0;
+}
+.avatar-option .avatar-badge {
+  width: 52px;
+  height: 52px;
+  font-size: 15px;
+}
+.avatar-option:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: transparent;
+}
+.avatar-option[aria-checked='true'] {
+  border-color: var(--accent);
+}
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.style-card {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  text-align: left;
+  gap: 2px;
+  padding: 10px 12px;
+}
+.style-card small {
+  color: var(--muted);
+}
+.style-card[aria-checked='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: var(--accent-soft);
+}
+.style-example {
+  padding: 14px 16px;
+  margin: 12px 0 16px;
+  background: var(--hover);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 13px;
+}
+.style-example p {
+  margin: 8px 0;
+}
+.style-example small {
+  color: var(--muted);
+}
+.settings-card h3 {
+  margin-top: 22px;
+}
+.settings-save {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 0;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}

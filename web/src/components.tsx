@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X, AlertCircle, Copy, LoaderCircle } from './icons.tsx';
 import { errorView } from '../../packages/harness-core/src/index.ts';
 import { ApiError } from './host.ts';
+import type { Memory } from '../../packages/harness-core/src/contracts.ts';
 import chatArt from './assets/illustrations/chat.webp';
 import connectionsArt from './assets/illustrations/connections.webp';
 import ideaArt from './assets/illustrations/idea.webp';
@@ -197,3 +198,41 @@ export function Visibility({ shared = false }: { shared?: boolean }) {
 export const bytes = (n: number) =>
   new Intl.NumberFormat('th-TH', { maximumFractionDigits: 1 }).format(n / 1000000) + ' MB';
 export const number = (n: number) => new Intl.NumberFormat('th-TH').format(n);
+// Bundled with the app, so a picture never loads from another site. Only the chosen id is stored.
+const avatarFiles = import.meta.glob<string>('./assets/avatars/*.webp', { eager: true, import: 'default' });
+export const avatarSrc = (id: string) => avatarFiles[`./assets/avatars/${id}.webp`];
+/** The employee's chosen drawing, or the first letter of their name in a circle, as on Desktop. */
+export function Avatar({
+  id,
+  fallback,
+  className = '',
+}: {
+  id?: string;
+  fallback: string;
+  className?: string;
+}) {
+  const src = id ? avatarSrc(id) : undefined;
+  return (
+    <span className={`avatar-badge ${src ? 'has-picture' : ''} ${className}`} aria-hidden="true">
+      {src ? <img src={src} alt="" draggable={false} /> : fallback}
+    </span>
+  );
+}
+/** Desktop's memory types, in its order and wording. */
+export const MEMORY_KINDS: [Memory['kind'], string][] = [
+  ['preference', 'ความชอบในการทำงาน'],
+  ['feedback', 'ข้อแก้ไข'],
+  ['project', 'บริบทโครงการ'],
+  ['reference', 'ข้อมูลอ้างอิง'],
+];
+/** Shown wherever the employee confirms sending data while the organization uses a free Gemini key. */
+export function FreeTierNote({ ai }: { ai?: { freeTier?: boolean } }) {
+  if (!ai?.freeTier) return null;
+  return (
+    <p className="warning-note">
+      ช่วงทดลองใช้ Gemini รุ่นฟรีของ Google AI Studio: Google อาจนำข้อความ ไฟล์ และคำตอบไปปรับปรุงบริการ
+      และอาจให้คนตรวจอ่าน ใช้เฉพาะข้อมูลที่ไม่เป็นความลับหรือข้อมูลสมมติ
+      และอาจถูกจำกัดจำนวนครั้งต่อนาทีหรือต่อวัน
+    </p>
+  );
+}

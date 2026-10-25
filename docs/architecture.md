@@ -1,5 +1,8 @@
 # Centralized STeP PWA
 
+> This describes the current Supabase pilot. The target architecture (Desktop engine on organization
+> hardware behind a gateway) is recorded in [ADR 0001](adr/0001-server-engine-direction.md).
+
 The web application is separate from the Electron repository. It uses a static
 React/Vite app on Cloudflare Pages and Supabase Auth, Postgres, private Storage,
 and Edge Functions. AI runs only on the server; the paid path uses Gemini. Hosting can start on free
@@ -105,7 +108,7 @@ fallbacks and sets prompt/completion/request/image price ceilings to zero. There
 is no paid-model fallback or purchase action. Provider billing remains external;
 an unexpected nonzero reported cost is surfaced as an error.
 
-Responses are bounded to 512 output tokens with a 20-second upstream deadline,
+Responses are bounded to 2048 output tokens with a 20-second upstream deadline,
 rendered as plain text and held only in component memory. Only token totals,
 elapsed time and optional reported cost accompany the reply; raw provider
 diagnostics and keys never reach clients. Missing cost is not reported as $0.

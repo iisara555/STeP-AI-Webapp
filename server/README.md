@@ -1,0 +1,44 @@
+# server · engine ของ Desktop แบบไม่มี Electron
+
+ระยะ 2 ของ [ADR 0001](../docs/adr/0001-server-engine-direction.md) เป็น headless spike
+พิสูจน์ว่า `WorkService` ของ Desktop รันบน Node ได้โดยไม่ต้องมี Electron และไม่ต้อง copy โค้ด engine
+
+- engine มาจาก submodule `harness/` ที่ล็อกไว้ที่ `desktop-v0.6.20` (`npm run check:engine-pin` ตรวจว่าเป็น release tag)
+- `src/engine.ts` สร้าง engine ของผู้ใช้ 1 คน มีโฟลเดอร์ของตัวเอง (`<data>/users/<id>/workspace.sqlite`, สิทธิ์ 0700)
+  ใช้ `serverPolicy()`: เปิด privacy check, ปิด tool loop, shell, sandbox, MCP, Copilot, Vault, autopilot และ staff Skills
+- `src/register.mjs` แทน `@github/copilot-sdk` ด้วย module ที่ไม่ยอมเริ่มทำงาน เพราะ `providers.ts` import มาแบบ static
+  แต่ Copilot ปิดบน server ทำให้ไม่ต้องติดตั้ง native client
+- dependencies ของ server มีแค่ 2 ตัว คือ `mdast-util-from-markdown` และ `@xmldom/xmldom` เวอร์ชันเดียวกับ Desktop
+
+## ตรวจ
+
+```bash
+git submodule update --init harness
+npm ci
+npm run test:engine        # 61/61 คำถามพนักงานผ่าน engine ทั้งเส้น, แยก SQLite รายคน, server profile
+npm run check              # รวม type check ของ server (ส่วน engine ให้ CI ของ Desktop ตรวจ)
+npm run check:engine-pin   # ต้องต่อเน็ตเพื่ออ่าน tag ของ Harness
+```
+
+`test:engine` ใช้ adapter สังเคราะห์ที่บันทึก prompt ไว้ ไม่เรียก AI จริง ข้อที่ตรวจคือเอกสารอันดับแรกใน
+`<organization_knowledge>` ที่ engine จะส่งให้ AI ต้องตรงกับคำตอบที่คาดไว้ ถ้าไม่มีเอกสาร engine ก็ต้องไม่ส่งเอกสาร
+ซึ่งเข้มกว่า benchmark เดิมใน Desktop ที่วัดแค่ `OrganizationKnowledge.search`
+
+## ลองบน homelab (เจ้าของโครงการคนเดียว)
+
+```bash
+export STEP_AI_KEY=…            # อ่านจาก environment เท่านั้น ห้ามใส่ในไฟล์ที่ commit
+export STEP_AI_MODEL=…          # ชื่อรุ่นของ endpoint
+# STEP_AI_BASE_URL ตั้งต้นที่ https://openrouter.ai/api/v1 ใช้ endpoint ที่เข้ากับ OpenAI ได้ทุกตัว
+npm run engine:ask -- --user owner "ติดต่อฝ่ายบุคคลช่องทางไหน"
+```
+
+ข้อมูลอยู่ใน `.data/users/owner/` (มีใน .gitignore แล้ว) เปลี่ยนที่เก็บได้ด้วย `STEP_AI_DATA`
+
+ข้อจำกัดของ spike นี้:
+
+- ยังไม่บังคับนโยบายข้อมูลของ provider (`data_collection: deny`) งานนี้เป็นของ router proxy ในระยะ 4
+  ระหว่างนี้ให้ถามเฉพาะคำถามที่ไม่ลับ
+- endpoint แบบ compatible ค้นเว็บไม่ได้ คำถามที่ engine เลือกส่งไปค้นเว็บ (เช่นวันหยุดราชการ) จะได้ `WEB_SEARCH_UNAVAILABLE`
+- tool loop ปิดอยู่ จนกว่า server จะมี tool host ที่จำกัดเครื่องมือเฉพาะ ADR ข้อ 5 (ระยะ 3)
+- ยังไม่มี gateway, login หรือการแยกผู้ใช้ระดับ process ตอนนี้เป็น process เดียวต่อคำสั่ง

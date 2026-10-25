@@ -19,7 +19,7 @@ import {
   type LucideIcon,
 } from './icons.tsx';
 import type { Conversation } from '../../packages/harness-core/src/contracts.ts';
-import { BrandSymbol, Segmented } from './components.tsx';
+import { Avatar, BrandSymbol, Segmented } from './components.tsx';
 import { mod } from './TitleBar.tsx';
 import type { Page } from './App.tsx';
 import { useReducedMotion } from './reduced-motion.ts';
@@ -107,7 +107,7 @@ export function Sidebar({
   sessions: Conversation[];
   currentSession: string | undefined;
   skillCount: number;
-  profile: { initial: string; name: string; detail: string };
+  profile: { initial: string; avatar: string; name: string; detail: string };
   update: boolean;
   mobileOpen: boolean;
   onCloseMobile: () => void;
@@ -282,9 +282,7 @@ export function Sidebar({
         </div>
       )}
       <div className="profile">
-        <span className="avatar-badge" aria-hidden="true">
-          {profile.initial}
-        </span>
+        <Avatar id={profile.avatar} fallback={profile.initial} />
         <div>
           <strong>{profile.name}</strong>
           <small>{profile.detail}</small>
@@ -343,7 +341,7 @@ export function SidebarRail({
   onExpand,
 }: {
   page: Page;
-  profile: { initial: string; name: string };
+  profile: { initial: string; avatar: string; name: string };
   onPage: (page: Page) => void;
   onNew: () => void;
   onPalette: () => void;
@@ -394,9 +392,7 @@ export function SidebarRail({
           title={profile.name}
           onClick={() => onPage('settings')}
         >
-          <span className="avatar-badge" aria-hidden="true">
-            {profile.initial}
-          </span>
+          <Avatar id={profile.avatar} fallback={profile.initial} />
         </button>
       </aside>
     </MotionConfig>

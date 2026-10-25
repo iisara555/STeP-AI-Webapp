@@ -1,21 +1,140 @@
 # Progress
 
-## 2026-10-24 · Protected routes reconciled with the Desktop-parity shell
+## 2026-10-25 · Protected routes reconciled with the Desktop-parity shell and draft protection
 
-- Merged main `a3b3259` (#10/#11) into the protected-route branch. The new shell keeps its lazy-loaded
+- Merged main `7aaa7d6` (through #23) into the protected-route branch. The shell keeps its lazy-loaded
   tool pages; its `replaceState` page state is replaced by `web/src/routes.ts`, so pages follow
   browser history and anonymous visitors go to `/login?next=…`.
-- The Auth browser tests now use the new shell: the Skill page opens from the sidebar's เครื่องมือ
+- Main's unsaved-draft protection is kept: an account change clears drafts and the discard prompt
+  inside the verified-identity handler, and sign-out still asks before discarding a draft, then
+  clears the return path and opens `/login`.
+- The Auth browser tests use the new shell: the Skill page opens from the sidebar's เครื่องมือ
   navigation, sign-out runs from เมนู STeP, and "no private view" checks look for that navigation in
   the DOM. The old เมนูหลัก label no longer exists, so those checks would otherwise pass vacuously; the
   sign-in test first asserts the navigation is present.
-- Validation: TypeScript/Prettier, 41 unit/API/PWA tests, 27 PostgreSQL tests, production build and
-  46 of 48 desktop/mobile Chromium checks passed, including all 16 Auth checks. The two Word download
-  checks fail the same way on unchanged main in the cloud container (Chromium 141 names the file
-  `download`); GitHub CI remains authoritative.
-- The hosted Auth settings this PR waited on are recorded below as configured by the operator. Left:
-  human review, then rebuilding the homelab frontend after merge and repeating the real-account
-  sign-in, reload and sign-out checks there.
+- Validation (cloud container, Node 22.22.0): TypeScript/Prettier, 65 unit/API/PWA tests, 29 PostgreSQL
+  tests, 3 engine tests, production build and 70 of 72 desktop/mobile Chromium checks, including all
+  16 Auth checks and the draft regression suites. The two Word download checks fail the same way on
+  unchanged main in this container (Chromium 141 names the file `download`); GitHub CI remains
+  authoritative.
+- The Supabase system is under feature freeze (ADR 0001); this is pilot sign-in hardening, for the owner
+  to accept or close. Left: human review, then rebuilding the homelab frontend after merge and
+  repeating real-account sign-in, reload and sign-out there.
+
+## 2026-10-25 · ระยะ 2: engine ของ Desktop รันแบบ headless
+
+- เพิ่ม submodule `harness/` ที่ `desktop-v0.6.20` (`90ee71c`) และ `server/` ที่สร้าง `WorkService` ของ Desktop
+  โดยไม่มี Electron ไม่ได้ copy หรือแก้โค้ด engine เลย ผู้ใช้แต่ละคนมี SQLite ของตัวเองในโฟลเดอร์ 0700
+- เกณฑ์ผ่านของ spike: คำถามพนักงานชุดเดิม **61/61** ผ่าน engine ทั้งเส้น (router → ความรู้องค์กร → prompt)
+  โดยเอกสารอันดับแรกที่จะส่งให้ AI ตรงกับคำตอบที่คาดไว้ ส่วนข้อที่ไม่ควรมีเอกสารก็ไม่มี ใช้ adapter สังเคราะห์
+  ไม่เรียก AI จริง ทดสอบแล้วว่าตัวตรวจจับความผิดพลาดได้จริง (ตัวตรวจที่ผิดได้ 11/61)
+- server profile: เปิด privacy check ส่วน authority check ใช้ค่าเดียวกับ Desktop (ปิด) ถ้าเปิด authority
+  คำถาม "เอกสาร WI ฉบับไหนถูกยกเลิกแล้ว" จะติด `AUTHORITY_REVIEW_REQUIRED` ต้องตัดสินว่าจะเปิดหรือไม่ก่อนระยะ 3
+- `@github/copilot-sdk` ถูกแทนด้วย module ที่ไม่ยอมเริ่มทำงาน (Copilot ปิดบน server) dependencies เพิ่มแค่
+  `mdast-util-from-markdown` 2.0.2 และ `@xmldom/xmldom` 0.8.15 เวอร์ชันเดียวกับ Desktop
+- `npm run engine:ask` ให้เจ้าของโครงการลองบน homelab กับ endpoint ที่เข้ากับ OpenAI ได้ ทดสอบกับ endpoint ปลอม
+  ในเครื่องแล้วว่าใช้ `CompatibleAdapter` ของ Desktop ได้ทั้งเส้น ยังไม่ได้ลองกับ provider จริง
+- CI: checkout submodule, `check:engine-pin` (ต้องเป็น tag `desktop-v*`), `test:engine` และ type check ของ `server/`
+  (diagnostics ในไฟล์ engine ปล่อยให้ CI ของ Desktop ที่มี dependencies ครบเป็นคนตรวจ)
+- Validation (cloud container, Node 22.22.0): `npm run check`, `npm test` 62/62, `npm run test:db` 29/29, `npm run build`,
+  `npm run test:engine` 3/3, `check:engine-pin` ผ่าน และลองให้ pin ผิดแล้วตรวจจับได้ Playwright ไม่ได้รัน (ไม่มี UI เปลี่ยน)
+- ยังไม่ทำ: gateway, process แยกต่อผู้ใช้, tool host ของ server, router proxy, ลองกับ provider จริงบน homelab
+
+## 2026-10-25 · ทิศทางใหม่: engine ของ Desktop บน server องค์กร
+
+- บันทึกการตัดสินใจใน [ADR 0001](adr/0001-server-engine-direction.md): เว็บเป็นตัวกลาง งานจริงรันบน engine ของ Desktop
+  (git submodule ของ Harness ที่ release tag) บน hardware ที่องค์กรจะซื้อ 1 ผู้ใช้ = 1 engine process + SQLite
+  มี gateway ทำ login/เพดาน/admin/audit และ router proxy เลือกระหว่าง API กับ local LLM
+- ระบบ Supabase ปัจจุบัน **feature freeze**: แก้เฉพาะ bug และสิ่งที่ pilot ต้องใช้
+- เจ้าของโครงการรายงานว่าใช้งานจริงด้วยบัญชีจริงได้แล้ว: Google login, เชื่อม Drive/เลือกไฟล์, แชต Gemini กับเอกสาร STeP,
+  ร่างและ export Word, OCR ใบเสร็จจริง agent ไม่ได้ตรวจซ้ำและไม่ได้เห็นหลักฐาน (log/ภาพหน้าจอ) ด้วยตัวเอง
+  ยังไม่ได้ทดสอบ: ถอนสิทธิ์หรือยกเลิกระหว่างงานด้วยบัญชีจริง
+- รอเจ้าของโครงการก่อนเปิด pilot 3–5 คน: ทดสอบการถอนสิทธิ์ด้วยบัญชีที่สอง (งานต้องจบด้วย `ACCESS_DENIED`
+  และไม่มีคำตอบ), ให้กลุ่มผู้ดูแลองค์กรเป็น Owner ของ Google Cloud project, หนังสืออนุมัติใช้ Gemini free tier
+  กับเอกสารที่ไม่ลับ และเชิญผู้ใช้ pilot
+- ถัดไป (agent): headless spike ของ engine และ benchmark local LLM คู่ขนาน ตามลำดับงานใน ADR
+- เปลี่ยนเฉพาะเอกสาร ไม่มีการเปลี่ยนโค้ด, deploy หรือ secret
+
+## 2026-10-25 · แก้ findings จาก audit runtime
+
+- P1 worker: ก่อนส่งบริบทไป AI ทุกครั้ง (หลังรอ Drive/Storage, หลัง countTokens และระหว่าง backoff 503
+  ของ countTokens/generateContent/embedContent) worker ตรวจสิทธิ์และ lease ซ้ำ ถ้า revoke หรือ cancel
+  จะไม่ส่งบริบทและไม่ retry; ปิดงานด้วย `answer: null` และโค้ด `ACCESS_DENIED`/`RUN_INTERRUPTED`
+- P2 ร่าง: ร่างแยกตามงาน คงอยู่เมื่อเปลี่ยนหน้าโดยไม่ใช้ browser storage, response ที่บันทึกช้าหรืออ่านช้า
+  ไม่ย้อนข้อความที่พิมพ์ใหม่, มี dialog เตือนก่อนออกจากระบบและ `beforeunload` เมื่อมีร่างที่ยังไม่บันทึก
+- P2 ความจำ: แก้ความจำที่หมดอายุหรือเหลือบางส่วนไม่เปลี่ยนวันหมดอายุเดิม เปลี่ยนอายุได้เมื่อผู้ใช้เลือกเอง
+- P2 OCR: polling ใบเสร็จลองอ่านงานเดิมซ้ำหลัง network/server error โดยไม่เริ่ม OCR ใหม่ และหยุดเมื่อถูกปฏิเสธสิทธิ์
+- Validation (Windows, ข้อมูลสังเคราะห์, ไม่มีการเรียก AI/Google จริง): `tsc --noEmit` ผ่าน, build ผ่าน,
+  unit/API/PWA 62/62 (ใหม่ 17 รวม worker-revocation), PostgreSQL/PGlite 29/29, Playwright desktop/mobile 56/56
+  `prettier --check` ยังรายงาน 57 ไฟล์จาก CRLF ใน checkout นี้ (ไฟล์ที่ไม่ได้แตะก็ติด) ไม่ใช่ปัญหาเนื้อหา
+- Deploy 2026-10-25: operator deploy `api` และ `worker` จาก main `e381eb8` ด้วย
+  `supabase functions deploy … --no-verify-jwt --use-api --import-map supabase/functions/deno.json`
+  ตอนนี้ทั้งสองเป็น v19 ACTIVE (`verify_jwt=false` ตามเดิม) `google-callback` ยัง v14 เพราะไม่ได้แก้
+  ครั้งแรกที่ไม่ใส่ `--import-map` bundle ล้มเหลวที่ `zod` และไม่มีการเปลี่ยนเวอร์ชัน
+  v19 รวม Gemini busy retry/`AI_BUSY` จากรอบก่อนด้วย ตรวจเฉพาะรายการฟังก์ชัน/เวอร์ชัน/สถานะ
+  ไม่ได้เทียบ source ที่ deploy และไม่ได้เรียก API จริง
+- ยังไม่ทำ: real-account acceptance (Google, Gemini, การ revoke ระหว่างงานจริง) และเทียบ source ที่ deploy
+
+## 2026-10-24 · Audit เทียบ Desktop 0.6.20
+
+- ตรวจ Webapp `a5a99d2` เทียบ Desktop `90ee71c` (main/tag `desktop-v0.6.20` ที่ตรวจจาก GitHub)
+  หน้าตา โปรไฟล์ แบบฟอร์ม Skill และการเตรียม Prompt ใกล้เคียง แต่ editor/Office/history,
+  tool loop, personal Skills, learning และ recurring schedules ยังไม่เทียบเท่า
+  ดู [รายงาน audit](desktop-parity-audit-2026-10-24.md) สำหรับหลักฐานและข้อจำกัด
+- ทำซ้ำได้ด้วยข้อมูลสังเคราะห์: P1 worker ส่งบริบทหลัง revoke/cancel ระหว่างรอ Drive;
+  P2 ร่างหายเมื่อเปลี่ยนหน้า, response บันทึกช้าดึงกลับงานเก่า, แก้ความจำหมดอายุเป็นไม่หมดอายุ
+  และ OCR เลิก polling หลัง network error ครั้งเดียว รายงานนี้ยังไม่ได้แก้ runtime findings เหล่านี้
+- แก้ข้อความ reference ที่ยังบอกว่าไม่มี TTL UI/โปรไฟล์ และค่า sandbox output limit เป็น 2048
+  ไม่เปลี่ยนพฤติกรรมแอปหรือ checkout Desktop
+- ตรวจ hosted แบบอ่านอย่างเดียว: migration ครบ 13 รุ่นรวม member_profiles; API/worker ACTIVE v18
+  และ callback v14; deployed source โปรไฟล์ตรงกับ checkout แต่ Gemini busy retry/AI_BUSY ยังไม่ deployed
+  ไม่อ่านข้อมูลพนักงาน/เอกสาร/grants ไม่ deploy และไม่เรียก AI/Google จริง
+- Validation: build ผ่าน, unit/API/PWA 45/45, PostgreSQL/PGlite 29/29 และ Chromium desktop/mobile
+  36/36 ผ่าน TypeScript ผ่าน แต่ `npm run check` ติด CRLF และ ignored local settings;
+  reference check ติด CRLF เช่นกัน ตรวจ Git-blob SHA-256 แล้วตรงกับ inventory ครบ 91/91
+  ตรวจ `npm run check` และ reference แบบไม่ระบุ source ใน clean LF worktree แล้วผ่าน
+  ผลเหล่านี้ไม่ยืนยัน real-account/deployment acceptance หรือการแก้ findings
+
+## 2026-10-24 · Gemini busy responses
+
+- Observed on the hosted pilot: two chat runs (13:46 and 13:56 UTC) failed with `AI_SERVICE_ERROR` within
+  four seconds, with no document attached; the same short request succeeded a minute later. The worker
+  did not record Google's status, so the cause could not be confirmed; a temporary overload (503) of the
+  free-tier model fits the pattern.
+- Gemini failures now log only the step and HTTP status (never prompt, answer or key). 503 UNAVAILABLE,
+  which Google returns when it did not process the request, is retried once after 1.5 s; other failures
+  are not retried. 5xx responses that remain are reported as `AI_BUSY` (บริการ AI ไม่ว่างชั่วคราว,
+  send again later) instead of the admin-facing service error; countTokens 401/403 now report
+  `AI_NOT_CONFIGURED` like generation does.
+- A failed run still keeps its reservation in the monthly budget, as before (7 cents at 75/375).
+- Validation under Node 25.2.1: TypeScript, build, 45 unit/API/PWA tests (new: retry, busy, logging and
+  status mapping), 29 PostgreSQL tests and 36 Playwright tests. Requires redeploying the worker (and the
+  API for the shared code); not yet done.
+
+## 2026-10-24 · Profile, assistant, answer style and memory types from Desktop
+
+- Settings opens on โปรไฟล์และผู้ช่วย, as Desktop's ทั่วไป: the 56 Desktop avatar drawings (53 offered),
+  the name to be called, main team, assistant name, chat language, the four personality presets,
+  คมคาย (Witty) and ชวนคิด (Ob-Oon), and the ภาษาเหนือ language style, with Desktop's prepared
+  examples (no AI call). The sidebar shows the avatar, name and "ผู้ช่วย … · ทีม …"; the greeting,
+  starters and answer labels use the chosen name, team and assistant.
+- Preferences are stored per employee and tenant in `member_profiles` (migration
+  `20261023120000`). RLS lets only the employee read or change their own row; tenant admins cannot,
+  ownership columns are not updatable, and values are bounded in SQL and the API. Names and the custom
+  tone pass the same credential checks as messages.
+- The worker appends the run owner's preferences after `SYSTEM_RULES`, opening with a line that ranks
+  them below organization rules, sources, authority, approvals and privacy. Speaking-style text is
+  Desktop's verbatim. The consent preview lists "ชื่อเรียก ทีม และสไตล์การตอบที่คุณตั้งไว้" when a
+  profile exists; nothing else about the employee is added to the request.
+- Memories gain Desktop's types (adds บริบทโครงการ), a lifetime in days, their origin (พิมพ์เอง/จากแชต)
+  and Desktop's guidance. The consent preview now leaves out expired memories, matching the worker.
+- Validation under Node 25.2.1: TypeScript, build, 41 unit/API/PWA tests, 29 PostgreSQL tests (new
+  owner-only profile and memory-type checks) and 36 desktop/mobile Playwright tests passed; axe is clean
+  on 40 page/theme/viewport combinations. No live AI or Google call was made.
+- Requires before it works on the homelab: applying the migration to the hosted project and redeploying
+  the API and worker (the frontend alone shows Settings but cannot save). Not yet done.
+- Not carried over: Desktop's installed output styles, importance, AI-proposed memories, the lessons box,
+  English UI and voice.
 
 ## 2026-10-23 · Homelab rollout of #10 (Desktop-parity interface)
 

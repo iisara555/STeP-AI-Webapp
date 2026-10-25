@@ -8,6 +8,8 @@ export interface AiService {
   consentId: string;
   configured: boolean;
   textOnly: boolean;
+  /** Gemini on a Google AI Studio free key: Google may use what is sent, so every consent says so. */
+  freeTier?: boolean;
 }
 export type RunStatus =
   'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
@@ -46,11 +48,26 @@ export interface Memory {
   visibility: Visibility;
   title: string;
   body: string;
-  kind: 'preference' | 'reference' | 'feedback';
+  kind: 'preference' | 'reference' | 'feedback' | 'project';
   confirmed: boolean;
   origin: string;
   expires_at: string | null;
   created_at: string;
+}
+/** One employee's own profile and assistant preferences in one tenant. Only that employee reads or edits it. */
+export interface MemberProfile {
+  tenant_id: string;
+  user_id: string;
+  display_name: string;
+  team: string;
+  avatar: string;
+  assistant_name: string;
+  chat_language: 'auto' | 'th' | 'en';
+  personality: 'coworker' | 'professional' | 'concise' | 'custom';
+  assistant_tone: string;
+  interaction_style: 'standard' | 'witty' | 'ob-oon';
+  language_style: 'standard' | 'northern-thai';
+  updated_at?: string;
 }
 export interface DocumentRecord {
   id: string;
@@ -142,6 +159,8 @@ export interface Snapshot {
   memories: Memory[];
   documents: DocumentRecord[];
   skills: Skill[];
+  /** The signed-in employee's own profiles, one per tenant at most. */
+  profiles?: MemberProfile[];
 }
 export interface ErrorView {
   title: string;

@@ -3,9 +3,9 @@ import { Check, CheckCircle2, Download, FileImage, Receipt, RotateCw, ScanText, 
 import type { DocumentRecord, ReceiptResult, Run } from '../../packages/harness-core/src/contracts.ts';
 import { RECEIPT_BUYER, errorView } from '../../packages/harness-core/src/index.ts';
 import type { ViewProps } from './App.tsx';
-import { Art, Busy, Modal } from './components.tsx';
+import { Art, Busy, FreeTierNote, Modal } from './components.tsx';
 import { prepareReceipt, uploadFile } from './uploads.ts';
-import { saveBlob } from './host.ts';
+import { ApiError, saveBlob } from './host.ts';
 const types: Record<ReceiptResult['document_type'], string> = {
   full_tax_invoice: 'ใบเสร็จรับเงิน/ใบกำกับภาษีแบบเต็มรูป',
   abbreviated_tax_invoice: 'ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ',
@@ -72,10 +72,12 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
+      let awaitingResult = true;
       try {
         const value = await host.call<Run>('run.read', { tenant, id: run.id });
         if (!active) return;
         setRun(value);
+        awaitingResult = ['queued', 'running'].includes(value.status);
         if (value.status === 'completed') {
           const receipt = (value.result as { receipt?: ReceiptResult })?.receipt;
           if (!receipt) throw new Error('PROVIDER_STREAM_INVALID');
@@ -91,8 +93,15 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
         } else timer = setTimeout(poll, 1500);
       } catch (e) {
         if (active) {
-          setBusy(false);
           fail(e);
+          const code = e instanceof ApiError ? e.code : e instanceof Error ? e.message : 'NETWORK_ERROR';
+          if (
+            awaitingResult &&
+            ['NETWORK_ERROR', 'SERVER_ERROR', 'INTERNAL_ERROR', 'DATA_ERROR'].includes(code)
+          ) {
+            // Only retry reading the existing job; never start another OCR request here.
+            timer = setTimeout(poll, 5000);
+          } else setBusy(false);
         }
       }
     };
@@ -515,6 +524,7 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
           <p className="muted">
             เก็บต้นฉบับไว้เสมอ ภาพที่ปรับก่อนอ่านเป็นสำเนา ผลที่อ่านได้ยังต้องตรวจเทียบก่อนนำไปใช้
           </p>
+          <FreeTierNote ai={data.ai} />
           <footer>
             <button onClick={() => setConsent(null)}>ยกเลิก</button>
             <button className="primary" onClick={() => void start()}>

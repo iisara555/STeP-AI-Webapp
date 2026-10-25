@@ -242,3 +242,49 @@ test('dark theme keeps task, notice and receipt states readable', async ({ page 
   await expect(page.locator('.check-status.found').first()).toBeVisible({ timeout: 15000 });
   expect(await axe()).toEqual([]);
 });
+test('profile, assistant and answer style follow Desktop and are disclosed before AI use', async ({
+  page,
+}) => {
+  await page.goto('/?demo=1');
+  const open = page.getByRole('button', { name: 'เปิดเมนู', exact: true });
+  if (await open.isVisible()) await open.click();
+  await page.getByRole('button', { name: 'การตั้งค่า', exact: true }).first().click();
+  await expect(page.getByRole('heading', { name: 'โปรไฟล์และทีม' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'ชื่อเรียกของคุณ', exact: true }).fill('ต้น');
+  await page.getByRole('combobox', { name: 'ทีมหลัก', exact: true }).selectOption('afp');
+  await page.getByRole('textbox', { name: 'ชื่อผู้ช่วย', exact: true }).fill('ตุ๊ดตู่');
+  await page.getByRole('radio', { name: /คมคาย \(Witty\)/ }).click();
+  await expect(
+    page.getByText('ก่อนส่ง ตรวจให้ครบสามจุด: เนื้อหา ผู้รับ และไฟล์แนบ แล้วค่อยกดส่ง'),
+  ).toBeVisible();
+  await page.getByRole('radio', { name: /ภาษาเหนือ/ }).click();
+  await page.getByRole('button', { name: 'เปลี่ยนรูป', exact: true }).click();
+  await page.getByRole('radio', { name: 'ภาพที่ 3', exact: true }).click();
+  const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
+  expect(result.violations.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target) }))).toEqual([]);
+  await page.getByRole('button', { name: 'บันทึกโปรไฟล์และผู้ช่วย' }).click();
+  await expect(page.getByText('บันทึกโปรไฟล์และผู้ช่วยแล้ว')).toBeVisible();
+  if (await open.isVisible()) await open.click();
+  const sidebar = page.getByRole('complementary', { name: 'แถบงาน' });
+  await expect(sidebar.getByText('ผู้ช่วย ตุ๊ดตู่ · ทีม AFP')).toBeVisible();
+  await expect(sidebar.locator('.profile .avatar-badge img')).toBeVisible();
+  await page.getByRole('button', { name: 'เริ่มงานใหม่', exact: true }).first().click();
+  await expect(page.getByText('สวัสดีครับ คุณต้น · บัญชี การเงิน และจัดซื้อ')).toBeVisible();
+  await expect(page.getByText('ลองงานแรกของทีม บัญชี การเงิน และจัดซื้อ')).toBeVisible();
+  await page.getByRole('textbox', { name: 'ข้อความถึง AI' }).fill('ช่วยสรุปงานตัวอย่าง');
+  await page.getByRole('button', { name: 'ส่งข้อความ' }).click();
+  await expect(page.getByRole('dialog').getByText('ชื่อเรียก ทีม และสไตล์การตอบที่คุณตั้งไว้')).toBeVisible();
+});
+test('memories record their Desktop type and lifetime', async ({ page }) => {
+  await page.goto('/?demo=1');
+  await menu(page, 'ความจำ');
+  await page.getByRole('button', { name: 'เพิ่มความจำ', exact: true }).click();
+  await page.getByRole('textbox', { name: 'ชื่อความจำ' }).fill('โครงการตัวอย่าง');
+  await page.getByRole('textbox', { name: 'สิ่งที่ต้องการจำ' }).fill('งานสังเคราะห์สำหรับทดสอบ');
+  await page.getByRole('combobox', { name: 'ประเภท', exact: true }).selectOption('project');
+  await page.getByRole('spinbutton', { name: /อายุความจำ/ }).fill('30');
+  await page.getByRole('button', { name: 'ยืนยันและบันทึก' }).click();
+  const card = page.locator('.memory-card', { hasText: 'โครงการตัวอย่าง' });
+  await expect(card.getByText('บริบทโครงการ')).toBeVisible();
+  await expect(card.getByText('พิมพ์เอง · ใช้ได้อีก 30 วัน')).toBeVisible();
+});
