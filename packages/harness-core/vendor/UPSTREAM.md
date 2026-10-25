@@ -16,6 +16,9 @@ Copied from `iisara555/STeP-AI-Harness` at
   document presentation presets and internal-media Prompt engine. Imports use explicit
   `.ts` extensions for web/server tooling. `starters.ts` uses Thai labels directly and
   exposes the team keys; it never uses team selection for authorization.
+- `desktop/document-contract.ts` is `documentToolRule` from upstream `desktop/electron/document-tools.ts`,
+  unchanged apart from its import path. The web's context assembly around it is in
+  `../src/document-context.ts`.
 - `desktop/teams.ts` keeps only the team ids and display names from upstream `manifest/teams.yaml`
   (no starter prompts, paths or routing); a team choice never grants access.
 - `../src/assistant-profile.ts` copies the speaking-style fragments from `desktop/src/speaking-styles.ts`

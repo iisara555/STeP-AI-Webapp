@@ -234,7 +234,7 @@ export function demoHost(): Host {
             if (p.providerConsent !== data.ai?.consentId) throw new ApiError('AI_PROVIDER_CHANGED');
             const session = data.sessions.find((s) => s.id === p.session);
             if (session) {
-              session.title = String(p.message).slice(0, 100);
+              if (session.title === 'เริ่มงานใหม่') session.title = String(p.message).slice(0, 100);
               messages[session.id].push({
                 id: crypto.randomUUID(),
                 role: 'user',
@@ -255,6 +255,7 @@ export function demoHost(): Host {
               partial: '',
               result: null,
               created_at: new Date().toISOString(),
+              document_tool: (p.documentTool as string) || null,
             };
             runs[row.id] = row;
             return { ...row };
@@ -264,8 +265,21 @@ export function demoHost(): Host {
             if (!row) throw new ApiError('ACCESS_DENIED');
             if (row.status === 'queued' && Date.now() - Date.parse(row.created_at) > 1000) {
               row.status = 'completed';
-              const text =
-                'นี่คือคำตอบตัวอย่างสำหรับตรวจหน้าจอครับ\n\nระบบจริงจะอ่านเฉพาะเอกสารและความจำที่คุณอนุญาต พร้อมแสดงแหล่งอ้างอิงเมื่อใช้ข้อมูลองค์กร\n\nขั้นตอนถัดไป: เชื่อมต่อบริการและนำเข้าเอกสาร STeP ก่อนเปิดให้พนักงานใช้งานจริง';
+              // Document tools answer in Desktop's two blocks: the editable draft and the review kept beside it.
+              const text = row.document_tool
+                ? `<document_draft>
+# ขอบเขตของงาน (ตัวอย่าง)
+
+## ๑. ความเป็นมา
+ร่างเพื่อพิจารณา: ข้อความสังเคราะห์สำหรับตรวจหน้าจอ
+
+## ๒. งบประมาณ
+[รอยืนยัน: งบประมาณที่มีหลักฐาน]
+</document_draft>
+<document_review>
+ผลตรวจตัวอย่าง: ใช้แม่แบบทำงาน ๑๖ หัวข้อ ยังต้องยืนยันงบประมาณและหน่วยงานเจ้าของเรื่อง
+</document_review>`
+                : 'นี่คือคำตอบตัวอย่างสำหรับตรวจหน้าจอครับ\n\nระบบจริงจะอ่านเฉพาะเอกสารและความจำที่คุณอนุญาต พร้อมแสดงแหล่งอ้างอิงเมื่อใช้ข้อมูลองค์กร\n\nขั้นตอนถัดไป: เชื่อมต่อบริการและนำเข้าเอกสาร STeP ก่อนเปิดให้พนักงานใช้งานจริง';
               if (row.kind === 'chat') {
                 row.result = { text, sources: [] };
                 messages[row.session_id!].push({
