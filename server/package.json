@@ -1,0 +1,11 @@
+{
+  "name": "@step-ai/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs the pinned Desktop engine without Electron (ADR 0001)",
+  "dependencies": {
+    "@xmldom/xmldom": "0.8.15",
+    "mdast-util-from-markdown": "2.0.2"
+  }
+}
