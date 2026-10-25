@@ -86,6 +86,9 @@ role key). Staff never enter these keys. No key from a chat transcript is bundle
 
 ## Google
 
+See [auth-setup.md](auth-setup.md) for the protected routes, exact login callback
+for this project, and the real-account acceptance steps.
+
 Create a Web OAuth client in the STeP-controlled Google Cloud project with redirect
 `https://YOUR_PROJECT.supabase.co/auth/v1/callback`. Enable Google in Supabase Auth
 and put that client ID/secret there. Set Auth Site URL to the real Pages origin;
