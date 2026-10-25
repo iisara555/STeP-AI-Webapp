@@ -43,9 +43,37 @@ export async function responseJson(response: Response, max = 1000000) {
     throw new Error('PROVIDER_STREAM_INVALID');
   }
 }
-/** Google's own status for a failed call; only the step and status are logged, never text or keys. */
-function providerError(step: 'count' | 'generate' | 'embed', status: number) {
-  console.warn(JSON.stringify({ provider: 'gemini', step, status }));
+type Step = 'count' | 'generate' | 'embed';
+/**
+ * Google's reason for a failed call (e.g. UNAVAILABLE "The model is overloaded" or DEADLINE_EXCEEDED), read from its
+ * error body. Google's error text never repeats the request; it is still bounded and stripped of anything key-like.
+ */
+async function providerReason(response: Response) {
+  try {
+    const text = (await response.text()).slice(0, 4000);
+    const error = JSON.parse(text)?.error;
+    return {
+      reason: typeof error?.status === 'string' ? error.status.slice(0, 40) : undefined,
+      message:
+        typeof error?.message === 'string'
+          ? error.message.replace(/AIza[\w-]{10,}/g, '[key]').slice(0, 200)
+          : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+/** Logs the step, status, Google's reason and how long the attempt took; never prompt, answer or key. */
+function logFailure(
+  step: Step,
+  status: number,
+  ms: number,
+  detail: { reason?: string; message?: string },
+  retried: boolean,
+) {
+  console.warn(JSON.stringify({ provider: 'gemini', step, status, ms, ...detail, retried }));
+}
+function providerError(status: number) {
   return new Error(
     status === 429
       ? 'AI_RATE_LIMIT'
@@ -65,16 +93,21 @@ export function gemini(env: Environment, fetcher: typeof fetch = fetch) {
   const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': key };
   // 503 UNAVAILABLE means Google did not process the request (an overloaded model, common on the free tier),
   // so one retry neither repeats work nor costs anything. Every other failure is reported as it came.
-  const call = async (step: 'count' | 'generate' | 'embed', url: string, init: RequestInit) => {
+  const call = async (step: Step, url: string, init: RequestInit) => {
+    let started = Date.now(),
+      retried = false;
     let response = await fetcher(url, init);
     if (response.status === 503) {
-      await response.body?.cancel();
+      logFailure(step, 503, Date.now() - started, await providerReason(response), false);
       await new Promise((resolve) => setTimeout(resolve, BUSY_RETRY_MS));
+      started = Date.now();
+      retried = true;
       response = await fetcher(url, init);
     }
     if (!response.ok) {
-      await response.body?.cancel();
-      throw providerError(step, response.status);
+      const status = response.status;
+      logFailure(step, status, Date.now() - started, await providerReason(response), retried);
+      throw providerError(status);
     }
     return response;
   };
