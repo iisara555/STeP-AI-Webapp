@@ -7,7 +7,7 @@ import {
   pointerTargets,
 } from '../packages/harness-core/src/document-context.ts';
 import { skillContext, type RegisteredSource } from '../packages/harness-core/src/skill-context.ts';
-import { SYSTEM_RULES } from '../packages/harness-core/src/index.ts';
+import { SYSTEM_RULES, estimateTextTokens } from '../packages/harness-core/src/index.ts';
 import type { Skill } from '../packages/harness-core/src/contracts.ts';
 import { aiService } from '../supabase/functions/_shared/ai.ts';
 import { processOne } from '../supabase/functions/_shared/worker.ts';
@@ -91,7 +91,20 @@ test('longer document answers never cost more than the run reserved', () => {
   assert.equal(documentOutputTokens(0, 0, 0), 4096);
 });
 
-test('a TOR request with a Skill reaches the model with its contract instead of the missing-source reply', async () => {
+const draft = [
+  '<document_draft>',
+  '# ขอบเขตของงาน',
+  '</document_draft>',
+  '<document_review>',
+  'ตรวจ',
+  '</document_review>',
+].join('\n');
+/** One queued TOR job through the real worker, with a mocked database and Gemini. */
+async function runTor(
+  sources: RegisteredSource[],
+  jobSkills: Skill[],
+  message = 'ร่าง TOR (จ้างงาน / บริการ) งบประมาณ [รอยืนยัน]',
+) {
   const values: Record<string, string> = {
     GEMINI_API_KEY: 'synthetic-gemini-value',
     GEMINI_MODEL: 'gemini-synthetic-flash',
@@ -100,8 +113,6 @@ test('a TOR request with a Skill reaches the model with its contract instead of 
     SUPABASE_SECRET_KEY: 'synthetic-service-value',
   };
   const env = (key: string) => values[key];
-  const draft =
-    '<document_draft>\n# ขอบเขตของงาน\n</document_draft>\n<document_review>\nตรวจ\n</document_review>';
   let generation: Record<string, any> | undefined;
   const finished: Record<string, any>[] = [];
   const fetcher = (async (url, init) => {
@@ -116,7 +127,7 @@ test('a TOR request with a Skill reaches the model with its contract instead of 
         actor_id: crypto.randomUUID(),
         input: {
           providerConsent: aiService(env).consentId,
-          message: 'ร่าง TOR (จ้างงาน / บริการ) งบประมาณ [รอยืนยัน]',
+          message,
           skill: 'tor-government-writing',
           documentTool: 'tor',
           useMemory: false,
@@ -129,12 +140,12 @@ test('a TOR request with a Skill reaches the model with its contract instead of 
         sources: [
           { source_key: '__authority', title: '', body: '', source_version: '', provenance: {} },
           { source_key: '__organization', title: '', body: '', source_version: '', provenance: {} },
-          ...registered,
+          ...sources,
         ],
-        skills,
+        skills: jobSkills,
         memories: [],
         documents: [],
-        history: [{ role: 'user', body: 'ร่าง TOR' }],
+        history: [{ role: 'user', body: message }],
       });
     if (target.pathname.endsWith('/member_profiles')) return Response.json([]);
     if (target.pathname.endsWith(':countTokens')) return Response.json({ totalTokens: 1200 });
@@ -152,6 +163,11 @@ test('a TOR request with a Skill reaches the model with its contract instead of 
     return Response.json(true);
   }) as typeof fetch;
   await processOne(env, fetcher);
+  return { generation, finished, prompt: String(generation?.contents?.[0]?.parts?.[0]?.text || '') };
+}
+
+test('a TOR request with a Skill reaches the model with its contract instead of the missing-source reply', async () => {
+  const { generation, finished } = await runTor(registered, skills);
   assert.ok(generation, 'the model was called rather than the missing-source reply');
   const system = generation.systemInstruction.parts[0].text;
   assert.match(system, /<document_tool_contract>/);
@@ -159,4 +175,111 @@ test('a TOR request with a Skill reaches the model with its contract instead of 
   assert.match(generation.contents[0].parts[0].text, /synthetic sixteen sections/);
   assert.equal(finished[0].error, null);
   assert.equal(finished[0].answer.text, draft);
+});
+
+// Synthetic Thai text sized like the production TOR files (characters), so the real budgets are exercised.
+const thaiText = (chars: number, seed: string) => {
+  const words = [
+    'ข้อกำหนด',
+    'การจัดซื้อ',
+    'ครุภัณฑ์',
+    'คุณลักษณะ',
+    'ผู้เสนอราคา',
+    'ตรวจรับ',
+    'ระยะเวลา',
+    'งบประมาณ',
+  ];
+  let text = `[${seed}] `;
+  for (let i = 0; text.length < chars; i++)
+    text += words[(i * 7 + seed.length) % words.length] + (i % 9 ? ' ' : '\n');
+  return text.slice(0, chars);
+};
+const file = (path: string, chars: number, extra = ''): RegisteredSource => ({
+  source_key: 'support-' + path.replace(/\W+/g, '-'),
+  title: path.split('/').slice(-2).join('/'),
+  body: extra || thaiText(chars, path),
+  source_version: 'synthetic',
+  provenance: { kind: 'skill-support', path },
+});
+const COMMON = 'skills/common/thai-official-documents';
+const PM = 'skills/pm/tor-government-writing';
+const link = (to: string) => `ใช้แหล่งกลางเดียว [กลาง](../../../${to})`;
+const keyOf = (all: RegisteredSource[], path: string) =>
+  all.find((s) => s.provenance.path === path)!.source_key;
+const productionSized = () => {
+  const registered = [
+    file(`${PM}/references/tor-drafting-guide.md`, 5357),
+    file(`${PM}/references/procurement-source-map.md`, 2942),
+    file(`${PM}/examples/task-adaptations.md`, 3117),
+    file(
+      `${PM}/templates/tor-16-sections-template.md`,
+      0,
+      link('common/thai-official-documents/templates/tor-16-sections-template.md'),
+    ),
+    file(
+      `${PM}/examples/tor-goods-ai-computer-master-example.md`,
+      0,
+      link('common/thai-official-documents/examples/tor-goods-ai-computer-master-example.md'),
+    ),
+    file(`${COMMON}/templates/tor-16-sections-template.md`, 5523),
+    file(`${COMMON}/examples/tor-goods-ai-computer-master-example.md`, 14811),
+    file(`${COMMON}/references/drafting-checks.md`, 3806),
+    file(`${COMMON}/references/thai-layout.md`, 2955),
+  ];
+  const instructions = (chars: number, seed: string) => thaiText(chars, seed);
+  const jobSkills = [
+    {
+      ...skill('tor-government-writing'),
+      instructions: instructions(7375, 'tor-skill'),
+      metadata: {
+        support_source_keys: registered
+          .filter((s) => String(s.provenance.path).startsWith(PM))
+          .map((s) => s.source_key),
+        required_source_keys: [],
+      },
+    },
+    { ...skill('thai-official-documents'), instructions: instructions(11141, 'official-skill') },
+  ];
+  return { registered, jobSkills };
+};
+
+test('a production-sized TOR fits the budget and reads every working file exactly once', async () => {
+  const { registered, jobSkills } = productionSized();
+  const { generation, finished, prompt } = await runTor(registered, jobSkills);
+  assert.equal(finished[0].error, null, 'the run must not stop with CONTEXT_LIMIT');
+  assert.ok(generation);
+  assert.ok(estimateTextTokens(prompt).estimatedTokens <= 40000);
+  // Both Skills' instructions, the 16-section template, the checks and the guides are all read, each once.
+  assert.match(prompt, /\[tor-skill\]/);
+  assert.match(prompt, /\[official-skill\]/);
+  for (const path of [
+    `${COMMON}/templates/tor-16-sections-template.md`,
+    `${COMMON}/references/drafting-checks.md`,
+    `${COMMON}/references/thai-layout.md`,
+    `${PM}/references/tor-drafting-guide.md`,
+    `${PM}/references/procurement-source-map.md`,
+    `${PM}/examples/task-adaptations.md`,
+  ])
+    assert.equal(prompt.split(`<reference name="${keyOf(registered, path)}">`).length - 1, 1, path);
+  assert.doesNotMatch(prompt, /ข้ามเพราะบริบทเต็ม/);
+});
+
+test('when working files do not fit, the template stays and every skipped file is named', () => {
+  const { registered, jobSkills } = productionSized();
+  const { parts, sources } = documentContext('tor', jobSkills, registered, { budgetTokens: 9000 });
+  const text = parts.join('\n');
+  // The supporting Skill (about 7,700 estimated tokens) and the template are required; references are not.
+  assert.match(text, /\[official-skill\]/);
+  assert.ok(sources.some((s) => s.title.endsWith('tor-16-sections-template.md')));
+  assert.ok(!sources.some((s) => s.title.endsWith('drafting-checks.md')));
+  const skipped = text.match(/ข้ามเพราะบริบทเต็ม: ([^\n]+)/)?.[1] || '';
+  for (const path of [`${COMMON}/references/drafting-checks.md`, `${PM}/references/tor-drafting-guide.md`])
+    assert.ok(skipped.includes(path), path);
+});
+
+test('files the chosen Skill already loaded are not loaded again', () => {
+  const { registered, jobSkills } = productionSized();
+  const guide = registered.find((s) => s.source_key.endsWith('tor-drafting-guide-md'))!;
+  const { parts } = documentContext('tor', jobSkills, registered, { loaded: [guide.source_key] });
+  assert.ok(!parts.join('\n').includes(`${PM}/references/tor-drafting-guide.md ·`));
 });
