@@ -319,7 +319,7 @@ export function demoHost(): Host {
               existing.title = String(p.title);
               existing.body = String(p.body);
               existing.kind = kind;
-              existing.expires_at = expires_at;
+              if (p.ttlDays !== undefined) existing.expires_at = expires_at;
               return { ...existing };
             }
             const row = {

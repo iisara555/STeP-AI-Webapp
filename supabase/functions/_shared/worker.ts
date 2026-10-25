@@ -27,6 +27,22 @@ import { imageBase64 } from './files.ts';
 import { normalizeReceipt } from './receipt.ts';
 import { skillContext } from '../../../packages/harness-core/src/skill-context.ts';
 const textSchema = z.object({ text: z.string().max(200000), truncated: z.boolean() });
+// Fail closed if material already assembled into a prompt was removed, expired or replaced.
+// worker_payload also rechecks the live lease, membership and each selected document's ACL.
+function resourceSnapshot(payload: {
+  document?: unknown;
+  prepared_document?: unknown;
+  documents?: { id: string }[];
+  memories?: { id: string }[];
+}) {
+  const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
+  return JSON.stringify({
+    document: payload.document,
+    prepared_document: payload.prepared_document,
+    documents: [...(payload.documents || [])].sort(byId),
+    memories: [...(payload.memories || [])].sort(byId),
+  });
+}
 const receiptPrompt = `อ่านข้อความและจัดกลุ่มข้อมูลจากใบเสร็จในภาพเท่านั้น ไม่เติมสิ่งที่มองไม่เห็น
 ตอบ JSON ตามรูปแบบนี้: {"document_type":"full_tax_invoice|abbreviated_tax_invoice|cash_bill|general_receipt|unknown","complete":"complete|incomplete|uncertain","signature":"present|absent|uncertain","checks":[{"field":"ชื่อช่องข้อมูล","status":"found|missing|uncertain|mismatch","value":null,"evidence":null}],"next_steps":["ต้องทำอะไรต่อ"],"warnings":[]}
 checks ต้องมีหัวข้อ วันที่ ชื่อผู้ขาย ที่อยู่ผู้ขาย รายการสินค้า/บริการ ยอดรวม เลขที่เอกสาร เลขภาษีผู้ขาย ชื่อผู้ซื้อ ที่อยู่ผู้ซื้อ เลขภาษีผู้ซื้อ ภาษีมูลค่าเพิ่ม และลายเซ็นผู้รับเงิน แยกคนละรายการ ตรวจตามประเภทใบเสร็จและสิ่งที่ปรากฏ ข้อที่อ่านไม่ชัดให้ uncertain และไม่สรุปว่าเบิกได้
@@ -40,23 +56,44 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
   const job = await checked(service.rpc('claim_run'));
   if (!job?.id) return { processed: false };
   const deadline = Date.now() + 95000;
+  let resources: string;
   const jobFetch: typeof fetch = async (input, init) => {
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error('RUN_INTERRUPTED');
+    const signal = AbortSignal.any([AbortSignal.timeout(remaining), ...(init?.signal ? [init.signal] : [])]);
     try {
-      return await fetcher(input, {
-        ...init,
-        signal: AbortSignal.any([AbortSignal.timeout(remaining), ...(init?.signal ? [init.signal] : [])]),
-      });
+      // Check at the actual request boundary, including token counting, embeddings, Google
+      // reads and every provider retry. Do not reuse the access decision from prompt assembly.
+      const fresh = await checked(
+        service.rpc('worker_payload', { job_id: job.id, lease: job.lease_token }).abortSignal(signal),
+      );
+      if (resourceSnapshot(fresh) !== resources) throw new Error('ACCESS_DENIED');
+      requireProviderConsent(env, job.input.providerConsent);
+      signal.throwIfAborted();
+      return await fetcher(input, { ...init, signal });
     } catch (error) {
-      if (Date.now() >= deadline || init?.signal?.aborted) throw new Error('RUN_INTERRUPTED');
+      if (Date.now() >= deadline || signal.aborted) throw new Error('RUN_INTERRUPTED');
       throw error;
     }
   };
+  // Private profile and Storage reads also pass the fresh gate. Accounting/finish RPCs keep
+  // the original client so cancelled work can still be finalized without refunding its reserve.
+  const { service: jobService } = clients(env, undefined, async (input, init) => {
+    try {
+      return await jobFetch(input, init);
+    } catch (error) {
+      const code = safeCode(error);
+      if (!['ACCESS_DENIED', 'RUN_INTERRUPTED', 'DATA_ERROR'].includes(code)) throw error;
+      // A terminal access failure is an HTTP denial, not a transport failure that the
+      // Supabase client may retry. Never resume a denied read if access later changes.
+      return Response.json({ message: code }, { status: 403 });
+    }
+  });
   let inputTokens = 0,
     outputTokens = 0;
   try {
     const context = await checked(service.rpc('worker_payload', { job_id: job.id, lease: job.lease_token }));
+    resources = resourceSnapshot(context);
     const info = requireProviderConsent(env, job.input.providerConsent);
     if (job.ai_provider !== info.provider) throw new Error('AI_PROVIDER_CHANGED');
     if (info.textOnly && job.kind !== 'chat') throw new Error('AI_TRIAL_TEXT_ONLY');
@@ -202,9 +239,9 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
           if (history) parts.push(untrusted('บทสนทนาก่อนหน้า', history));
           const prompt = boundedContext(parts, 27000);
           assertSafeText(prompt);
-          // Only the run owner's own preferences, read after worker_payload has checked their membership.
+          // Only the run owner's own preferences, behind the same fresh access gate.
           const profile = await checked<MemberProfile | null>(
-            service
+            jobService
               .from('member_profiles')
               .select('*')
               .eq('tenant_id', job.tenant_id)
@@ -264,7 +301,7 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
         if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(doc.mime))
           throw new Error('FILE_UNSUPPORTED');
         const image = context.prepared_document || doc;
-        const blob = await checked(service.storage.from('documents').download(image.object_path));
+        const blob = await checked(jobService.storage.from('documents').download(image.object_path));
         if (blob.size > 10485760) throw new Error('DOCUMENT_TOO_LARGE');
         const answer = await ai.generate({
           system: SYSTEM_RULES,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowUp,
@@ -30,7 +30,7 @@ import type {
   SourceRef,
 } from '../../packages/harness-core/src/contracts.ts';
 import { errorView } from '../../packages/harness-core/src/index.ts';
-import { saveBlob } from './host.ts';
+import { ApiError, saveBlob } from './host.ts';
 import { Art, Busy, FreeTierNote, MEMORY_KINDS, Modal, Visibility } from './components.tsx';
 import type { ViewProps } from './App.tsx';
 import { exportWord } from './extract.ts';
@@ -39,6 +39,7 @@ import { teamLabel } from '../../packages/harness-core/vendor/desktop/teams.ts';
 import { assistantName } from '../../packages/harness-core/src/assistant-profile.ts';
 import { parseDocumentOutput } from '../../packages/harness-core/vendor/desktop/document-output.ts';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
+import type { DraftBook } from './drafts.ts';
 type Plan = {
   provider: string;
   providerConsent: string;
@@ -70,9 +71,10 @@ export function Chat({
   consumePrepared,
   onPrepare,
   artifactSlot,
+  drafts,
 }: ViewProps & {
   session: Conversation | null;
-  setSession: (s: Conversation | null) => void;
+  setSession: Dispatch<SetStateAction<Conversation | null>>;
   skill: Skill | null;
   clearSkill: () => void;
   newSession: () => void;
@@ -80,6 +82,7 @@ export function Chat({
   consumePrepared: () => void;
   onPrepare: (work: PreparedWork, options?: { submit?: boolean; documents?: string[] }) => Promise<void>;
   artifactSlot: HTMLElement | null;
+  drafts: DraftBook;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]),
     [run, setRun] = useState<Run | null>(null),
@@ -91,7 +94,6 @@ export function Chat({
   const [plan, setPlan] = useState<Plan | null>(null),
     [googleConsent, setGoogleConsent] = useState(false),
     [draftOpen, setDraftOpen] = useState(false),
-    [draft, setDraft] = useState(''),
     [menu, setMenu] = useState(false);
   const [source, setSource] = useState<{ title: string; body: string } | null>(null),
     [remember, setRemember] = useState<ChatMessage | null>(null);
@@ -107,18 +109,42 @@ export function Chat({
   const bottom = useRef<HTMLDivElement>(null),
     currentSession = useRef(session?.id);
   currentSession.current = session?.id;
+  const draftState = session ? drafts.get(session) : null;
+  const draft = draftState?.text || '';
+  const setDraft = (value: string | ((text: string) => string)) => {
+    if (session) drafts.edit(session, value);
+  };
+  const denyRead = (error: unknown, id: string) => {
+    const code = error instanceof ApiError ? error.code : error instanceof Error ? error.message : '';
+    if (code !== 'ACCESS_DENIED' && code !== 'UNAUTHENTICATED') return;
+    if (code === 'UNAUTHENTICATED') drafts.clear();
+    else drafts.forget(id);
+    setDraftOpen(false);
+    setSession((current) => (current?.id === id ? null : current));
+  };
+  const navigation = useRef(0);
+  useEffect(() => {
+    const generation = ++navigation.current;
+    return () => {
+      if (navigation.current === generation) navigation.current++;
+    };
+  }, [session?.id, tenant, host]);
   useEffect(() => {
     const handoff = prepared && prepared.sessionId === session?.id ? prepared : null;
     setMessages([]);
     setRun(null);
+    setBusy(false);
     setText(handoff ? handoff.text : '');
     if (handoff) consumePrepared();
     autoPreview.current = Boolean(handoff?.submit);
     setDocuments(handoff?.documents || []);
     setPlan(null);
     setMenu(false);
-    setDraftOpen(Boolean(handoff && session?.draft));
-    setDraft(session?.draft || '');
+    setDraftOpen(
+      Boolean(
+        session && ((handoff && session.draft) || drafts.get(session).text !== drafts.get(session).savedText),
+      ),
+    );
     if (!session) return;
     const id = session.id;
     let active = true;
@@ -127,8 +153,10 @@ export function Chat({
       .then((result) => {
         if (!active) return;
         setMessages(result.messages);
-        setDraft(result.session.draft);
-        setSession(result.session);
+        drafts.receive(result.session);
+        setSession((current) =>
+          current?.id === id && current.version <= result.session.version ? result.session : current,
+        );
         setRun(
           result.runs.find((r) => ['queued', 'running', 'waiting_approval'].includes(r.status)) ||
             result.runs[0] ||
@@ -140,12 +168,15 @@ export function Chat({
         }
       })
       .catch((e) => {
-        if (active) fail(e);
+        if (active) {
+          denyRead(e, id);
+          fail(e);
+        }
       });
     return () => {
       active = false;
     };
-  }, [session?.id, tenant, host]);
+  }, [session?.id, tenant, host, drafts]);
   useEffect(() => {
     if (!run || !['queued', 'running', 'waiting_approval'].includes(run.status)) return;
     let stopped = false;
@@ -160,13 +191,23 @@ export function Chat({
           return;
         }
         if (session) {
-          const result = await host.call<{ session: Conversation; messages: ChatMessage[] }>('session.read', {
-            tenant,
-            id: session.id,
-          });
+          const result = await host
+            .call<{ session: Conversation; messages: ChatMessage[] }>('session.read', {
+              tenant,
+              id: session.id,
+            })
+            .catch((error) => {
+              if (!stopped) denyRead(error, session.id);
+              throw error;
+            });
           if (!stopped) {
             setMessages(result.messages);
-            setSession(result.session);
+            drafts.receive(result.session);
+            setSession((current) =>
+              current?.id === result.session.id && current.version <= result.session.version
+                ? result.session
+                : current,
+            );
             await refresh();
           }
         }
@@ -198,6 +239,7 @@ export function Chat({
   // Text typed on the home screen starts a private task; the consent preview opens before any AI call.
   const preview = async (id = session?.id, message = text, documentIds = documents) => {
     if (!id || !message.trim() || active) return;
+    const generation = navigation.current;
     setBusy(true);
     try {
       const result = await host.call<Plan>('context.plan', {
@@ -207,14 +249,14 @@ export function Chat({
         documentIds,
         useMemory,
       });
-      if (currentSession.current === id) {
+      if (currentSession.current === id && navigation.current === generation) {
         setPlan(result);
         setGoogleConsent(false);
       }
     } catch (e) {
-      fail(e);
+      if (navigation.current === generation) fail(e);
     } finally {
-      setBusy(false);
+      if (navigation.current === generation) setBusy(false);
     }
   };
   const send = async () => {
@@ -235,6 +277,7 @@ export function Chat({
   const submit = async () => {
     if (!session || !plan) return;
     const id = session.id;
+    const generation = navigation.current;
     setBusy(true);
     try {
       const result = await host.call<Run>('run.start', {
@@ -250,21 +293,29 @@ export function Chat({
         providerConsent: plan.providerConsent,
         googleConsent,
       });
-      if (currentSession.current !== id) return;
+      if (currentSession.current !== id || navigation.current !== generation) return;
       setPlan(null);
       setText('');
       setRun(result);
-      const state = await host.call<{ session: Conversation; messages: ChatMessage[] }>('session.read', {
-        tenant,
-        id,
-      });
+      const state = await host
+        .call<{ session: Conversation; messages: ChatMessage[] }>('session.read', {
+          tenant,
+          id,
+        })
+        .catch((error) => {
+          if (navigation.current === generation) denyRead(error, id);
+          throw error;
+        });
+      if (currentSession.current !== id || navigation.current !== generation) return;
       setMessages(state.messages);
       await refresh();
     } catch (e) {
-      setPlan(null);
-      fail(e);
+      if (navigation.current === generation) {
+        setPlan(null);
+        fail(e);
+      }
     } finally {
-      setBusy(false);
+      if (navigation.current === generation) setBusy(false);
     }
   };
   const openSource = async (ref: SourceRef) => {
@@ -289,20 +340,28 @@ export function Chat({
   };
   const removeSession = async () => {
     if (!session) return;
+    const id = session.id;
     try {
-      await host.call('session.delete', { tenant, id: session.id });
-      setSession(null);
+      await host.call('session.delete', { tenant, id });
+      drafts.forget(id);
+      setSession((current) => (current?.id === id ? null : current));
       await refresh();
     } catch (e) {
       fail(e);
     }
   };
-  const saveDraft = () =>
-    session &&
-    void host
-      .call<Conversation>('session.draft', { tenant, id: session.id, version: session.version, draft })
-      .then((s) => setSession(s))
-      .catch(fail);
+  const saveDraft = async () => {
+    if (!session) return;
+    const id = session.id,
+      generation = navigation.current;
+    try {
+      const saved = await drafts.save(session, (input) => host.call<Conversation>('session.draft', input));
+      if (saved && navigation.current === generation)
+        setSession((current) => (current?.id === id && current.version <= saved.version ? saved : current));
+    } catch (error) {
+      if (navigation.current === generation) fail(error);
+    }
+  };
   const exportDraft = () => {
     if (!session || !draft.trim()) return;
     if (format === 'docx') void exportWord(draft, session.title, wordPreset).catch(fail);
@@ -649,9 +708,11 @@ export function Chat({
               <small>
                 {!draft.trim()
                   ? 'ยังไม่มีร่าง · ใช้คำตอบเป็นร่าง หรือพิมพ์เองได้'
-                  : draft === session.draft
-                    ? 'ร่าง Markdown · บันทึกแล้ว'
-                    : 'ร่าง Markdown · ยังไม่บันทึก'}
+                  : draftState?.saving
+                    ? 'กำลังบันทึกร่าง'
+                    : draft === draftState?.savedText
+                      ? 'ร่าง Markdown · บันทึกแล้ว'
+                      : 'ร่าง Markdown · ยังไม่บันทึก'}
               </small>
             </div>
             <div className="draft-toolbar" role="toolbar" aria-label="จัดรูปแบบร่าง">
@@ -707,7 +768,7 @@ export function Chat({
             </details>
             <p className="draft-note">Word ยังไม่ฝังฟอนต์หรือตราครุฑ ตรวจรูปแบบกับแบบของหน่วยงานก่อนใช้</p>
             <footer className="artifact-footer">
-              <button onClick={saveDraft}>
+              <button onClick={() => void saveDraft()} disabled={draftState?.saving}>
                 <Save size={15} />
                 บันทึก
               </button>

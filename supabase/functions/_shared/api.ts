@@ -352,8 +352,8 @@ export async function dispatch(
           body: z.string().max(4000),
           id: uuid.optional(),
           kind: z.enum(['preference', 'reference', 'feedback', 'project']).default('preference'),
-          // Days until the memory stops being used; 0 keeps it until deleted, as on Desktop.
-          ttlDays: z.number().int().min(0).max(3650).default(0),
+          // Omit on edits to preserve the exact expiry; 0 deliberately removes the expiry.
+          ttlDays: z.number().int().min(0).max(3650).optional(),
           // Where a new memory came from, shown beside it as on Desktop.
           origin: z.enum(['manual', 'chat']).default('manual'),
         })
@@ -367,7 +367,7 @@ export async function dispatch(
             .update({
               ...safe,
               kind: p.kind,
-              expires_at,
+              ...(p.ttlDays === undefined ? {} : { expires_at }),
               confirmed: true,
               updated_at: new Date().toISOString(),
             })

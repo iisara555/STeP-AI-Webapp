@@ -1,5 +1,19 @@
 # Progress
 
+## 2026-10-25 · แก้ findings จาก audit runtime
+
+- P1 worker: ก่อนส่งบริบทไป AI ทุกครั้ง (หลังรอ Drive/Storage, หลัง countTokens และระหว่าง backoff 503
+  ของ countTokens/generateContent/embedContent) worker ตรวจสิทธิ์และ lease ซ้ำ ถ้า revoke หรือ cancel
+  จะไม่ส่งบริบทและไม่ retry; ปิดงานด้วย `answer: null` และโค้ด `ACCESS_DENIED`/`RUN_INTERRUPTED`
+- P2 ร่าง: ร่างแยกตามงาน คงอยู่เมื่อเปลี่ยนหน้าโดยไม่ใช้ browser storage, response ที่บันทึกช้าหรืออ่านช้า
+  ไม่ย้อนข้อความที่พิมพ์ใหม่, มี dialog เตือนก่อนออกจากระบบและ `beforeunload` เมื่อมีร่างที่ยังไม่บันทึก
+- P2 ความจำ: แก้ความจำที่หมดอายุหรือเหลือบางส่วนไม่เปลี่ยนวันหมดอายุเดิม เปลี่ยนอายุได้เมื่อผู้ใช้เลือกเอง
+- P2 OCR: polling ใบเสร็จลองอ่านงานเดิมซ้ำหลัง network/server error โดยไม่เริ่ม OCR ใหม่ และหยุดเมื่อถูกปฏิเสธสิทธิ์
+- Validation (Windows, ข้อมูลสังเคราะห์, ไม่มีการเรียก AI/Google จริง): `tsc --noEmit` ผ่าน, build ผ่าน,
+  unit/API/PWA 62/62 (ใหม่ 17 รวม worker-revocation), PostgreSQL/PGlite 29/29, Playwright desktop/mobile 56/56
+  `prettier --check` ยังรายงาน 57 ไฟล์จาก CRLF ใน checkout นี้ (ไฟล์ที่ไม่ได้แตะก็ติด) ไม่ใช่ปัญหาเนื้อหา
+- ยังไม่ทำ: deploy API/worker (hosted ยังเป็นเวอร์ชันก่อนแก้นี้ รวมถึง Gemini busy retry) และ real-account acceptance
+
 ## 2026-10-24 · Audit เทียบ Desktop 0.6.20
 
 - ตรวจ Webapp `a5a99d2` เทียบ Desktop `90ee71c` (main/tag `desktop-v0.6.20` ที่ตรวจจาก GitHub)

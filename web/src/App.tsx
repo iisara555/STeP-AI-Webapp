@@ -20,6 +20,7 @@ import { Sidebar, SidebarRail, sidebarChoice, tools } from './Sidebar.tsx';
 import { useTheme } from './ThemeSelect.tsx';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
 import { assistantName } from '../../packages/harness-core/src/assistant-profile.ts';
+import { DraftBook } from './drafts.ts';
 // Tool pages load on first open, so the first screen does not wait for the Desktop reference or Word export.
 const Documents = lazy(() => import('./Documents.tsx').then((m) => ({ default: m.Documents })));
 const Memories = lazy(() => import('./Memories.tsx').then((m) => ({ default: m.Memories })));
@@ -115,6 +116,26 @@ export function App() {
   const epoch = useRef(0);
   const authenticatedUser = useRef('');
   const [authGeneration, setAuthGeneration] = useState(0);
+  const drafts = useMemo(() => new DraftBook(tenant), [host, tenant, authGeneration, data?.user.id]);
+  useSyncExternalStore(drafts.subscribe, drafts.revision);
+  const draftScope = useRef(drafts);
+  draftScope.current = drafts;
+  const [discardAction, setDiscardAction] = useState<(() => void) | null>(null);
+  const hasUnsaved = drafts.hasUnsaved();
+  useEffect(() => () => drafts.clear(), [drafts]);
+  useEffect(() => {
+    if (!hasUnsaved) return;
+    const protect = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', protect);
+    return () => window.removeEventListener('beforeunload', protect);
+  }, [hasUnsaved]);
+  const protectDrafts = (action: () => void) => {
+    if (drafts.hasUnsaved()) setDiscardAction(() => action);
+    else action();
+  };
   useEffect(() => {
     if (demo) {
       setSignedIn(true);
@@ -159,6 +180,8 @@ export function App() {
         if (next !== authenticatedUser.current) {
           authenticatedUser.current = next;
           epoch.current++;
+          draftScope.current.clear();
+          setDiscardAction(null);
           setAuthGeneration((v) => v + 1);
           setData(null);
           setSession(null);
@@ -291,9 +314,11 @@ export function App() {
     return () => window.removeEventListener('keydown', key);
   }, [signedIn, data, demo, workspace]);
 
-  const logout = async () => {
+  const endSession = async () => {
     setSignedIn(false);
     epoch.current++;
+    drafts.clear();
+    setDiscardAction(null);
     setData(null);
     setSession(null);
     setError(null);
@@ -304,13 +329,15 @@ export function App() {
     setDemo(false);
     history.replaceState(null, '', '/');
   };
-  const updateApp = async () => {
+  const logout = () => protectDrafts(() => void endSession());
+  const applyUpdate = async () => {
     const registration = await navigator.serviceWorker.getRegistration();
     if (registration?.waiting) {
       navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
       registration.waiting.postMessage('activate-update');
     } else location.reload();
   };
+  const updateApp = () => protectDrafts(() => void applyUpdate());
   const toggleSidebar = () => {
     sidebarChoice.save(!fullSidebar);
     setFullSidebar(!fullSidebar);
@@ -569,6 +596,7 @@ export function App() {
                   consumePrepared={consumePrepared}
                   onPrepare={prepareWork}
                   artifactSlot={artifactSlot}
+                  drafts={drafts}
                 />
               )}
               {page === 'documents' && <Documents {...props} />}
@@ -583,8 +611,14 @@ export function App() {
                   onTheme={setTheme}
                   onLogout={() => void logout()}
                   onTenantChange={(id) => {
-                    setSettingsTab('profile');
-                    setTenant(id);
+                    if (id === tenant) return;
+                    protectDrafts(() => {
+                      epoch.current++;
+                      drafts.clear();
+                      setSession(null);
+                      setSettingsTab('profile');
+                      setTenant(id);
+                    });
                   }}
                 />
               )}
@@ -632,7 +666,7 @@ export function App() {
             onAction={(code) => {
               setError(null);
               if (code === 'UNAUTHENTICATED') {
-                void logout();
+                void endSession();
                 return;
               }
               if (code === 'GOOGLE_PRIVATE_CONTEXT') {
@@ -660,6 +694,28 @@ export function App() {
             }}
           />
         </div>
+      )}
+      {discardAction && (
+        <Modal title="มีร่างที่ยังไม่บันทึก" onClose={() => setDiscardAction(null)}>
+          <p>
+            ร่างที่ยังไม่บันทึกจะหายเมื่อออกจากบัญชี เปลี่ยนองค์กร หรือเปิดแอปใหม่
+            กลับไปบันทึกก่อนดำเนินการต่อได้
+          </p>
+          <footer>
+            <button onClick={() => setDiscardAction(null)}>กลับไปทำงาน</button>
+            <button
+              className="danger"
+              onClick={() => {
+                const action = discardAction;
+                setDiscardAction(null);
+                drafts.clear();
+                action();
+              }}
+            >
+              ทิ้งร่างและดำเนินการต่อ
+            </button>
+          </footer>
+        </Modal>
       )}
       {palette && (
         <CommandPalette
