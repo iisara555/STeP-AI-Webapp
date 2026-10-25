@@ -33,6 +33,14 @@ import { imageBase64 } from './files.ts';
 import { normalizeReceipt } from './receipt.ts';
 import { skillContext } from '../../../packages/harness-core/src/skill-context.ts';
 const textSchema = z.object({ text: z.string().max(200000), truncated: z.boolean() });
+// The estimator counts a Thai character as 0.9 token, about twice what Gemini reports (a measured run: roughly
+// 15,000 estimated, 8,211 counted). Chat keeps that margin. A drafting run needs the template, checks and guides in
+// full, so its estimated budget is wider (40,000 stays within 32,000 counted tokens unless a document counts above 0.8 per
+// estimated token); the true limit is still enforced by countTokens before every call.
+const CONTEXT_TOKENS = 27000;
+const DOCUMENT_CONTEXT_TOKENS = 40000;
+// Estimated tokens a document run keeps free for organization answers, memories and history after its working files.
+const DOCUMENT_OPTIONAL_TOKENS = 3000;
 // Fail closed if material already assembled into a prompt was removed, expired or replaced.
 // worker_payload also rechecks the live lease, membership and each selected document's ACL.
 function resourceSnapshot(payload: {
@@ -173,6 +181,7 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
             sources: [],
           };
         } else {
+          const contextBudget = tool ? DOCUMENT_CONTEXT_TOKENS : CONTEXT_TOKENS;
           // The user's query precedes optional references so budget trimming never drops it.
           parts.unshift(`คำขอปัจจุบัน: ${query}`);
           if (skill) {
@@ -181,16 +190,26 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
             sources.push(...selected.sources);
           }
           if (tool) {
-            const drafting = documentContext(tool, context.skills as Skill[], registered);
-            parts.push(...drafting.parts);
-            sources.push(...drafting.sources);
             // After the first answer, revisions start from the saved draft and change only what was asked.
             const revising = (context.history as { role: string }[]).some((m) => m.role === 'assistant');
             const current = String(context.session?.draft || '').trim();
-            if (revising && current) parts.push(untrusted('current_draft', current));
+            const revision = revising && current ? untrusted('current_draft', current) : '';
+            // The Skill's own files are already in; the working files fill what is left of the budget, after room
+            // for the saved draft and for the answers, memories and history that follow.
+            const drafting = documentContext(tool, context.skills as Skill[], registered, {
+              loaded: sources.map((s) => s.id),
+              budgetTokens:
+                contextBudget -
+                DOCUMENT_OPTIONAL_TOKENS -
+                estimateTextTokens(parts.join('\n') + revision).estimatedTokens,
+            });
+            parts.push(...drafting.parts);
+            sources.push(...drafting.sources);
+            if (revision) parts.push(revision);
           }
           // Required Skill material and the current request must fit before optional context.
-          if (estimateTextTokens(parts.join('\n')).estimatedTokens > 27000) throw new Error('CONTEXT_LIMIT');
+          if (estimateTextTokens(parts.join('\n')).estimatedTokens > contextBudget)
+            throw new Error('CONTEXT_LIMIT');
           for (const section of found) {
             const id = section.id;
             parts.push(untrusted(id, `${section.title}\n${section.heading}\n${section.text}`));
@@ -254,7 +273,7 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
             .map((m) => `${m.role}: ${m.body}`)
             .join('\n');
           if (history) parts.push(untrusted('บทสนทนาก่อนหน้า', history));
-          const prompt = boundedContext(parts, 27000);
+          const prompt = boundedContext(parts, contextBudget);
           assertSafeText(prompt);
           // Only the run owner's own preferences, behind the same fresh access gate.
           const profile = await checked<MemberProfile | null>(
