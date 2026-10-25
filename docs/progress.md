@@ -1,5 +1,23 @@
 # Progress
 
+## 2026-10-25 · Rollout ของ #26 และ #16 (คุณภาพร่าง ตราครุฑ การจัดหน้า)
+
+- Merge #26 (`40231f7`) แล้ว #16 (`b1fe31a`) หลัง CI ผ่าน ทั้งสองเป็นข้อยกเว้นของ feature freeze ใน ADR 0001
+  ข้อ 11 ที่เจ้าของโครงการอนุมัติ #16 ถูก rebase ซ้อนบน #26 เพื่อให้ diff มีเฉพาะส่วนการจัดหน้า/ส่งออก
+- Supabase (ผู้ดูแลสั่งผ่าน CLI จาก main `b1fe31a` ด้วย `--no-verify-jwt --use-api --import-map`):
+  `worker` เป็น v21 และ `api` เป็น v20 ACTIVE `google-callback` ยัง v14 ไม่มี migration ตรวจเฉพาะรายการ
+  ฟังก์ชัน/เวอร์ชัน/สถานะ ไม่ได้เทียบ source ที่ deploy และไม่ได้เรียก API จริง
+- Homelab: ก่อนแทนที่ ตรวจว่าโค้ดที่รันอยู่ตรงกับ `b9d5f6b` (เทียบ hash ของ `Chat.tsx`, `App.tsx`,
+  `package.json` หลังตัด CR) แล้ว tag image เดิมเป็น `step-ai-webapp:pilot-b9d5f6b` เก็บแหล่งเดิมไว้ที่
+  `~/STeP-AI-Webapp.prev-b9d5f6b` แล้ว build จาก `git archive` ของ `b1fe31a` โดยคง `.local/homelab.env`
+  container `step-ai-pilot-web-1` healthy
+- Smoke ผ่าน HTTPS บน tailnet origin เดิม: shell 200, `/healthz` 200, asset ที่ไม่มี 404, CSP คงอยู่,
+  ไฟล์ฟอนต์ TH Sarabun ให้บริการจากเว็บเอง และ `manifest.json` ของฟอนต์ตรงกับ hash ที่ตรึงไว้ (`8bafe458…`)
+- ย้อนกลับ: แท็ก image `pilot-b9d5f6b` กลับเป็น `pilot` แล้ว `compose up -d --wait` และ deploy `api`/`worker`
+  จาก commit `203cff8` (v19/v20 ก่อนหน้าเทียบเท่ากับโค้ดของ `e381eb8`/`203cff8`)
+- ยังไม่ทำ: ทดสอบร่างจริงด้วยบัญชีจริงและ Gemini (TOR และบันทึกข้อความ) real-account acceptance และ
+  การแก้ `docs/thai-data-formatting.md` ที่ยังไม่ได้นำเข้า (ร่างจะแจ้งเป็นช่องว่าง)
+
 ## 2026-10-25 · Garuda, page layout and Desktop's Word/PDF export
 
 - The draft pane now exports with Desktop's exporter instead of the web's simple Markdown-to-Word:
