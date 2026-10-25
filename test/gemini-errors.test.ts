@@ -15,7 +15,12 @@ function provider(statuses: { count?: number[]; generate?: number[] }) {
     const step = String(url).endsWith(':countTokens') ? 'count' : 'generate';
     calls.push(step);
     const status = statuses[step]?.shift() ?? 200;
-    if (status !== 200) return new Response('{"error":{"status":"UNAVAILABLE"}}', { status });
+    if (status !== 200)
+      return Response.json(
+        // A key-like string stands in for anything sensitive Google might echo; it must never reach the logs.
+        { error: { status: 'UNAVAILABLE', message: 'The model is overloaded. AIzaSyntheticKeyValue12345' } },
+        { status },
+      );
     return Response.json(step === 'count' ? { totalTokens: 10 } : answer);
   }) as typeof fetch;
   return { client: gemini(env, fetcher), calls };
@@ -42,11 +47,24 @@ test('a model still busy after one retry reports AI_BUSY, not a configuration pr
   }
   // Only the step and status are logged: no prompt, answer or key.
   assert.deepEqual(
-    warnings.map((w) => JSON.parse(w)),
-    [{ provider: 'gemini', step: 'count', status: 503 }],
+    warnings.map((w) => {
+      const { ms, ...rest } = JSON.parse(w);
+      assert.equal(typeof ms, 'number');
+      return rest;
+    }),
+    // Both attempts are logged with Google's reason, so overload and deadline failures can be told apart.
+    [false, true].map((retried) => ({
+      provider: 'gemini',
+      step: 'count',
+      status: 503,
+      reason: 'UNAVAILABLE',
+      message: 'The model is overloaded. [key]',
+      retried,
+    })),
   );
+  const logged = warnings.join('');
   assert.ok(
-    !warnings.join('').includes('synthetic-gemini-value') && !warnings.join('').includes('สังเคราะห์'),
+    !logged.includes('synthetic-gemini-value') && !logged.includes('สังเคราะห์') && !logged.includes('AIza'),
   );
 });
 
