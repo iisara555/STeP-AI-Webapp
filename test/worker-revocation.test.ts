@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { processOne } from '../supabase/functions/_shared/worker.ts';
 import { aiService } from '../supabase/functions/_shared/ai.ts';
 import { encrypt } from '../supabase/functions/_shared/crypto.ts';
+import { prepareDocument } from '../packages/harness-core/src/desktop-workflows.ts';
 
 // Every Supabase, Google and AI request is intercepted; only synthetic data is used.
 function barrier() {
@@ -10,7 +11,10 @@ function barrier() {
   const wait = new Promise<void>((resolve) => (release = resolve));
   return { wait, release };
 }
-async function fixture(kind: 'chat' | 'document' | 'receipt' = 'chat') {
+async function fixture(
+  kind: 'chat' | 'document' | 'receipt' = 'chat',
+  input: { message?: string; skill?: string; registered?: boolean; documents?: boolean } = {},
+) {
   const values: Record<string, string> = {
     SUPABASE_URL: 'https://synthetic.supabase.co',
     SUPABASE_SECRET_KEY: 'synthetic-service-value',
@@ -28,7 +32,8 @@ async function fixture(kind: 'chat' | 'document' | 'receipt' = 'chat') {
     ai_provider: 'gemini',
     input: {
       providerConsent: aiService(env).consentId,
-      message: 'Please rewrite the synthetic example.',
+      message: input.message ?? 'Please rewrite the synthetic example.',
+      ...(input.skill ? { skill: input.skill } : {}),
       useMemory: true,
       documentIds: [] as string[],
     },
@@ -51,8 +56,21 @@ async function fixture(kind: 'chat' | 'document' | 'receipt' = 'chat') {
       source_version: 'test',
       provenance: {},
     })),
-    skills: [],
-    documents: kind === 'chat' ? [doc] : [],
+    skills:
+      input.skill && input.registered !== false
+        ? [
+            {
+              id: crypto.randomUUID(),
+              skill_key: input.skill,
+              title: 'Synthetic Skill',
+              description: '',
+              instructions: 'SYNTHETIC_SKILL_MARKER',
+              metadata: {},
+              source_version: 'test',
+            },
+          ]
+        : [],
+    documents: kind === 'chat' && input.documents !== false ? [doc] : [],
     document: kind === 'chat' ? null : doc,
     prepared_document:
       kind === 'receipt' ? { ...doc, id: crypto.randomUUID(), object_path: 'synthetic/derivative' } : null,
@@ -256,4 +274,46 @@ test('cancellation before the receipt read prevents service-role Storage access'
   assert.equal(downloads, 0);
   assert.equal(f.state.sent.length, 0);
   assert.ok('code' in result);
+});
+
+// TOR, memos and proposals mention budget or procurement, which used to trigger the "no STeP document" reply
+// before the form's Skill was used, so the draft never reached the AI.
+for (const [tool, variant] of [
+  ['tor', 'service'],
+  ['tor', 'goods'],
+  ['memo', 'approval'],
+  ['letter', 'external'],
+  ['project', 'proposal'],
+  ['minutes', 'minutes'],
+] as const)
+  test(`the ${tool} (${variant}) form draft reaches the AI with its Skill`, async () => {
+    const work = prepareDocument(tool, {}, variant);
+    const f = await fixture('chat', { message: work.message, skill: work.skillKey, documents: false });
+    await f.run();
+    assert.equal(f.state.sent.length, 2, 'countTokens and generateContent');
+    assert.ok(
+      f.state.sent.every((body) => body.includes('SYNTHETIC_SKILL_MARKER')),
+      'the Skill is used',
+    );
+    assert.equal((f.state.finishes[0].answer as { text: string }).text, 'Synthetic answer');
+  });
+
+test('a Skill name that is not registered does not lift the no-document reply', async () => {
+  const work = prepareDocument('tor', {}, 'service');
+  const f = await fixture('chat', {
+    message: work.message,
+    skill: 'not-a-registered-skill',
+    registered: false,
+    documents: false,
+  });
+  await f.run();
+  assert.equal(f.state.sent.length, 0);
+  assert.match((f.state.finishes[0].answer as { text: string }).text, /ยังไม่พบเอกสารองค์กร/);
+});
+
+test('a STeP question with no matching document and no Skill still gets the no-document reply', async () => {
+  const f = await fixture('chat', { message: 'ขั้นตอนเบิกค่าเดินทางของ STeP', documents: false });
+  await f.run();
+  assert.equal(f.state.sent.length, 0);
+  assert.match((f.state.finishes[0].answer as { text: string }).text, /ยังไม่พบเอกสารองค์กร/);
 });

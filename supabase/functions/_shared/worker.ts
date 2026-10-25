@@ -152,19 +152,19 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
           /(?:STeP|สเต็ป|AFP|อุทยาน|มหาวิทยาลัย|เบิก|ลาพัก|ลาป่วย|ลาคลอด|พัสดุ|งบประมาณ|นโยบาย|ขั้นตอนงาน|QM-|QP-|WI-|FM-)/i.test(
             query,
           );
-        if (orgQuestion && !found.length && !parts.length) {
+        const skill = chooseSkill(
+          (context.skills as Skill[]).filter((s) => !s.metadata.developerOnly && !s.metadata.webUnsupported),
+          query,
+          job.input.skill || undefined,
+        );
+        // A chosen, registered Skill (every document form sends one) is guided drafting, not a question to answer
+        // from documents. An unknown Skill name does not lift the rule.
+        if (orgQuestion && !found.length && !parts.length && !(job.input.skill && skill)) {
           result = {
             text: 'ยังไม่พบเอกสารองค์กรที่ยืนยันเรื่องนี้ครับ กรุณาแนบเอกสารที่เกี่ยวข้อง หรือให้ผู้ดูแลนำเข้าเอกสาร STeP เพิ่มก่อน',
             sources: [],
           };
         } else {
-          const skill = chooseSkill(
-            (context.skills as Skill[]).filter(
-              (s) => !s.metadata.developerOnly && !s.metadata.webUnsupported,
-            ),
-            query,
-            job.input.skill || undefined,
-          );
           // The user's query precedes optional references so budget trimming never drops it.
           parts.unshift(`คำขอปัจจุบัน: ${query}`);
           if (skill) {
