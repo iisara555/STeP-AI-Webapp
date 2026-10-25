@@ -1,5 +1,32 @@
 # Progress
 
+## 2026-10-25 · Rollout คู่มือ TOR/หนังสือราชการและปิด PR ที่ค้าง
+
+- Harness #235 merge เป็น `2874bf1` หลัง CI ผ่านทุกระบบ (รวม Windows และ macOS Electron)
+  และ Webapp #32 merge เป็น `4844e2a` หลัง Verify PWA ผ่านครบ รวม engine isolation บน Linux 3/3,
+  unit/API/PWA 94/94, PostgreSQL 29/29, engine pin, reference, check, build และ Playwright 76/76
+  ทดสอบหน้าเครื่องมือเอกสารซ้ำหลังจัดลำดับไฟล์รอบสุดท้ายบน Windows ผ่าน 18/18
+- Deploy `api` v24 และ `worker` v25 จาก main `4844e2a` ด้วย CLI 2.122.0, `--no-verify-jwt --use-api`
+  และ shared import map ทั้งสอง ACTIVE เทียบ source ที่ deploy กับ main แล้วตรงทุกไฟล์ runtime
+  (API 25 ไฟล์, worker 26 ไฟล์; ยกเว้น type-only `contracts.ts`) callback ยัง v14 ไม่มี migration/secret เปลี่ยน
+- นำเข้า Harness pack `2874bf1` ให้ STeP แบบ atomic: 108 sources / 48 Skills ตรวจ body/instructions
+  และ source version ทุกรายการกับ pack แล้วตรงกัน ก่อนนำเข้ามีสำรองข้อมูลเดิมจริง 106 sources / 48 Skills
+  ไว้เฉพาะ `.exports/production-before.json` ที่ Git ignore คีย์ operator อยู่เฉพาะใน process และล้างหลังใช้
+- หน้าเว็บ build บน homelab จาก tree ของ `e5a816c` (ตรงกับ PR #32 ที่ merge แล้ว) และสลับ container ใหม่
+  `step-ai-pilot-web-1` healthy โดยคง `.local/homelab.env` และ origin HTTPS ของ tailnet เดิม
+  image เก่าเก็บเป็น `step-ai-webapp:pilot-pre32-1a857b7` และ source เดิมอยู่ที่
+  `~/STeP-AI-Webapp.prev-pre32-1a857b7` ไม่ลบของเดิม
+- Smoke หลัง rollout: hosting/CSP/PWA/cache/callback/missing assets ผ่าน, API origin ที่อนุญาตได้ 401
+  เมื่อไม่มี identity, origin อื่นได้ 403 และ worker ไม่มี dispatch secret ได้ 403
+  Chromium ผ่าน HTTPS จริงทั้ง desktop/mobile: anonymous protected route ไป login, แบบฟอร์มเตรียมร่างส่วนตัว,
+  Word มีฟอนต์ฝังครบสี่ไฟล์และตราครุฑ 1.5 ซม., consent ก่อนส่ง AI, ไม่มี page error และไม่มี external request
+  ใช้เฉพาะข้อมูลสังเคราะห์ใน demo ไม่เรียก Google/Gemini จริง
+- ย้อนกลับ: tag image ข้างต้นกลับเป็น `pilot` แล้ว compose up แบบ `--no-build --wait`, deploy API/worker
+  จาก `1a857b7` และ import private backup ด้วย operator หากต้องย้อน pack ไม่มี schema เปลี่ยน
+- ข้อจำกัดที่ยังอยู่: ยังไม่ได้ทำ real-account acceptance หลัง rollout, ตรวจคุณภาพร่างด้วย Gemini หรือไฟล์ใน Word จริง
+  `docs/thai-data-formatting.md` ยังไม่ถูก export และ TOR ยาวอาจข้ามแหล่งอ้างอิงทั่วไปโดยแจ้งในผลตรวจ
+  การเปิดให้พนักงาน pilot ยังต้องทำตามเงื่อนไขใน ADR 0001
+
 ## 2026-10-25 · เชื่อมคู่มือ TOR และหนังสือราชการจาก Harness ที่ merge แล้ว
 
 - Harness #233/#234 รวมแล้ว และ #235 merge เป็น `2874bf1` หลัง CI ทุกระบบผ่าน ไม่มี PR เปิดค้างในทั้งสอง repo
