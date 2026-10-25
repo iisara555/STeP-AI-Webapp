@@ -97,6 +97,23 @@ test('a drafted document lands in the workbench while the review stays in the co
   await expect(draft).toHaveValue(/# ขอบเขตของงาน \(ตัวอย่าง\)/);
   await expect(draft).not.toHaveValue(/ผลตรวจตัวอย่าง|document_review/);
 });
+test('the owning unit starts as the employee organization and stays editable', async ({ page }) => {
+  await page.goto('/?demo=1');
+  await menu(page, 'เครื่องมือร่างเอกสาร');
+  const unit = page.getByRole('textbox', { name: /^หน่วยงานเจ้าของเรื่อง/ });
+  await expect(unit).toHaveValue('STeP · ตัวอย่าง');
+  await expect(page.getByText('ค่าเริ่มต้นจากองค์กรของคุณ', { exact: false })).toBeVisible();
+  // The organization alone does not make a request; something about the work must be filled in.
+  await expect(page.getByRole('button', { name: 'เตรียมร่างในบทสนทนา' })).toBeDisabled();
+  await unit.fill('STeP · ตัวอย่าง ฝ่ายสังเคราะห์');
+  await page
+    .getByRole('textbox', { name: 'ชื่อเอกสาร / ชื่อโครงการ', exact: true })
+    .fill('ครุภัณฑ์สังเคราะห์');
+  await page.getByRole('button', { name: 'เตรียมร่างในบทสนทนา' }).click();
+  await expect(page.getByRole('textbox', { name: 'ข้อความถึง AI' })).toHaveValue(
+    /STeP · ตัวอย่าง ฝ่ายสังเคราะห์/,
+  );
+});
 test('media studio keeps prompt preparation local and offers no fabricated image result', async ({
   page,
 }) => {

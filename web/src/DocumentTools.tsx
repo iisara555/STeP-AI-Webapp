@@ -9,11 +9,19 @@ import { skillTitle } from '../../packages/harness-core/src/skill-labels.ts';
 import type { ViewProps } from './App.tsx';
 
 export function DocumentTools({
+  data,
+  tenant,
   fail,
   onPrepare,
 }: ViewProps & { onPrepare: (work: PreparedWork) => Promise<void> }) {
+  // The owning unit is the employee's own organization unless they name a department or another unit.
+  const organization = data.tenants.find((t) => t.id === tenant)?.name.trim() || '';
+  const defaults = (toolId: string): Record<string, string> =>
+    organization && DOCUMENT_TOOLS.find((t) => t.id === toolId)?.fields.some((f) => f.key === 'unit')
+      ? { unit: organization }
+      : {};
   const [id, setId] = useState('tor');
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<Record<string, string>>(() => defaults('tor'));
   const [variant, setVariant] = useState('service');
   const [busy, setBusy] = useState(false);
   const tool = DOCUMENT_TOOLS.find((t) => t.id === id)!;
@@ -35,7 +43,7 @@ export function DocumentTools({
               onClick={() => {
                 setId(t.id);
                 setVariant(t.variants[0].id);
-                setValues({});
+                setValues(defaults(t.id));
               }}
             >
               {t.title}
@@ -100,7 +108,13 @@ export function DocumentTools({
                     onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
                   />
                 )}
-                {f.hint && <small className="muted">{f.hint}</small>}
+                {f.key === 'unit' && organization && values.unit === organization ? (
+                  <small className="muted">
+                    ค่าเริ่มต้นจากองค์กรของคุณ เติมฝ่ายหรือแก้เป็นหน่วยงานอื่นได้
+                  </small>
+                ) : (
+                  f.hint && <small className="muted">{f.hint}</small>
+                )}
               </label>
             ))}
           </div>
@@ -108,7 +122,13 @@ export function DocumentTools({
             ช่องที่ยังไม่มีหลักฐานจะคง “รอยืนยัน” ร่างนี้ยังไม่ใช่การอนุมัติ การออกเลขหนังสือ หรือการลงนาม
             ฟอร์มจะถูกบันทึกในบทสนทนาส่วนตัวเมื่อกดเตรียมงาน
           </p>
-          <button className="primary" disabled={busy || !Object.values(values).some((v) => v.trim())}>
+          <button
+            className="primary"
+            disabled={
+              busy ||
+              !Object.entries(values).some(([key, v]) => v.trim() && !(key === 'unit' && v === organization))
+            }
+          >
             {busy ? <Busy label="กำลังเตรียมร่าง" /> : 'เตรียมร่างในบทสนทนา'}
           </button>
         </form>
