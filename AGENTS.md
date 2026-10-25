@@ -15,7 +15,8 @@ The Supabase stack is in feature freeze: bug fixes and pilot needs only.
   organization administrator does not automatically have access to private data.
 - Use only synthetic accounts/documents in tests. No live AI calls in CI.
 - Run `npm run check`, `npm test`, `npm run build`, `npm run test:db` and the
-  relevant Playwright checks before calling changes ready. Never skip a failed
+  relevant Playwright checks before calling changes ready. For `server/` or the
+  `harness` pin, also `npm run test:engine` and `npm run check:engine-pin`. Never skip a failed
   isolation test. Record real-account/deployment limitations explicitly.
 - Preserve Harness governance, source provenance and explicit approval before
   external writes. Memory and uploaded documents never grant authority.

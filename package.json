@@ -5,7 +5,8 @@
   "type": "module",
   "workspaces": [
     "web",
-    "packages/harness-core"
+    "packages/harness-core",
+    "server"
   ],
   "engines": {
     "node": ">=24"
@@ -13,10 +14,13 @@
   "scripts": {
     "dev": "npm run dev -w web",
     "build": "npm run build -w web",
-    "check": "tsc --noEmit && prettier --check .",
+    "check": "tsc --noEmit && node scripts/check-server-types.mjs && prettier --check .",
+    "check:engine-pin": "node scripts/check-engine-pin.mjs",
     "format": "prettier --write .",
     "test": "tsx --test test/*.test.ts",
     "test:db": "tsx --test --test-concurrency=1 test/database/*.test.ts",
+    "test:engine": "tsx --import ./server/src/register.mjs --test server/test/*.test.ts",
+    "engine:ask": "tsx --import ./server/src/register.mjs server/src/ask.ts",
     "test:e2e": "playwright test",
     "harness:export": "node scripts/export-harness.mjs",
     "bootstrap": "tsx scripts/bootstrap.ts",

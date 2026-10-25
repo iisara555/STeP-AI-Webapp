@@ -11,15 +11,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run check:engine-pin
       - run: npm run harness:reference
       - run: npm test
       - run: npm run test:db
+      - run: npm run test:engine
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

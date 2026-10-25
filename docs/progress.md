@@ -1,5 +1,24 @@
 # Progress
 
+## 2026-10-25 · ระยะ 2: engine ของ Desktop รันแบบ headless
+
+- เพิ่ม submodule `harness/` ที่ `desktop-v0.6.20` (`90ee71c`) และ `server/` ที่สร้าง `WorkService` ของ Desktop
+  โดยไม่มี Electron ไม่ได้ copy หรือแก้โค้ด engine เลย ผู้ใช้แต่ละคนมี SQLite ของตัวเองในโฟลเดอร์ 0700
+- เกณฑ์ผ่านของ spike: คำถามพนักงานชุดเดิม **61/61** ผ่าน engine ทั้งเส้น (router → ความรู้องค์กร → prompt)
+  โดยเอกสารอันดับแรกที่จะส่งให้ AI ตรงกับคำตอบที่คาดไว้ ส่วนข้อที่ไม่ควรมีเอกสารก็ไม่มี ใช้ adapter สังเคราะห์
+  ไม่เรียก AI จริง ทดสอบแล้วว่าตัวตรวจจับความผิดพลาดได้จริง (ตัวตรวจที่ผิดได้ 11/61)
+- server profile: เปิด privacy check ส่วน authority check ใช้ค่าเดียวกับ Desktop (ปิด) ถ้าเปิด authority
+  คำถาม "เอกสาร WI ฉบับไหนถูกยกเลิกแล้ว" จะติด `AUTHORITY_REVIEW_REQUIRED` ต้องตัดสินว่าจะเปิดหรือไม่ก่อนระยะ 3
+- `@github/copilot-sdk` ถูกแทนด้วย module ที่ไม่ยอมเริ่มทำงาน (Copilot ปิดบน server) dependencies เพิ่มแค่
+  `mdast-util-from-markdown` 2.0.2 และ `@xmldom/xmldom` 0.8.15 เวอร์ชันเดียวกับ Desktop
+- `npm run engine:ask` ให้เจ้าของโครงการลองบน homelab กับ endpoint ที่เข้ากับ OpenAI ได้ ทดสอบกับ endpoint ปลอม
+  ในเครื่องแล้วว่าใช้ `CompatibleAdapter` ของ Desktop ได้ทั้งเส้น ยังไม่ได้ลองกับ provider จริง
+- CI: checkout submodule, `check:engine-pin` (ต้องเป็น tag `desktop-v*`), `test:engine` และ type check ของ `server/`
+  (diagnostics ในไฟล์ engine ปล่อยให้ CI ของ Desktop ที่มี dependencies ครบเป็นคนตรวจ)
+- Validation (cloud container, Node 22.22.0): `npm run check`, `npm test` 62/62, `npm run test:db` 29/29, `npm run build`,
+  `npm run test:engine` 3/3, `check:engine-pin` ผ่าน และลองให้ pin ผิดแล้วตรวจจับได้ Playwright ไม่ได้รัน (ไม่มี UI เปลี่ยน)
+- ยังไม่ทำ: gateway, process แยกต่อผู้ใช้, tool host ของ server, router proxy, ลองกับ provider จริงบน homelab
+
 ## 2026-10-25 · ทิศทางใหม่: engine ของ Desktop บน server องค์กร
 
 - บันทึกการตัดสินใจใน [ADR 0001](adr/0001-server-engine-direction.md): เว็บเป็นตัวกลาง งานจริงรันบน engine ของ Desktop
