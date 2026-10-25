@@ -13,6 +13,17 @@
   ไม่มีการแก้ 4 ข้อล้ม มีการแก้ผ่านทั้งหมด; `npm run check`, `npm test`, `npm run test:db`, `npm run build`
 - ต้อง deploy `worker` (และ `api` ถ้าต้องการให้ตรงกัน) จึงจะมีผลบน homelab ยังไม่ได้ deploy
 
+## 2026-10-25 · รวมบันทึกจาก PR ที่ค้าง
+
+- นำบันทึก rollout จาก #9 (#7/#8, 2026-10-23), #13 (#12, 2026-10-24) และ #15 (Gemini free tier, 2026-10-24)
+  มาใส่ตามลำดับวันที่ เนื้อหาเดิมไม่แก้ PR เหล่านั้น conflict กับ main เพราะเพิ่มบันทึกไว้บนสุดของไฟล์เดียวกัน
+- แก้คู่มือ deploy ตาม #9: คำสั่ง deploy ต้องมี `--use-api --import-map supabase/functions/deno.json`
+  และชื่อ secret ของ Picker คือ `GOOGLE_PROJECT_NUMBER` ตามที่ `supabase/functions/_shared/api.ts` อ่านจริง
+  (คู่มือเดิมเขียน `GOOGLE_PICKER_APP_ID`) ถ้าเคยตั้ง secret ด้วยชื่อเดิม ต้องตั้ง `GOOGLE_PROJECT_NUMBER` เพิ่ม
+- ย้ายกติกา "ยืนยันการเขียนข้อมูลภายนอกเป็นรายครั้ง" จาก #19 มาเป็น [ADR 0002](adr/0002-confirm-each-external-write.md)
+  ส่วนแผน web-only parity ใน #19 ถูกแทนด้วย ADR 0001 แล้ว
+- เปลี่ยนเฉพาะเอกสาร ไม่มี deploy หรือ secret
+
 ## 2026-10-25 · Protected routes reconciled with the Desktop-parity shell and draft protection
 
 - Merged main `7aaa7d6` (through #23) into the protected-route branch. The shell keeps its lazy-loaded
@@ -124,6 +135,41 @@
   status mapping), 29 PostgreSQL tests and 36 Playwright tests. Requires redeploying the worker (and the
   API for the shared code); not yet done.
 
+## 2026-10-24 · Gemini free-tier trial enabled
+
+- Merged #14 and deployed API/worker from main `b9d5f6b` (CLI 2.122.0, `--use-api`, shared import map,
+  `verify_jwt` false); rebuilt the homelab frontend from the same commit. Rollback image:
+  `step-ai-webapp:pilot-408604d`.
+- The operator created a Google AI Studio key in a project without billing and set `GEMINI_API_KEY` from
+  their own terminal; the key never passed through the agent session. Server settings now select
+  `AI_PROVIDER=gemini`, `GEMINI_TIER=free` and `GEMINI_MODEL=gemini-3.6-flash` (a stable model the
+  pricing page lists as free of charge). Values were checked by their SHA-256 digests only.
+- Settings were switched only after the disclosure build was live, so every consent screen names the
+  free AI Studio tier and says Google may use what is sent; use synthetic or non-confidential material.
+- Smoke: API 401 for the homelab origin, 403 for a foreign origin, worker 403 without its secret; hosting
+  smoke passed and the served bundle contains the free-tier notice.
+- Not yet accepted: the tenant budget/rates (set by the owner in Settings), a real chat answer, receipt
+  OCR and document indexing. Embedding free-tier availability for `gemini-embedding-2` is unconfirmed.
+
+## 2026-10-24 · Production rollout of #12 (profile, assistant and answer style)
+
+- Merged #12 after CI passed. Before changing anything, hosted migrations matched the 12 in the repo and
+  the deployed API source matched main file-for-file (only the type-only `contracts.ts` differs).
+- Applied `20261023120000_member_profiles` through the Supabase connector because the CLI had no
+  database password in this session; the history row was then renamed from the connector's timestamp
+  to `20261023120000` so `supabase migration list` matches the repo. Verified on the hosted database:
+  RLS on with read/insert/update policies, no `anon` grants, authenticated updates limited to the
+  data columns (not `tenant_id`/`user_id`), memory kinds include `project`, 0 profile rows. The
+  security advisor raised nothing for the new table.
+- Deployed API and worker version 14 from main `408604d` with Supabase CLI 2.122.0 (`--use-api`,
+  shared import map, `verify_jwt` false). google-callback was unchanged and not redeployed. Smoke: API
+  401 for the homelab origin, 403 for a foreign origin, worker 403 without its secret.
+- Rebuilt the homelab frontend from the same commit; it is healthy and hosting smoke passed over HTTPS.
+  The previous image is tagged `step-ai-webapp:pilot-a78b769` for rollback. The synthetic demo saves a
+  profile and shows it in the sidebar on the live origin.
+- Not yet accepted: saving a profile with a real Google account and a real AI answer using the chosen
+  style.
+
 ## 2026-10-24 · Profile, assistant, answer style and memory types from Desktop
 
 - Settings opens on โปรไฟล์และผู้ช่วย, as Desktop's ทั่วไป: the 56 Desktop avatar drawings (53 offered),
@@ -192,6 +238,25 @@
   `web/PRODUCT.md` and `web/DESIGN.md` record the product and the inherited Desktop design.
 - Not done here: no deployment, no real-account check. Desktop-only surfaces (tabs for เว็บ/งานเบื้องหลัง,
   model picker, งานตั้งเวลา, avatar pictures) are not imitated because the web has no such capability.
+
+## 2026-10-23 · Function and homelab rollout of #7/#8
+
+- Merged #7 and #8. API and worker were deployed from main `8cd4a23` with Supabase
+  CLI 2.122.0 (`--use-api`, shared import map); both are ACTIVE with `verify_jwt`
+  false. Deployed source matches main file-for-file except the type-only
+  `contracts.ts`. google-callback was unchanged and not redeployed.
+- The first CLI attempt without `--import-map` failed server-side bundling on `zod`
+  and changed nothing; the deployment guide now passes the import map.
+- The deployment guide named the Picker project-number secret `GOOGLE_PICKER_APP_ID`, but the API
+  reads `GOOGLE_PROJECT_NUMBER`; the guide now uses the code's name. If the secret was set under the
+  old name, the operator must add it as `GOOGLE_PROJECT_NUMBER` before Picker can work.
+- Runtime smoke: API 401 for the homelab origin, 403 for a foreign origin, worker 403
+  without its secret; function logs show clean boots.
+- The homelab frontend was rebuilt from the same commit and is healthy; hosting smoke
+  passed and the served bundle contains `AI_EMPTY_REPLY`. The previous image is kept as
+  `step-ai-webapp:pilot-5f7d059` for rollback.
+- Not yet accepted: a successful OpenRouter sandbox/chat reply after this deployment,
+  Workspace connection, Gemini, worker dispatch through Vault and member denial.
 
 ## 2026-10-23 · Homelab origin, first owner and OpenRouter empty replies
 

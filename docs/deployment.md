@@ -38,10 +38,15 @@ With the official Supabase CLI installed:
 npx supabase login
 npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase db push
-npx supabase functions deploy api --no-verify-jwt
-npx supabase functions deploy worker --no-verify-jwt
-npx supabase functions deploy google-callback --no-verify-jwt
+npx supabase functions deploy api worker google-callback --no-verify-jwt \
+  --use-api --import-map supabase/functions/deno.json
 ```
+
+The shared `supabase/functions/deno.json` import map must be passed explicitly;
+without it, server-side bundling fails to resolve `zod` and the previous version
+keeps serving. The command above is for the first deployment. For updates, name
+only the functions whose source changed (for example `deploy api worker` with the
+same flags), then compare the deployed source with the merged commit.
 
 The initial project also has provider/Vault changes deployed outside the earlier
 checkout. This source reconciles those changes with the administrator sandbox;
@@ -78,7 +83,7 @@ local environment file. Never put them in `VITE_` or a committed SQL migration.
 | `GOOGLE_WORKSPACE_CLIENT_ID`     | Web OAuth client for Workspace                                      |
 | `GOOGLE_WORKSPACE_CLIENT_SECRET` | Its server-side secret                                              |
 | `GOOGLE_PICKER_API_KEY`          | Picker browser key restricted to actual origin/APIs                 |
-| `GOOGLE_PICKER_APP_ID`           | Google Cloud project number, same OAuth project                     |
+| `GOOGLE_PROJECT_NUMBER`          | Google Cloud project number (Picker app ID), same OAuth project     |
 
 Supabase provides URL, service-role and anon keys to functions automatically.
 Operator scripts read local `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or service
