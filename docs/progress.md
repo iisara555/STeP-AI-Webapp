@@ -22,9 +22,60 @@
   พร้อมคงหน่วยงานอื่นที่ผู้ใช้ระบุและแจ้งความขัดแย้ง ไม่เติมช่องหน่วยงานขึ้นมาเอง
 - Validation: `check`, `build`, unit/API/PWA 91/91, PostgreSQL 29/29, engine 3/3 และ engine pin `desktop-v0.6.20`
   ผ่าน; targeted document tests 25/25 ผ่าน
-- Playwright 76 เคสเริ่มไม่ได้เพราะ environment ไม่มี Chromium และการดาวน์โหลดจาก Playwright CDN ถูก policy ตอบ 403;
-  จึงยังต้องรัน browser acceptance ใน CI/เครื่องที่มี browser ก่อน deploy หน้าเว็บใหม่
-- ต้อง rebuild/deploy frontend เท่านั้น ไม่มี migration; worker/API ไม่ได้เปลี่ยน
+- หลัง merge main รันซ้ำบน Windows: check, build, unit/API/PWA 96/96, PostgreSQL 29/29, engine pin และ
+  Playwright desktop/mobile 76/76 ผ่าน; engine isolation ล้มเฉพาะ POSIX mode 0700 ที่ Windows ไม่รองรับ
+  (ข้อจำกัดเดิม) และผ่าน 3/3 ใน Linux CI ของ PR
+- ต้อง rebuild/deploy frontend และ deploy `worker` (และ `api`) ด้วย เพราะ `document-contract.ts` และ
+  `documentRequest` ที่เพิ่ม organization reference อยู่ในเส้นทางร่างของ worker ไม่มี migration
+- Merge main หลัง #32/#33 เข้ามาแล้ว (คู่มือ TOR content-by-type และ saraban guide) ขัดแย้งเฉพาะ progress นี้
+
+## 2026-10-25 · Rollout คู่มือ TOR/หนังสือราชการและปิด PR ที่ค้าง
+
+- Harness #235 merge เป็น `2874bf1` หลัง CI ผ่านทุกระบบ (รวม Windows และ macOS Electron)
+  และ Webapp #32 merge เป็น `4844e2a` หลัง Verify PWA ผ่านครบ รวม engine isolation บน Linux 3/3,
+  unit/API/PWA 94/94, PostgreSQL 29/29, engine pin, reference, check, build และ Playwright 76/76
+  ทดสอบหน้าเครื่องมือเอกสารซ้ำหลังจัดลำดับไฟล์รอบสุดท้ายบน Windows ผ่าน 18/18
+- Deploy `api` v24 และ `worker` v25 จาก main `4844e2a` ด้วย CLI 2.122.0, `--no-verify-jwt --use-api`
+  และ shared import map ทั้งสอง ACTIVE เทียบ source ที่ deploy กับ main แล้วตรงทุกไฟล์ runtime
+  (API 25 ไฟล์, worker 26 ไฟล์; ยกเว้น type-only `contracts.ts`) callback ยัง v14 ไม่มี migration/secret เปลี่ยน
+- นำเข้า Harness pack `2874bf1` ให้ STeP แบบ atomic: 108 sources / 48 Skills ตรวจ body/instructions
+  และ source version ทุกรายการกับ pack แล้วตรงกัน ก่อนนำเข้ามีสำรองข้อมูลเดิมจริง 106 sources / 48 Skills
+  ไว้เฉพาะ `.exports/production-before.json` ที่ Git ignore คีย์ operator อยู่เฉพาะใน process และล้างหลังใช้
+- หน้าเว็บ build บน homelab จาก tree ของ `e5a816c` (ตรงกับ PR #32 ที่ merge แล้ว) และสลับ container ใหม่
+  `step-ai-pilot-web-1` healthy โดยคง `.local/homelab.env` และ origin HTTPS ของ tailnet เดิม
+  image เก่าเก็บเป็น `step-ai-webapp:pilot-pre32-1a857b7` และ source เดิมอยู่ที่
+  `~/STeP-AI-Webapp.prev-pre32-1a857b7` ไม่ลบของเดิม
+- Smoke หลัง rollout: hosting/CSP/PWA/cache/callback/missing assets ผ่าน, API origin ที่อนุญาตได้ 401
+  เมื่อไม่มี identity, origin อื่นได้ 403 และ worker ไม่มี dispatch secret ได้ 403
+  Chromium ผ่าน HTTPS จริงทั้ง desktop/mobile: anonymous protected route ไป login, แบบฟอร์มเตรียมร่างส่วนตัว,
+  Word มีฟอนต์ฝังครบสี่ไฟล์และตราครุฑ 1.5 ซม., consent ก่อนส่ง AI, ไม่มี page error และไม่มี external request
+  ใช้เฉพาะข้อมูลสังเคราะห์ใน demo ไม่เรียก Google/Gemini จริง
+- ย้อนกลับ: tag image ข้างต้นกลับเป็น `pilot` แล้ว compose up แบบ `--no-build --wait`, deploy API/worker
+  จาก `1a857b7` และ import private backup ด้วย operator หากต้องย้อน pack ไม่มี schema เปลี่ยน
+- ข้อจำกัดที่ยังอยู่: ยังไม่ได้ทำ real-account acceptance หลัง rollout, ตรวจคุณภาพร่างด้วย Gemini หรือไฟล์ใน Word จริง
+  `docs/thai-data-formatting.md` ยังไม่ถูก export และ TOR ยาวอาจข้ามแหล่งอ้างอิงทั่วไปโดยแจ้งในผลตรวจ
+  การเปิดให้พนักงาน pilot ยังต้องทำตามเงื่อนไขใน ADR 0001
+
+## 2026-10-25 · เชื่อมคู่มือ TOR และหนังสือราชการจาก Harness ที่ merge แล้ว
+
+- Harness #233/#234 รวมแล้ว และ #235 merge เป็น `2874bf1` หลัง CI ทุกระบบผ่าน ไม่มี PR เปิดค้างในทั้งสอง repo
+  ก่อนเปิด PR ของชุดแก้นี้ ไม่แก้ checkout Desktop และไม่เลื่อน engine pin จาก `desktop-v0.6.20`
+- แก้งานค้างที่อ้าง `WORKING_FILE_CHARS` โดยยังไม่ประกาศค่า (ทำให้ document tests ล้ม 6 ข้อ) และให้เส้นทาง
+  Skill กับเครื่องมือร่างอ่านไฟล์ประกอบได้ถึง 16,000 ตัวอักษร ส่วนแชตทั่วไปยัง 6,000 ไฟล์ที่ยาวกว่ายังแจ้งว่าบางส่วน
+- เพิ่มเฉพาะ path ของ `tor-content-by-type.md` ให้ TOR และ `saraban-writing-guide.md` ให้บันทึก/หนังสือ
+  ตาม upstream พร้อม provenance ไม่มีเนื้อหาคู่มือหรือเอกสารองค์กรเข้า Git คู่มือ TOR ได้ลำดับก่อนแหล่งอ้างอิงทั่วไป
+  ภายในงบบริบทเดิม ไฟล์ที่ไม่พอยังต้องแจ้งใน `document_review` เพดานจริง 32,000 token ยังตรวจด้วย `countTokens`
+- ตรวจ pack ใหม่แบบ private: 108 sources / 48 Skills ที่ `2874bf1`, retrieval 61/61 และ buyer identity 3/3
+  ผ่าน worker จริงด้วย provider จำลองพบว่าคู่มือใหม่ของ TOR/บันทึก/หนังสือเข้าครบและครั้งเดียว TOR คอมพิวเตอร์ AI
+  ยังข้าม `tor-drafting-guide.md` และ `procurement-source-map.md` เมื่อบริบทเต็ม ส่วนบันทึก/หนังสือไม่ข้าม
+- แก้ `check-server-types.mjs` ให้เรียก compiler ด้วย Node โดยตรงแทน `npx` ที่ spawn ไม่ได้บน Windows
+  และรายงานข้อผิดพลาดการเริ่ม process แทนการล้มตอนอ่าน stdout
+- Validation: check, build, unit/API/PWA 94/94, PostgreSQL 29/29 และ Playwright desktop/mobile 76/76
+  ใช้ข้อมูลสังเคราะห์ ไม่เรียก AI/Google จริง engine pin ผ่าน แต่ engine isolation test บน Windows ยังล้มที่
+  POSIX directory mode (Windows ไม่รองรับ 0700 แบบ Linux) จึงต้องผ่าน Linux CI ก่อน merge ห้ามข้าม isolation test
+- ยังต้อง rollout: deploy API/worker, rebuild หน้าเว็บ homelab และ import pack ใหม่ ก่อนหน้านี้ตรวจ source ของ
+  worker v24 แล้วตรง main `1a857b7` ทุกไฟล์ที่ใช้งาน (ยกเว้น type-only contracts) มี pack เดิมสำหรับย้อนกลับ
+  `docs/thai-data-formatting.md` ยังไม่ถูก export และยังต้องทดสอบคุณภาพร่างกับบัญชีจริงหลัง deploy
 
 ## 2026-10-25 · หน่วยงานเจ้าของเรื่องเริ่มเป็นองค์กรของผู้ใช้
 

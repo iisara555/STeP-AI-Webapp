@@ -16,6 +16,11 @@ Copied from `iisara555/STeP-AI-Harness` at
   document presentation presets and internal-media Prompt engine. Imports use explicit
   `.ts` extensions for web/server tooling. `starters.ts` uses Thai labels directly and
   exposes the team keys; it never uses team selection for authorization.
+- `desktop/document-tools.ts` additionally takes the TOR content-by-type reference from Harness #234
+  (`83cd2a7`) and the memo/letter writing reference from #235 (`1df44e0`). No reference bodies are
+  vendored; the operator imports those working files separately with their source commit.
+  The web reads the TOR content guide before the other optional references so a long worked example
+  does not use up its remaining context budget first; skipped references remain explicit in the review.
 - `desktop/document-contract.ts` is `documentToolRule` from upstream `desktop/electron/document-tools.ts`,
   with the public STeP organization reference added to the trusted drafting contract. The web's context
   assembly around it is in `../src/document-context.ts`.

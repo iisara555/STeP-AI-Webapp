@@ -25,6 +25,7 @@ const common = [field('title', 'ชื่อเอกสาร / ชื่อโ
 const dateGuide = 'docs/thai-data-formatting.md';
 const draftingChecks = 'skills/common/thai-official-documents/references/drafting-checks.md';
 const thaiLayout = 'skills/common/thai-official-documents/references/thai-layout.md';
+const sarabanGuide = 'skills/common/thai-official-documents/references/saraban-writing-guide.md';
 const official = [
   field('number', 'เลขหนังสือ', false, 'เว้นไว้หากยังไม่ได้ออกเลข'),
   field('date', 'วันที่', false, 'ระบุปีเต็ม เช่น 2 ตุลาคม 2569'),
@@ -42,6 +43,7 @@ export const DOCUMENT_TOOLS: DocumentTool[] = [
     template: 'skills/common/thai-official-documents/templates/tor-16-sections-template.md',
     references: [
       dateGuide,
+      'skills/pm/tor-government-writing/references/tor-content-by-type.md',
       draftingChecks,
       thaiLayout,
       'skills/pm/tor-government-writing/references/tor-drafting-guide.md',
@@ -94,7 +96,7 @@ export const DOCUMENT_TOOLS: DocumentTool[] = [
     skill: 'thai-official-documents',
     supportSkills: [],
     template: 'skills/common/thai-official-documents/templates/memo-draft.md',
-    references: [dateGuide, draftingChecks, thaiLayout],
+    references: [dateGuide, draftingChecks, sarabanGuide, thaiLayout],
     variants: [
       { id: 'approval', label: 'ขออนุมัติ' },
       { id: 'concurrence', label: 'ขอความเห็นชอบ' },
@@ -121,7 +123,7 @@ export const DOCUMENT_TOOLS: DocumentTool[] = [
     skill: 'thai-official-documents',
     supportSkills: [],
     template: 'skills/common/thai-official-documents/templates/letter-draft.md',
-    references: [dateGuide, draftingChecks, thaiLayout],
+    references: [dateGuide, draftingChecks, sarabanGuide, thaiLayout],
     variants: [
       { id: 'external', label: 'หนังสือภายนอก' },
       { id: 'invitation', label: 'หนังสือเชิญ' },
