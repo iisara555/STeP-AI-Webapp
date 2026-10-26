@@ -1,5 +1,16 @@
 # Progress
 
+## 2026-10-26 · Cloud Workspace ระยะ 2: engine ของ Desktop รันใน runtime ของแต่ละ Workspace
+
+- `runtime-main.ts` เปิด engine headless (`server/src/engine.ts`) บน `<ws>/workspace.sqlite` ของ Workspace นั้น และตอบ Manager
+  ผ่าน IPC แบบ request/reply (`connect`, `ask`, `conversations`, `health`) ส่งออกเฉพาะ error code ไม่ส่งข้อความที่อาจมีเนื้อหาผู้ใช้
+- `RuntimeManager` เพิ่ม `ask`/`conversations` (resume Workspace ที่หยุดให้เอง), `grant()` ที่ออก endpoint/token ทุกครั้งที่ start
+  และไม่หยุด runtime ที่มีงานค้างแม้เกินเวลา idle (ปิด Browser แล้วงานยังทำต่อ)
+- test ใหม่ 4 ตัว ใช้ endpoint สังเคราะห์บน loopback (ไม่เรียก AI จริง): คำถามพนักงานผ่าน process จริง 60/60 ข้อที่ไม่ต้องค้นเว็บ,
+  stop แล้ว resume บทสนทนาเดิมต่อได้และ token ไม่อยู่ใน SQLite, ใช้ session ของอีกคนไม่ได้, งานค้างไม่ถูกหยุดเป็น idle
+- ช่องว่าง: คำถาม "วันหยุดราชการปีนี้" ต้องใช้ web search ของ provider ซึ่ง endpoint แบบ compatible ไม่มี และ AI skill selection
+  ยังปิดเพราะผูกกับ tool loop (ดู server/README.md) ยังไม่มี Gateway/HTTP/event stream (ระยะ 3), ไม่มี deploy หรือ secret ใหม่
+
 ## 2026-10-26 · Cloud Workspace ระยะ 1: Workspace contract และ Runtime Manager
 
 - เพิ่ม `server/src/workspace/`: contract ของ Workspace (id, เจ้าของ, สถานะ runtime, error code), โฟลเดอร์ตาม ADR 0001 §2

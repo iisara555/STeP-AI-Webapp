@@ -1,12 +1,16 @@
-// Runtime Manager (ADR 0001 §3, phase 1): create, start, stop, resume and health of Workspace runtimes. Every call
+// Runtime Manager (ADR 0001 §3, phases 1–2): create, start, stop, resume and health of Workspace runtimes. Every call
 // names the acting user, and a Workspace is reachable only through its owner; sharing by ACL comes later and must
 // be granted explicitly, never by being in the same tenant.
 import {
+  AskInput,
   newWorkspaceId,
+  ProviderGrant,
   parse,
   UserId,
   WorkspaceError,
   WorkspaceName,
+  type AskResult,
+  type ConversationSummary,
   type RuntimeDriver,
   type RuntimeHandle,
   type RuntimeHealth,
@@ -24,6 +28,14 @@ export type RuntimeManagerOptions = {
   /** A running Workspace with no activity for this long is stopped by sweepIdle(); its data stays. */
   idleMs?: number;
   now?: () => number;
+  /**
+   * The AI endpoint and short-lived token for one runtime start, asked for again at every start and resume so a
+   * token never outlives the runtime it was issued to. The Gateway supplies this from its secret store (phase 3).
+   */
+  grant?: (
+    ownerId: string,
+    workspaceId: string,
+  ) => ProviderGrant | undefined | Promise<ProviderGrant | undefined>;
 };
 
 type Live = {
@@ -31,6 +43,8 @@ type Live = {
   handle?: RuntimeHandle;
   starting?: Promise<void>;
   lastActive: number;
+  /** Requests in flight; a busy runtime is never stopped as idle, so work goes on after the browser closes. */
+  busy: number;
   error?: string;
 };
 
@@ -41,6 +55,7 @@ export class RuntimeManager {
   private readonly maxRunning: number;
   private readonly idleMs: number;
   private readonly now: () => number;
+  private readonly grant: NonNullable<RuntimeManagerOptions['grant']>;
 
   constructor({
     dataRoot,
@@ -48,12 +63,14 @@ export class RuntimeManager {
     maxRunning = 8,
     idleMs = 30 * 60_000,
     now = Date.now,
+    grant = () => undefined,
   }: RuntimeManagerOptions) {
     this.dataRoot = dataRoot;
     this.driver = driver;
     this.maxRunning = maxRunning;
     this.idleMs = idleMs;
     this.now = now;
+    this.grant = grant;
   }
 
   async create(actor: string, input: { name: string }): Promise<Workspace> {
@@ -84,11 +101,18 @@ export class RuntimeManager {
       return this.view(record);
     }
     if (this.running() >= this.maxRunning) throw new WorkspaceError('RUNTIME_CAPACITY');
-    const entry: Live = { state: 'starting', lastActive: this.now() };
+    const entry: Live = { state: 'starting', lastActive: this.now(), busy: 0 };
     this.live.set(key, entry);
     entry.starting = (async () => {
       try {
         const handle = await this.driver.start(workspacePaths(this.dataRoot, record.ownerId, record.id));
+        try {
+          const provider = await this.grant(record.ownerId, record.id);
+          if (provider) await handle.call('connect', ProviderGrant.parse(provider));
+        } catch (error) {
+          await handle.stop();
+          throw error;
+        }
         entry.handle = handle;
         entry.state = 'running';
         handle.onExit(() => {
@@ -121,6 +145,19 @@ export class RuntimeManager {
     return { ...(await entry.handle.health()), state: entry.state };
   }
 
+  /**
+   * Runs one request in the Workspace's engine, resuming the runtime first when it is stopped. The request keeps
+   * running if the caller goes away; its result stays in the Workspace's conversation history.
+   */
+  async ask(actor: string, workspaceId: string, input: AskInput): Promise<AskResult> {
+    const request = parse(AskInput, input, 'INVALID_INPUT');
+    return this.call(actor, workspaceId, (handle) => handle.call('ask', request));
+  }
+
+  async conversations(actor: string, workspaceId: string): Promise<ConversationSummary[]> {
+    return this.call(actor, workspaceId, (handle) => handle.call('conversations', {}));
+  }
+
   /** Records user or job activity so the idle policy leaves the runtime running. */
   async touch(actor: string, workspaceId: string) {
     const record = await readRecord(this.dataRoot, actor, workspaceId);
@@ -131,13 +168,29 @@ export class RuntimeManager {
   /** Stops runtimes idle longer than idleMs; returns the ids it stopped. Call it on a timer. */
   async sweepIdle(): Promise<string[]> {
     const cutoff = this.now() - this.idleMs;
-    const idle = [...this.live].filter(([, entry]) => entry.state === 'running' && entry.lastActive < cutoff);
+    const idle = [...this.live].filter(
+      ([, entry]) => entry.state === 'running' && !entry.busy && entry.lastActive < cutoff,
+    );
     await Promise.all(idle.map(([key]) => this.stopKey(key)));
     return idle.map(([key]) => key.split('/')[1]);
   }
 
   async shutdown() {
     await Promise.all([...this.live.keys()].map((key) => this.stopKey(key)));
+  }
+
+  private async call<T>(actor: string, workspaceId: string, fn: (handle: RuntimeHandle) => Promise<T>) {
+    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    await this.start(actor, workspaceId);
+    const entry = this.live.get(this.key(record));
+    if (!entry?.handle) throw new WorkspaceError('RUNTIME_NOT_RUNNING');
+    entry.busy++;
+    try {
+      return await fn(entry.handle);
+    } finally {
+      entry.busy--;
+      await this.touchRecord(record, entry);
+    }
   }
 
   private async stopKey(key: string) {
