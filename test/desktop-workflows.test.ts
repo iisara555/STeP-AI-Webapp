@@ -28,6 +28,9 @@ test('all five document profiles retain source values and unresolved facts in a 
       assert.ok(work.message.includes(tool.template));
       assert.equal(work.skillKey, tool.skill);
     }
+  const tor = prepareDocument('tor', {}, 'service');
+  assert.match(tor.message, /อุทยานวิทยาศาสตร์และเทคโนโลยี มหาวิทยาลัยเชียงใหม่/);
+  assert.match(tor.message, /อาคาร A ชั้น 2 อาคารอำนวยการอุทยานวิทยาศาสตร์ภูมิภาค/);
   assert.throws(() => prepareDocument('tor', { invented: 'ข้อมูล' }, 'service'), /INVALID_DOCUMENT_FIELDS/);
   assert.throws(() => prepareDocument('memo', { subject: 'x'.repeat(6001) }, 'approval'), /INPUT_LIMIT/);
 });

@@ -1,5 +1,23 @@
 # Progress
 
+## 2026-10-26 · Web App ปรับการส่งออก TOR และเอกสารราชการให้ตรงกับ Desktop
+
+- แก้ browser DOCX/PDF exporter ให้ชื่อเรื่องอยู่กึ่งกลาง แต่บล็อกหน่วยงาน/ข้อมูลต้นเรื่องและเนื้อหา TOR ชิดซ้ายอย่างชัดเจน
+  ตารางข้อความกำหนดชิดซ้ายและตัวเลขชิดขวาเหมือนกันทั้ง Word และหน้า PDF
+- เพิ่ม `th-TH` ทั้ง language และ East Asian line-breaking metadata ใน DOCX เพื่อให้ Word ตัดบรรทัดภาษาไทยถูกต้องขึ้น
+  โดยยังคงใส่ zero-width break เฉพาะสำเนาส่งออก ไม่แก้ร่างต้นฉบับ
+- เพิ่ม source-backed organization reference สำหรับการร่าง: ใช้ชื่อเต็ม
+  `อุทยานวิทยาศาสตร์และเทคโนโลยี มหาวิทยาลัยเชียงใหม่` และที่อยู่ของอุทยานเมื่อเอกสารมีช่องหน่วยงานที่รับผิดชอบ/ผู้ส่ง
+  พร้อมคงหน่วยงานอื่นที่ผู้ใช้ระบุและแจ้งความขัดแย้ง ไม่เติมช่องหน่วยงานขึ้นมาเอง
+- Validation: `check`, `build`, unit/API/PWA 91/91, PostgreSQL 29/29, engine 3/3 และ engine pin `desktop-v0.6.20`
+  ผ่าน; targeted document tests 25/25 ผ่าน
+- หลัง merge main รันซ้ำบน Windows: check, build, unit/API/PWA 96/96, PostgreSQL 29/29, engine pin และ
+  Playwright desktop/mobile 76/76 ผ่าน; engine isolation ล้มเฉพาะ POSIX mode 0700 ที่ Windows ไม่รองรับ
+  (ข้อจำกัดเดิม) และผ่าน 3/3 ใน Linux CI ของ PR
+- ต้อง rebuild/deploy frontend และ deploy `worker` (และ `api`) ด้วย เพราะ `document-contract.ts` และ
+  `documentRequest` ที่เพิ่ม organization reference อยู่ในเส้นทางร่างของ worker ไม่มี migration
+- Merge main หลัง #32/#33 เข้ามาแล้ว (คู่มือ TOR content-by-type และ saraban guide) ขัดแย้งเฉพาะ progress นี้
+
 ## 2026-10-25 · Rollout คู่มือ TOR/หนังสือราชการและปิด PR ที่ค้าง
 
 - Harness #235 merge เป็น `2874bf1` หลัง CI ผ่านทุกระบบ (รวม Windows และ macOS Electron)

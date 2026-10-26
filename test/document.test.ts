@@ -75,6 +75,8 @@ test('the drafting contract sits between organization rules and personal prefere
   assert.ok(system.startsWith(SYSTEM_RULES));
   assert.ok(system.indexOf('<document_tool_contract>') < system.indexOf('Personal preferences'));
   assert.match(system, /Return exactly two separate blocks: <document_draft>/);
+  assert.match(system, /อุทยานวิทยาศาสตร์และเทคโนโลยี มหาวิทยาลัยเชียงใหม่/);
+  assert.match(system, /อาคาร A ชั้น 2 อาคารอำนวยการอุทยานวิทยาศาสตร์ภูมิภาค/);
   assert.equal(chatSystem(SYSTEM_RULES), SYSTEM_RULES);
 });
 
