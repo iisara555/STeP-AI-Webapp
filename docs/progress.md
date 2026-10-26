@@ -1,5 +1,16 @@
 # Progress
 
+## 2026-10-26 · ปรับ ADR 0001 เป็น STeP Cloud Workspace
+
+- เปลี่ยนปลายทางจากการคิดเป็น engine เดียวต่อผู้ใช้ ไปเป็น Cloud Workspace แบบ Codex/Claude Cloud:
+  Web เป็น client/gateway, Linux Server ใช้ทรัพยากรร่วมกัน และแต่ละ Workspace มี Runtime, filesystem,
+  SQLite และสิทธิ์แยกกัน ผู้ใช้หนึ่งคนสร้างได้หลาย Workspace และกลับมา Resume หลังปิด Browser ได้
+- ระบุขอบเขตว่าเป็น headless cloud workbench ไม่ใช่ Windows/Linux VDI: รุ่นแรกไม่ส่งภาพ Desktop และไม่เปิด
+  Host filesystem, privileged Docker, raw VNC/CDP หรือสิทธิ์ข้าม Workspace
+- เพิ่ม Runtime Manager, queue/quota, persistent volume, backup, event stream, approval, audit metadata,
+  Local LLM router และลำดับพัฒนา ตั้งแต่ headless isolation จนถึง optional Browser/MCP runner
+- งานนี้แก้เอกสาร ADR/progress เท่านั้น ยังไม่มีการเปลี่ยน runtime, migration, deployment หรือ secret
+
 ## 2026-10-26 · Web App ปรับการส่งออก TOR และเอกสารราชการให้ตรงกับ Desktop
 
 - แก้ browser DOCX/PDF exporter ให้ชื่อเรื่องอยู่กึ่งกลาง แต่บล็อกหน่วยงาน/ข้อมูลต้นเรื่องและเนื้อหา TOR ชิดซ้ายอย่างชัดเจน
