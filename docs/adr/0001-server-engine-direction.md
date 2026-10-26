@@ -148,16 +148,16 @@ OAuth token ไม่ย้าย ผู้ใช้ต้องเชื่อ�
 
 ## ลำดับการพัฒนา
 
-| ระยะ | งาน | เกณฑ์ผ่าน |
-| --- | --- | --- |
-| 0 | เจ้าของโครงการยืนยัน server, quota, policy, backup และประเภทข้อมูลที่อนุญาต | มี deployment/security checklist และข้อจำกัด Pilot เป็นลายลักษณ์อักษร |
-| 1 | Workspace contract + Runtime Manager: create/start/stop/resume/health | ผู้ใช้สองคนมี Workspace แยกกันและไม่มีการอ่านข้ามข้อมูล |
-| 2 | รัน Harness headless ต่อ Workspace ด้วย SQLite และ persistent volume | ทดสอบ knowledge ชุดเดิม 61/61 และ restart แล้วข้อมูลไม่หาย |
-| 2′ | Benchmark Local LLM และ router policy บน GPU/CPU จริง | มีผลคุณภาพ ภาษาไทย latency concurrency และต้นทุนต่อคำขอ |
-| 3 | Gateway, WebSocket/event stream, approval, quota และ Admin health page | ปิด Browser แล้วงานทำต่อ เปิดกลับมา Resume และยกเลิกได้ |
-| 4 | Workspace file tools, document export และ optional sandbox runner | อ่าน/เขียนได้เฉพาะ Workspace พร้อม audit และ resource limit |
-| 5 | Browser/MCP/Google write ที่ allowlist, migration และ Pilot 3–5 คน | ผ่าน isolation, revocation, backup/restore และ real-account acceptance |
-| 6 | เพิ่ม Worker หรือ Full Cloud PC เฉพาะเมื่อมี use case ที่พิสูจน์แล้ว | มีเหตุผลด้านงานและต้นทุน ไม่ใช่เพียงเพื่อให้ UI เหมือน Desktop |
+| ระยะ | งาน                                                                         | เกณฑ์ผ่าน                                                              |
+| ---- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 0    | เจ้าของโครงการยืนยัน server, quota, policy, backup และประเภทข้อมูลที่อนุญาต | มี deployment/security checklist และข้อจำกัด Pilot เป็นลายลักษณ์อักษร  |
+| 1    | Workspace contract + Runtime Manager: create/start/stop/resume/health       | ผู้ใช้สองคนมี Workspace แยกกันและไม่มีการอ่านข้ามข้อมูล                |
+| 2    | รัน Harness headless ต่อ Workspace ด้วย SQLite และ persistent volume        | ทดสอบ knowledge ชุดเดิม 61/61 และ restart แล้วข้อมูลไม่หาย             |
+| 2′   | Benchmark Local LLM และ router policy บน GPU/CPU จริง                       | มีผลคุณภาพ ภาษาไทย latency concurrency และต้นทุนต่อคำขอ                |
+| 3    | Gateway, WebSocket/event stream, approval, quota และ Admin health page      | ปิด Browser แล้วงานทำต่อ เปิดกลับมา Resume และยกเลิกได้                |
+| 4    | Workspace file tools, document export และ optional sandbox runner           | อ่าน/เขียนได้เฉพาะ Workspace พร้อม audit และ resource limit            |
+| 5    | Browser/MCP/Google write ที่ allowlist, migration และ Pilot 3–5 คน          | ผ่าน isolation, revocation, backup/restore และ real-account acceptance |
+| 6    | เพิ่ม Worker หรือ Full Cloud PC เฉพาะเมื่อมี use case ที่พิสูจน์แล้ว        | มีเหตุผลด้านงานและต้นทุน ไม่ใช่เพียงเพื่อให้ UI เหมือน Desktop         |
 
 ## ผลที่ตามมา
 
