@@ -11,6 +11,8 @@ export const DOCUMENT_TOOL_IDS = DOCUMENT_TOOLS.map((t) => t.id);
 export const isDocumentTool = (value: unknown): value is DocumentToolId =>
   DOCUMENT_TOOL_IDS.includes(value as DocumentToolId);
 
+/** Drafting guides and examples must retain their closing sections; longer files remain visibly bounded. */
+export const WORKING_FILE_CHARS = 16000;
 const pathOf = (source: RegisteredSource) => String(source.provenance.path || '');
 /** Resolve `../a/b.md` against the directory of `from`, as the Harness repository lays its files out. */
 function resolvePath(from: string, link: string) {
@@ -68,7 +70,7 @@ export function documentContext(
   const loaded = new Set<string>(options.loaded);
   const add = (source: RegisteredSource, label: string, required = false) => {
     if (loaded.has(source.source_key)) return;
-    const body = source.body.slice(0, 8000);
+    const body = source.body.slice(0, WORKING_FILE_CHARS);
     const part = untrusted(
       source.source_key,
       `${label} · ${pathOf(source)} · แบบทำงาน ไม่ใช่ข้อกำหนดที่ได้รับอนุมัติ\n${body}${
