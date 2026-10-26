@@ -17,19 +17,26 @@ Copied from `iisara555/STeP-AI-Harness` at
   `.ts` extensions for web/server tooling. `starters.ts` uses Thai labels directly and
   exposes the team keys; it never uses team selection for authorization.
 - `desktop/document-contract.ts` is `documentToolRule` from upstream `desktop/electron/document-tools.ts`,
-  unchanged apart from its import path. The web's context assembly around it is in
-  `../src/document-context.ts`.
-- `desktop/draft.ts`, `desktop/thai-typography.ts` and `desktop/document-layout.ts` are upstream
-  `desktop/src/` files, unchanged apart from `.ts` import extensions.
+  with the public STeP organization reference added to the trusted drafting contract. The web's context
+  assembly around it is in `../src/document-context.ts`.
+- `desktop/draft.ts` and `desktop/document-layout.ts` are upstream `desktop/src/` files, unchanged apart
+  from `.ts` import extensions. `desktop/thai-typography.ts` also adds the `eastAsia` Thai language
+  attribute needed by Word line breaking.
 - `desktop/garuda-image.ts` is upstream `desktop/electron/garuda-image.ts` with the same pinned PNG bytes;
   only the decoding uses `atob` instead of Node's `Buffer`. Provenance and sizing are in
   `docs/third-party-notices/thai-garuda.md` (copied unchanged).
 - `desktop/document-export.ts` is upstream `desktop/electron/export.ts` for the browser. The Word
-  document, table layout and PDF page HTML are unchanged. Changes: imports; `DocumentImage` is declared
+  document, table layout and PDF page HTML follow the upstream layout with the browser-specific changes
+  below. Changes: imports; `DocumentImage` is declared
   locally and image bytes are encoded with `btoa`; `pdfHtml` accepts extra `@font-face` rules; the
   spreadsheet, slide, Markdown-file and agency-template (`document-template.ts`) exports and file writing
   are removed; `exportDocx`/`exportPdfHtml` replace `exportDocument` and read the Markdown draft with
   upstream `markdownDocument`.
+- The browser copy carries the same Thai export corrections as the Desktop release candidate: TOR
+  agency/front-matter blocks are left aligned, Word receives both Thai language attributes for line
+  breaking, and tables set explicit text alignment. The public STeP organization reference is included
+  in the browser document request and trusted drafting contract; a different user-supplied agency remains
+  authoritative for that task.
 - `desktop/document-fonts.ts` is upstream `desktop/electron/document-fonts.ts` with a font loader in place
   of the file system, Web Crypto hashes and the platform `DOMParser`; the manifest pin, per-file hashes
   and the package edits are unchanged. The font files themselves are the unchanged upstream

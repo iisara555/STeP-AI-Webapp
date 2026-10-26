@@ -37,6 +37,14 @@ const parts = async (bytes: Uint8Array) => {
     media: Object.keys(zip.files).filter((n) => n.startsWith('word/media/') && n.endsWith('.png')),
   };
 };
+const paragraphAlignment = (xml: string, text: string) => {
+  const paragraph = xml
+    .replace(/​/g, '')
+    .match(/<w:p(?: [^>]*)?>[\s\S]*?<\/w:p>/g)
+    ?.find((candidate) => candidate.includes(text));
+  assert.ok(paragraph, text);
+  return paragraph.match(/<w:jc[^>]*w:val="([^"]+)"/)?.[1];
+};
 
 test('the Garuda is the pinned 800 × 800 original', () => {
   assert.equal(
@@ -92,6 +100,26 @@ test('TOR, proposals and minutes have no automatic Garuda; general drafts keep t
   await assert.rejects(exportDocx('ก'.repeat(200001)), /DOCUMENT_TOO_LARGE/);
 });
 
+test('Thai Word settings and document roles keep TOR front matter left-aligned', async () => {
+  const tor = await exportDocx('# ร่าง TOR\n\nหน่วยงานสังเคราะห์\n\n## ๑. วัตถุประสงค์\n\nสาระจากต้นทาง', {
+    documentTool: 'tor',
+  });
+  const output = await parts(tor.bytes);
+  assert.match(output.styles, /w:eastAsia="th-TH"/);
+  assert.equal(paragraphAlignment(output.document, 'ร่าง TOR'), 'center');
+  assert.equal(paragraphAlignment(output.document, 'หน่วยงานสังเคราะห์'), 'left');
+  assert.equal(paragraphAlignment(output.document, 'สาระจากต้นทาง'), 'left');
+
+  const minutes = await exportDocx(
+    '# รายงานการประชุม\n\nชื่อการประชุม สังเคราะห์\n\nครั้งที่ [รอยืนยัน: ครั้งที่]\n\nผู้มาประชุม [รอยืนยัน: รายชื่อ]',
+    { documentTool: 'minutes' },
+  );
+  const minutesOutput = await parts(minutes.bytes);
+  assert.equal(paragraphAlignment(minutesOutput.document, 'ชื่อการประชุม'), 'center');
+  assert.equal(paragraphAlignment(minutesOutput.document, 'ครั้งที่'), 'center');
+  assert.notEqual(paragraphAlignment(minutesOutput.document, 'ผู้มาประชุม'), 'center');
+});
+
 test('the PDF page shows the letterhead and escapes draft text', () => {
   const html = exportPdfHtml(memo + '\n\n<img src=x onerror=alert(1)>', {
     documentTool: 'memo',
@@ -104,4 +132,13 @@ test('the PDF page shows the letterhead and escapes draft text', () => {
   assert.doesNotMatch(html, /<img src=x/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.doesNotMatch(exportPdfHtml('# ขอบเขตของงาน', { documentTool: 'tor' }), /ตราครุฑ/);
+});
+
+test('the PDF page keeps TOR agency blocks left-aligned', () => {
+  const html = exportPdfHtml('# ร่าง TOR\n\nหน่วยงานสังเคราะห์\n\n## ๑. วัตถุประสงค์\n\nสาระจากต้นทาง', {
+    documentTool: 'tor',
+  });
+  assert.match(html, /class="block title" style="text-align:center;"/);
+  assert.match(html, /class="block front" style="text-align:left;"/);
+  assert.match(html, /class="block body" style="text-align:left;text-indent:2\.5cm;text-align:justify;"/);
 });

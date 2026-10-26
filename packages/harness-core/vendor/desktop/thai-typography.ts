@@ -4,7 +4,10 @@ import type { DraftNode } from './draft.ts';
 const words = new Intl.Segmenter('th', { granularity: 'word' });
 const graphemes = new Intl.Segmenter('th', { granularity: 'grapheme' });
 
-export const THAI_DOCUMENT_LANGUAGE = { value: 'th-TH' } as const;
+// Word uses `value` for Latin/complex-script runs and `eastAsia` for the
+// paragraph's East Asian line-breaking language. Supplying both keeps Thai
+// wrapping consistent across Word versions and DOCX viewers.
+export const THAI_DOCUMENT_LANGUAGE = { value: 'th-TH', eastAsia: 'th-TH' } as const;
 export const THAI_DOCUMENT_CSS = 'word-break:normal;overflow-wrap:break-word;line-break:auto;hyphens:none;';
 
 /** Approximate visible units; combining vowels/tones and emoji sequences are not counted as separate letters. */
