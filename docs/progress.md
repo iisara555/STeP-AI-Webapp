@@ -1,5 +1,18 @@
 # Progress
 
+## 2026-10-26 · Cloud Workspace ระยะ 1: Workspace contract และ Runtime Manager
+
+- เพิ่ม `server/src/workspace/`: contract ของ Workspace (id, เจ้าของ, สถานะ runtime, error code), โฟลเดอร์ตาม ADR 0001 §2
+  (`users/<user>/workspaces/<ws>/{workspace.json,files,snapshots}` สิทธิ์ 0700) และ `RuntimeManager` ที่สั่ง
+  create/list/get/start/stop/resume/health/touch ได้เฉพาะเจ้าของ Workspace; id ของคนอื่นตอบเหมือนไม่มีอยู่ (`WORKSPACE_NOT_FOUND`)
+- Runtime ผ่าน `RuntimeDriver` contract: ตอนนี้มี process driver (หนึ่ง Workspace = หนึ่ง Node process, cwd อยู่ใน `files/`,
+  environment มีแค่ 5 ค่า ไม่สืบทอด key ของ provider/Supabase) ส่วน Docker/Podman/systemd sandbox ยังรอตัดสินตาม ADR
+- มี admission control (`maxRunning`), หยุด runtime ที่ idle (`sweepIdle`), runtime ล้มแล้วสถานะเป็น `failed` และ start ใหม่ได้
+- `npm run test:engine` เพิ่ม 6 test: ผู้ใช้สองคนแยกกันและเรียก Workspace ของอีกคนไม่ได้, id ที่พยายามออกนอก data root ถูกปฏิเสธ,
+  process แยกและไม่รับ secret, stop/resume แล้วไฟล์อยู่ครบ, crash แล้วกู้ได้, capacity และ idle
+- ข้อจำกัด: process driver ไม่ใช่ security boundary ระดับ host (ไม่มี namespace/cgroup/network policy); runtime ยังไม่เปิด engine
+  (ระยะ 2) และยังไม่มี Gateway/login/HTTP (ระยะ 3) ไม่มีการ deploy, migration หรือ secret ใหม่
+
 ## 2026-10-26 · ปรับ ADR 0001 เป็น STeP Cloud Workspace
 
 - เปลี่ยนปลายทางจากการคิดเป็น engine เดียวต่อผู้ใช้ ไปเป็น Cloud Workspace แบบ Codex/Claude Cloud:

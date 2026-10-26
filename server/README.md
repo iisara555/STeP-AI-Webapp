@@ -10,12 +10,22 @@
   แต่ Copilot ปิดบน server ทำให้ไม่ต้องติดตั้ง native client
 - dependencies ของ server มีแค่ 2 ตัว คือ `mdast-util-from-markdown` และ `@xmldom/xmldom` เวอร์ชันเดียวกับ Desktop
 
+## Cloud Workspace · Runtime Manager (ระยะ 1)
+
+`src/workspace/` เป็นโครงของ Cloud Workspace ตาม ADR 0001:
+
+- `contract.ts` รูปแบบ Workspace, สถานะ runtime (`stopped`/`starting`/`running`/`stopping`/`failed`) และ `RuntimeDriver`
+- `storage.ts` โฟลเดอร์ `<data>/users/<user>/workspaces/<ws>/` สิทธิ์ 0700 ตรวจ id ก่อนสร้าง path ทุกครั้ง
+- `manager.ts` `RuntimeManager` ทุกคำสั่งรับผู้ใช้ที่กระทำ และหา Workspace ใต้โฟลเดอร์ของผู้ใช้คนนั้นเท่านั้น
+- `process-driver.ts` + `runtime-main.ts` driver สำหรับพัฒนา: หนึ่ง Workspace เป็นหนึ่ง Node process ที่ cwd อยู่ใน `files/`
+  และได้ environment แค่ id กับโฟลเดอร์ของตัวเอง ยังไม่ใช่ container จึงห้ามใช้เป็น isolation ของ production
+
 ## ตรวจ
 
 ```bash
 git submodule update --init harness
 npm ci
-npm run test:engine        # 61/61 คำถามพนักงานผ่าน engine ทั้งเส้น, แยก SQLite รายคน, server profile
+npm run test:engine        # 61/61 คำถามพนักงานผ่าน engine ทั้งเส้น, แยก SQLite รายคน, server profile, Runtime Manager
 npm run check              # รวม type check ของ server (ส่วน engine ให้ CI ของ Desktop ตรวจ)
 npm run check:engine-pin   # ต้องต่อเน็ตเพื่ออ่าน tag ของ Harness
 ```
