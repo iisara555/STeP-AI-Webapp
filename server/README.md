@@ -47,6 +47,10 @@ STEP_AI_KEY=ollama STEP_AI_MODEL=gemma4:12b-32k STEP_AI_BASE_URL=http://127.0.0.
   npm run engine:ask -- --user owner "ติดต่อฝ่ายบุคคลช่องทางไหน"
 ```
 
+homelab ไม่มี GPU ให้รัน engine บน homelab แล้วเรียก Ollama บนเครื่องที่มี GPU ผ่าน SSH reverse tunnel
+ซึ่งเปิดเฉพาะระหว่างคำสั่ง (`ssh -R 127.0.0.1:11435:127.0.0.1:11434 <user>@homelab` แล้วใช้
+`STEP_AI_BASE_URL=http://127.0.0.1:11435/v1`) ไม่ต้องเปิด Ollama ออกเครือข่าย
+
 ข้อจำกัดของ spike นี้:
 
 - ยังไม่บังคับนโยบายข้อมูลของ provider (`data_collection: deny`) งานนี้เป็นของ router proxy ในระยะ 4
