@@ -35,6 +35,18 @@ npm run engine:ask -- --user owner "ติดต่อฝ่ายบุคค�
 
 ข้อมูลอยู่ใน `.data/users/owner/` (มีใน .gitignore แล้ว) เปลี่ยนที่เก็บได้ด้วย `STEP_AI_DATA`
 
+### local LLM ผ่าน Ollama
+
+ไม่ต้องใช้คีย์จริง (adapter ต้องมีค่า จึงใส่อะไรก็ได้) และข้อมูลไม่ออกนอกเครื่อง Ollama เปิดรุ่นที่ context 4,096 token
+ซึ่งสั้นกว่า prompt ของ engine จะล้มด้วย `PROVIDER_STREAM_INCOMPLETE` ให้สร้างรุ่นที่ context 32k ก่อน:
+
+```bash
+printf 'FROM gemma4:12b\nPARAMETER num_ctx 32768\n' > Modelfile.32k
+ollama create gemma4:12b-32k -f Modelfile.32k
+STEP_AI_KEY=ollama STEP_AI_MODEL=gemma4:12b-32k STEP_AI_BASE_URL=http://127.0.0.1:11434/v1 \
+  npm run engine:ask -- --user owner "ติดต่อฝ่ายบุคคลช่องทางไหน"
+```
+
 ข้อจำกัดของ spike นี้:
 
 - ยังไม่บังคับนโยบายข้อมูลของ provider (`data_collection: deny`) งานนี้เป็นของ router proxy ในระยะ 4
