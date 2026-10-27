@@ -5,11 +5,15 @@
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CompatibleAdapter } from '../../harness/desktop/electron/providers.ts';
-import { createEngine } from './engine.ts';
+import { serverPolicy, createEngine } from './engine.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { user: { type: 'string', default: 'owner' }, team: { type: 'string', default: 'cc' } },
+  options: {
+    user: { type: 'string', default: 'owner' },
+    team: { type: 'string', default: 'cc' },
+    'public-web': { type: 'boolean', default: false },
+  },
 });
 const question = positionals.join(' ').trim();
 const key = process.env.STEP_AI_KEY;
@@ -22,9 +26,11 @@ const dataDir = join(resolve(process.env.STEP_AI_DATA || '.data'), 'users', valu
 let streamed = false;
 const engine = await createEngine({
   dataDir,
+  policy: serverPolicy({ publicWeb: values['public-web'] }),
+  ...(values['public-web'] ? { publicWeb: {} } : {}),
   runtime: async () => ({ adapter: new CompatibleAdapter(), context: { cwd: dataDir, env: {}, key } }),
   emit: (event) => {
-    if (event.type !== 'delta' || !event.text) return;
+    if (values['public-web'] || event.type !== 'delta' || !event.text) return;
     streamed = true;
     process.stdout.write(event.text);
   },

@@ -103,7 +103,16 @@ test('each employee has an own SQLite file and sees only their own tasks', async
 
 test('the server profile turns off tools that do not belong on a shared machine', async () => {
   const { features, checks } = serverPolicy();
-  for (const off of ['toolLoop', 'shellByAi', 'sandbox', 'mcp', 'copilot', 'vault', 'autopilot'] as const)
+  for (const off of [
+    'toolLoop',
+    'hybridSkillSelection',
+    'shellByAi',
+    'sandbox',
+    'mcp',
+    'copilot',
+    'vault',
+    'autopilot',
+  ] as const)
     assert.equal(features[off], false, off);
   assert.equal(checks.privacy, true);
   const { CopilotClient } = await import('@github/copilot-sdk');
