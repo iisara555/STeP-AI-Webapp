@@ -42,9 +42,53 @@ export type RuntimeSpec = {
   filesDir: string;
 };
 
+/**
+ * The AI endpoint a runtime may use, issued per start by the Manager (later the Gateway). The token lives only in
+ * the runtime's memory: it is never written to workspace.sqlite or passed in the environment (ADR 0001 §2, §7).
+ */
+export const ProviderGrant = z.object({
+  baseUrl: z.url({ protocol: /^https?$/ }),
+  model: z.string().min(1).max(160),
+  token: z.string().max(4096).optional(),
+  /** Public web retrieval needs the Workspace's consent (ADR 0001 §4); off unless granted. */
+  publicSearch: z.boolean().default(false),
+});
+export type ProviderGrant = z.input<typeof ProviderGrant>;
+
+export const AskInput = z.object({
+  text: z.string().trim().min(1).max(20_000),
+  /** Continue this conversation of the Workspace; a new one is created when absent. */
+  sessionId: z.string().min(1).max(200).optional(),
+});
+export type AskInput = z.input<typeof AskInput>;
+
+export type AskResult = {
+  sessionId: string;
+  /** The engine's task status; `review` means an answer is ready. */
+  status: string;
+  answer?: string;
+  /** Engine error code when the run did not finish, never message text. */
+  code?: string;
+  /** Organization documents the answer was grounded on. */
+  sources: string[];
+};
+
+export type ConversationSummary = { id: string; title: string; status: string; updatedAt?: string };
+
+/** Requests a runtime answers over its private channel; the Manager is the only caller. */
+export type RuntimeCalls = {
+  connect: { params: ProviderGrant; result: { ok: true } };
+  ask: { params: AskInput; result: AskResult };
+  conversations: { params: Record<string, never>; result: ConversationSummary[] };
+};
+
 export type RuntimeHandle = {
   pid?: number;
   health(timeoutMs?: number): Promise<RuntimeHealth>;
+  call<M extends keyof RuntimeCalls>(
+    method: M,
+    params: RuntimeCalls[M]['params'],
+  ): Promise<RuntimeCalls[M]['result']>;
   stop(): Promise<void>;
   /** Called once when the runtime ends for any reason, including stop(). */
   onExit(listener: (code: number | null) => void): void;
@@ -61,7 +105,10 @@ export type WorkspaceErrorCode =
   | 'WORKSPACE_NOT_FOUND'
   | 'RUNTIME_CAPACITY'
   | 'RUNTIME_START_FAILED'
-  | 'RUNTIME_EXITED';
+  | 'RUNTIME_EXITED'
+  | 'RUNTIME_NOT_RUNNING'
+  | 'RUNTIME_CALL_FAILED'
+  | 'INVALID_INPUT';
 
 export class WorkspaceError extends Error {
   constructor(readonly code: WorkspaceErrorCode) {

@@ -34,6 +34,9 @@ function fakeDriver() {
       let exit: (code: number | null) => void = () => {};
       return {
         health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
+        call: async () => {
+          throw new Error('UNUSED');
+        },
         stop: async () => exit(0),
         onExit: (listener) => void (exit = listener),
       };
