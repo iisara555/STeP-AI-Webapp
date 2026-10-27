@@ -33,6 +33,13 @@ import { calendarEvents, driveText, wantsCalendar } from './google.ts';
 import { imageBase64 } from './files.ts';
 import { normalizeReceipt } from './receipt.ts';
 import { skillContext } from '../../../packages/harness-core/src/skill-context.ts';
+import {
+  SELECTION_SYSTEM,
+  documentExcerpts,
+  parseSelection,
+  selectionCatalog,
+  selectionPrompt,
+} from '../../../packages/harness-core/src/reference-selection.ts';
 const textSchema = z.object({ text: z.string().max(200000), truncated: z.boolean() });
 // The estimator counts a Thai character as 0.9 token, about twice what Gemini reports (measured runs: about 15,000
 // estimated for 8,211 counted, and about 31,000 for 17,372). Chat keeps that margin. A drafting run needs the template,
@@ -42,6 +49,8 @@ const CONTEXT_TOKENS = 27000;
 const DOCUMENT_CONTEXT_TOKENS = 48000;
 // Estimated tokens a document run keeps free for organization answers, memories and history after its working files.
 const DOCUMENT_OPTIONAL_TOKENS = 3000;
+// Characters of AI-chosen document sections, about the 9,000 Desktop sends for its own keyword matches.
+const SELECTED_DOCUMENT_CHARS = 10000;
 // Fail closed if material already assembled into a prompt was removed, expired or replaced.
 // worker_payload also rechecks the live lease, membership and each selected document's ACL.
 function resourceSnapshot(payload: {
@@ -169,11 +178,55 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
           /(?:STeP|สเต็ป|AFP|อุทยาน|มหาวิทยาลัย|เบิก|ลาพัก|ลาป่วย|ลาคลอด|พัสดุ|งบประมาณ|นโยบาย|ขั้นตอนงาน|QM-|QP-|WI-|FM-)/i.test(
             query,
           );
-        const skill = chooseSkill(
-          (context.skills as Skill[]).filter((s) => !s.metadata.developerOnly && !s.metadata.webUnsupported),
-          query,
-          job.input.skill || undefined,
+        const usable = (context.skills as Skill[]).filter(
+          (s) => !s.metadata.developerOnly && !s.metadata.webUnsupported,
         );
+        let skill = chooseSkill(usable, query, job.input.skill || undefined);
+        // Desktop's tool loop lets the AI open a registered document or Skill the keyword match missed ("ปีหน้าลางาน
+        // ได้กี่วัน"). The web asks the AI once to choose from the same registry, then reads only those sections.
+        if (!tool && !job.input.skill && (!found.length || !skill)) {
+          const documents = found.length ? [] : await knowledge.registry();
+          const choices = skill ? [] : usable;
+          if (documents.length || choices.length) {
+            const history = (context.history as { role: string; body: string }[])
+              .slice(0, -1)
+              .slice(-4)
+              .map((m) => `${m.role}: ${m.body.slice(0, 600)}`)
+              .join('\n');
+            try {
+              const picked = await ai.generate({
+                system: SELECTION_SYSTEM,
+                prompt: selectionPrompt(query, history, selectionCatalog(documents, choices)),
+                json: info.provider === 'gemini',
+                maxOutputTokens: 2048,
+                signal: AbortSignal.timeout(25000),
+              });
+              inputTokens += picked.usage.input;
+              outputTokens += picked.usage.output;
+              const choice = parseSelection(
+                picked.text,
+                documents.map((d) => d.id),
+                choices.map((s) => s.skill_key),
+              );
+              let room = SELECTED_DOCUMENT_CHARS;
+              for (const { id, sections } of choice.documents) {
+                const source = registered.find((s) => s.source_key === id)!;
+                const excerpts = documentExcerpts(
+                  { id, title: source.title, path: String(source.provenance.path || id), body: source.body },
+                  sections,
+                  query,
+                  room,
+                );
+                room -= excerpts.reduce((n, e) => n + e.text.length, 0);
+                found.push(...excerpts);
+              }
+              if (choice.skill) skill = choices.find((s) => s.skill_key === choice.skill);
+            } catch (error) {
+              // Access and lease failures stop the run; a failed or unreadable choice only loses the extra context.
+              if (['ACCESS_DENIED', 'RUN_INTERRUPTED', 'DATA_ERROR'].includes(safeCode(error))) throw error;
+            }
+          }
+        }
         // A STeP request with no organization document, attachment, calendar data, document tool or chosen Skill is
         // still answered, as general help that says it is not based on STeP documents. An auto-matched Skill is used.
         const noOrganizationSource =
