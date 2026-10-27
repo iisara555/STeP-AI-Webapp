@@ -13,7 +13,13 @@ function barrier() {
 }
 async function fixture(
   kind: 'chat' | 'document' | 'receipt' = 'chat',
-  input: { message?: string; skill?: string; registered?: boolean; documents?: boolean } = {},
+  input: {
+    message?: string;
+    skill?: string;
+    registered?: boolean;
+    documents?: boolean;
+    autoSkillTriggers?: string[];
+  } = {},
 ) {
   const values: Record<string, string> = {
     SUPABASE_URL: 'https://synthetic.supabase.co',
@@ -56,8 +62,19 @@ async function fixture(
       source_version: 'test',
       provenance: {},
     })),
-    skills:
-      input.skill && input.registered !== false
+    skills: input.autoSkillTriggers
+      ? [
+          {
+            id: crypto.randomUUID(),
+            skill_key: 'synthetic-auto-skill',
+            title: 'Synthetic auto Skill',
+            description: '',
+            instructions: 'SYNTHETIC_AUTO_SKILL_MARKER',
+            metadata: { triggers: input.autoSkillTriggers },
+            source_version: 'test',
+          },
+        ]
+      : input.skill && input.registered !== false
         ? [
             {
               id: crypto.randomUUID(),
@@ -298,7 +315,7 @@ for (const [tool, variant] of [
     assert.equal((f.state.finishes[0].answer as { text: string }).text, 'Synthetic answer');
   });
 
-test('a Skill name that is not registered does not lift the no-document reply', async () => {
+test('a Skill name that is not registered is not used, and the run is answered as general help', async () => {
   const work = prepareDocument('tor', {}, 'service');
   const f = await fixture('chat', {
     message: work.message,
@@ -307,13 +324,37 @@ test('a Skill name that is not registered does not lift the no-document reply', 
     documents: false,
   });
   await f.run();
-  assert.equal(f.state.sent.length, 0);
-  assert.match((f.state.finishes[0].answer as { text: string }).text, /ยังไม่พบเอกสารองค์กร/);
+  assert.equal(f.state.sent.length, 2, 'countTokens and generateContent');
+  assert.ok(f.state.sent.every((body) => !body.includes('SYNTHETIC_SKILL_MARKER')));
+  assert.ok(f.state.sent.every((body) => body.includes('ไม่ได้อ้างอิงเอกสาร STeP')));
 });
 
-test('a STeP question with no matching document and no Skill still gets the no-document reply', async () => {
+test('a STeP question with no matching document reaches the AI as general help that must not invent STeP facts', async () => {
   const f = await fixture('chat', { message: 'ขั้นตอนเบิกค่าเดินทางของ STeP', documents: false });
   await f.run();
-  assert.equal(f.state.sent.length, 0);
-  assert.match((f.state.finishes[0].answer as { text: string }).text, /ยังไม่พบเอกสารองค์กร/);
+  assert.equal(f.state.sent.length, 2, 'countTokens and generateContent');
+  assert.ok(f.state.sent.every((body) => body.includes('ไม่ได้อ้างอิงเอกสาร STeP')));
+  assert.ok(f.state.sent.every((body) => body.includes('ห้ามแต่งนโยบาย')));
+  assert.equal((f.state.finishes[0].answer as { text: string }).text, 'Synthetic answer');
+});
+
+test('a creative STeP request with no document uses the auto-matched Skill', async () => {
+  const f = await fixture('chat', {
+    message:
+      'คิด Big idea สำหรับงาน STeP Innovation Day 3 แนวทาง พร้อมชื่องาน key message และ signature moment',
+    autoSkillTriggers: ['big idea'],
+    documents: false,
+  });
+  await f.run();
+  assert.equal(f.state.sent.length, 2, 'countTokens and generateContent');
+  assert.ok(f.state.sent.every((body) => body.includes('SYNTHETIC_AUTO_SKILL_MARKER')));
+  assert.ok(f.state.sent.every((body) => body.includes('ไม่ได้อ้างอิงเอกสาร STeP')));
+  assert.equal((f.state.finishes[0].answer as { text: string }).text, 'Synthetic answer');
+});
+
+test('a run with organization context gets no general-help notice', async () => {
+  const work = prepareDocument('tor', {}, 'service');
+  const f = await fixture('chat', { message: work.message, skill: work.skillKey, documents: false });
+  await f.run();
+  assert.ok(f.state.sent.every((body) => !body.includes('ไม่ได้อ้างอิงเอกสาร STeP')));
 });
