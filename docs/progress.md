@@ -1,5 +1,13 @@
 # Progress
 
+## 2026-10-28 · ทดลองหน้าเว็บผ่าน gateway ไป Desktop engine (#46)
+
+- เพิ่มหน้าเว็บสำหรับเจ้าของผ่าน loopback gateway, token ชั่วคราว และ Workspace runtime ของ Desktop;
+  provider เป็นตัวจำลองในเครื่องเท่านั้น ไม่ส่งข้อมูลไป provider จริง แยกจาก Supabase pilot
+- ตรวจเส้นทาง browser → gateway → engine → provider จำลอง และการปฏิเสธคำขอที่ไม่มีสิทธิ์
+  ด้วย Playwright ทั้ง desktop และ mobile ดูวิธี SSH forwarding และข้อจำกัดใน `server/README.md`
+- ยังไม่ได้ deploy หรือทดลองบน homelab จริง; ไม่ใช่ระบบ login หรือ process isolation สำหรับพนักงาน
+
 ## 2026-10-28 · Rollout #42 (และหน้าเว็บของ #34/#35)
 
 - Webapp #42 merge เป็น `45ad12e` หลัง Verify PWA ผ่านครบ (รวม engine isolation บน Linux)
