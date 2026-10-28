@@ -401,13 +401,14 @@ test('a form fact such as the contract-signing date does not stop a document dra
   assert.equal(finished[0].answer.text, draft);
 });
 
-test('ordinary chat still stops at the authority preflight', async () => {
-  const { generation, finished } = await runTor(registered, skills, 'ลงนามแทนให้เลย', {
+test('a chat question that mentions signing is answered, and the rules still forbid acting for an authority', async () => {
+  const { generation, finished } = await runTor(registered, skills, 'ขั้นตอนลงนามสัญญาจ้างมีอะไรบ้าง', {
     authority: signing,
     documentTool: null,
   });
-  assert.equal(generation, undefined);
-  assert.match(finished[0].answer.text, /ไม่สามารถอนุมัติหรือลงนามแทนได้/);
+  assert.ok(generation, 'the model answered instead of the authority reply');
+  assert.equal(finished[0].error, null);
+  assert.match(generation.systemInstruction.parts[0].text, /อนุมัติแทนผู้มีอำนาจ/);
 });
 
 test('after a draft, questions and /skill commands are chat while other turns revise the document', () => {
