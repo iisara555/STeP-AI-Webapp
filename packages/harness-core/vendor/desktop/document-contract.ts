@@ -1,6 +1,23 @@
 // Copied from upstream desktop/electron/document-tools.ts (STeP-AI-Harness 90ee71c): the trusted drafting contract
-// the Desktop host adds to the system prompt for a selected document tool. Only the import path changes.
+// the Desktop host adds to the system prompt for a selected document tool, and isDocumentQuestion, which tells a
+// question about the draft from a request to revise it. The web adds its public STeP
+// organization reference and keeps the surrounding context assembly in ../src/document-context.ts.
 import { documentTool } from './document-tools.ts';
+import { stepOrganizationReference } from './organization-profile.ts';
+
+// A question ends with a Thai question word or "?", or opens with one. "…ได้ไหม" and edit words make it a polite request.
+const QUESTION =
+  /(?:[?？]|ไหม|มั้ย|หรือเปล่า|รึเปล่า|หรือไม่|อะไร|ยังไง|อย่างไร|เท่าไร|เท่าไหร่|ทำไม|ใคร|เมื่อไร|เมื่อไหร่|ที่ไหน|ตรงไหน|แบบไหน|มาจากไหน|หรอ|เหรอ)(?:\s*(?:ครับ|ค่ะ|คะ|คับ|จ้ะ|จ้า|นะ|ฮะ))*\s*[?？]?\s*$|^\s*(?:ทำไม|อะไร|ใคร|อธิบาย|why\b|what\b|how\b)/i;
+const EXPLAIN = /(?:ช่วย|รบกวน)?\s*(?:อธิบาย|ตอบ|บอก(?:หน่อย)?ว่า)|ขอถาม|อยาก(?:รู้|ทราบ)|\b(?:explain|clarify|tell me|what|why|how)\b/i;
+const EDIT =
+  /(?:^|(?:แล้ว|และ|จากนั้น)\s*)(?:(?:ช่วย|ขอ|อยากให้|รบกวน)\s*)?(?:ใส่|เพิ่ม|แก้|ปรับ|เปลี่ยน|ตัด|ลบ|เติม|ย้าย|ทำให้|เขียน|แปล)|(?:^|(?:and|then)\s+)(?:(?:can|could|would) you\s+)?(?:please\s+)?(?:change|edit|rewrite|replace|remove|add|update|translate)\b/i;
+
+/** A question about the selected document, answered in chat without touching the draft. */
+export function isDocumentQuestion(id: unknown, text: string): boolean {
+  const value = text.trim();
+  if (!documentTool(id) || !value) return false;
+  return !EDIT.test(value) && (QUESTION.test(value) || EXPLAIN.test(value) || /กี่(?:วัน|บาท|คน|ครั้ง|เดือน|ปี)/.test(value));
+}
 
 /** Trusted task constraints supplement, rather than replace, the loaded Skill procedures. */
 export function documentToolRule(id: unknown, agencyTemplate = false) {
@@ -21,6 +38,7 @@ export function documentToolRule(id: unknown, agencyTemplate = false) {
         'The host has a private native DOCX template for this task. Follow its sample-free outline and exact table count/column counts from source_document ahead of the working Markdown template. Use the primary Skill for facts and review; put substantive facts without a dedicated agency field in the closest relevant section instead of dropping them. The exported body uses the current editor content with native template formatting; DOCX rendering remains for review in Word. Do not claim the form revision or facts are verified merely because it was attached.',
       'Form fields in source_document are USER_INPUT, not verified policy or approval. File extraction preserves its own provenance; OCR/AI readings marked EXTRACTED_UNVERIFIED stay unverified until checked against the source by a person. Neither attachment consent nor drafting verifies them.',
       'A formatted form date is a presentation of the original USER_INPUT only. DATE_NEEDS_REVIEW means the date/year is invalid or ambiguous: preserve the reading and use a year/date placeholder in the draft. Never infer a century from a two-digit year. Keep document/reference numbers exactly as supplied.',
+      `STeP organization reference (SOURCE_FACT, ${stepOrganizationReference.sourceRef}, checked ${stepOrganizationReference.lastChecked}): use the full Thai name "${stepOrganizationReference.nameTh}" and address "${stepOrganizationReference.addressTh}" when the editable document contains a responsible-agency, owner-agency, sender-unit, or agency-address field and the current task does not explicitly name a different agency. Put the address in that agency block, not under a person. If the user/source supplies another agency, preserve it and flag any conflict; do not replace it with STeP. If no such agency field exists, do not add one just to use this reference.`,
       'Return exactly two separate blocks: <document_draft> followed by </document_draft>, then <document_review> followed by </document_review>. Inside document_draft include ONLY the requested editable document: its actual title, fields, body, legitimate tables, signatures and supplied attachments. Inside document_review include ALL Skill-required fact/source checks, unresolved-field lists, working-template caveats and next steps. No conversational introduction, Skill Verification/checklist, explanation of your work or export advice may appear inside document_draft. Do not replace the document with only a checklist or plan. Use Markdown paragraphs and line breaks; do not emit HTML tags such as <br/>.',
       'document_draft and document_review are response delimiters, not external fields or tools. The host parses these blocks and stages the document for review. Do not search for MCP/document-control tools to populate them or claim that missing tools prevent returning the draft.',
       `Draftable form fields for this profile: ${

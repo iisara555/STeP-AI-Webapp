@@ -45,6 +45,9 @@ const CM = 567; // twips per centimetre
 /** printToPDF margins in inches, matching the Word page. */
 export const PDF_MARGINS = { top: 2.5 / 2.54, bottom: 2 / 2.54, left: 3 / 2.54, right: 2 / 2.54 };
 
+/** Front matter in a TOR is an agency/data block, not a centered title. */
+const centerFrontMatter = (layout: DocumentLayout, role: LayoutRole | 'quote') => role === 'front' && layout.id === 'minutes';
+
 export function escapeHtml(text: string) {
   return text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
@@ -245,7 +248,8 @@ export function pdfHtml(
         .map((node, index) => {
           if (node === title) return '';
           const role = roles[index];
-          const css = ['title', 'front', 'signature', 'date'].includes(role) ? 'text-align:center;' : '';
+          const css =
+            ['title', 'signature', 'date'].includes(role) || centerFrontMatter(layout, role) ? 'text-align:center;' : 'text-align:left;';
           const indent = ['sender', 'signature'].includes(role)
             ? 'margin-left:8cm;'
             : role === 'body' && node.type === 'paragraph'
@@ -344,7 +348,7 @@ function docxTable(table: DraftNode, layout: WordLayout) {
               children: (cell?.content?.length ? cell.content : [{ type: 'paragraph' }]).map(
                 p =>
                   new Paragraph({
-                    alignment: numeric[column] ? AlignmentType.RIGHT : undefined,
+                    alignment: numeric[column] ? AlignmentType.RIGHT : AlignmentType.LEFT,
                     widowControl: true,
                     children: runs(p, size, header, font, false, layout.presentation.thaiBreaks),
                   }),
@@ -421,7 +425,7 @@ function docxBlocks(
           ? (points + [4, 2, 0][level - 1]) * 2
           : points * 2;
     const band = Math.floor(wordWidth(layout) / 2);
-    const centered = title || caption || ['front', 'signature', 'date'].includes(role);
+    const centered = title || caption || ['signature', 'date'].includes(role);
     const body = role === 'body' && node.type === 'paragraph' && !depth;
     return [
       new Paragraph({
@@ -434,7 +438,7 @@ function docxBlocks(
               ? { style: 'Caption' }
               : {}),
         numbering,
-        alignment: centered ? AlignmentType.CENTER : AlignmentType.LEFT,
+        alignment: centered || centerFrontMatter(layout, role) ? AlignmentType.CENTER : AlignmentType.LEFT,
         indent: numbering
           ? undefined
           : role === 'quote'

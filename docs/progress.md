@@ -1,5 +1,26 @@
 # Progress
 
+## 2026-10-28 · แชตไม่หยุดด้วย authority preflight และข้อความถัดไปไม่ติดโหมดร่าง
+
+- ผู้ใช้ทดสอบ TOR จ้างจัดสัมมนา (ข้อมูลสังเคราะห์) แล้วได้ข้อความ "งานนี้ต้องให้ผู้มีอำนาจของ STeP ตรวจ..." แทนร่าง
+  และคำถามถัดไปใน task เดียวกัน (ตรวจใบเสร็จ, วันลาสะสม) ยังขึ้นป้าย "ร่างเอกสารอยู่ในแผงผลงาน" พร้อมแหล่งอ้างอิงของ TOR
+- สาเหตุ 1: worker ตรวจ authority preflight กับคำขอที่ host สร้างจากฟอร์มทั้งก้อน ช่อง "60 วันนับจากลงนามสัญญา"
+  ชน trigger `ลงนามสัญญา` ของ `official-signing` (ทำซ้ำได้กับข้อความจริง) Desktop ปิด `checks.authority` เป็นค่าเริ่มต้น
+- แชตทั่วไปก็ชนแบบเดียวกัน: ทดสอบข้อความพนักงานสังเคราะห์ 23 ข้อกับ `authority.yaml` ของ pack คำขอให้ลงมือจริง 6/6
+  ถูกหยุด แต่คำถามข้อมูล 10/17 ถูกหยุดผิด เช่น "ขั้นตอนลงนามสัญญาจ้างมีอะไรบ้าง", "ใครมีอำนาจอนุมัติงบประมาณเกิน
+  500,000 บาท", "ออกเลขหนังสือภายนอกต้องทำที่ระบบไหน" เพราะ trigger จับคำ ไม่แยกคำถามจากคำสั่ง
+- แก้ 1 (เจ้าของโครงการตัดสิน 2026-10-28): เลิกหยุดแชตด้วย preflight ทั้งหมด เหมือนค่าเริ่มต้นของ Desktop เหตุผล:
+  STeP ลงนามและอนุมัติบนเอกสาร physical อยู่แล้ว และแชตเว็บไม่มีเครื่องมืออนุมัติ ลงนาม ออกเลข หรือส่งออกภายนอก
+  (ตรวจแล้ว: Google ใช้ POST เฉพาะขอ OAuth token) `SYSTEM_RULES` ยังห้ามอนุมัติแทนผู้มีอำนาจ และ Skill/drafting
+  contract ยังคงขอบเขต Human Authority ยังต้องนำเข้า `__authority`/`__organization` เหมือนเดิม การยินยอมก่อนส่ง AI
+  และก่อนอ่าน Google ไม่เปลี่ยน ถ้าภายหลังเพิ่มเครื่องมือเขียนภายนอก ต้องมี approval ของตัวเองก่อนใช้
+- สาเหตุ 2: หน้าแชตส่ง `documentTool` ของ task ไปกับทุกข้อความ ทุกคำถามจึงเป็นงานร่าง TOR โหลดแม่แบบ/คู่มือ TOR
+  และไม่เข้าการเลือกเอกสารด้วย AI ของ #39 (ซึ่งทำเฉพาะเมื่อไม่มีเครื่องมือร่าง) คำถามวันลาจึงตอบว่าไม่พบข้อมูล
+- แก้ 2: `turnDocumentTool` ทำตาม draft mode ของ Desktop หลังมีคำตอบแรกแล้ว คำถามเกี่ยวกับร่าง (`isDocumentQuestion`
+  จาก upstream ไม่แก้) หรือข้อความที่ขึ้นต้นด้วย `/` ส่งเป็นแชตปกติ ข้อความอื่นยังเป็นการแก้ร่าง คำขอแรกจากฟอร์มร่างเสมอ
+- สำเนียงภาษาเหนือในคำตอบมาจากสไตล์การพูดในโปรไฟล์ผู้ใช้ ทำงานเหมือน Desktop ไม่ใช่ข้อผิดพลาด
+- ต้อง deploy `worker` และ rebuild หน้าเว็บ ไม่มี migration หรือ secret ใหม่ ยังต้องทดสอบซ้ำกับบัญชีจริงหลัง deploy
+
 ## 2026-10-27 · ระยะ 2: engine ตอบด้วย provider จริงครั้งแรก (local LLM)
 
 - รัน `npm run engine:ask` กับ Ollama 0.40.11 บนเครื่องของเจ้าของโครงการ (RTX 4070 SUPER 12 GB, Node 25.2.1)
@@ -40,6 +61,87 @@
   ระยะ 2′ ยังต้องรันชุดเดียวกันกับ provider แบบ API (OpenRouter/Gemini/Claude ซึ่งต้องให้เจ้าของโครงการตั้งคีย์เอง)
   และอาจลองรุ่น local อื่นก่อนทำข้อเสนอ hardware A/B
 - ไม่มี deploy หรือ secret
+
+## 2026-10-27 · Webapp เลือกเอกสารองค์กรและ Skill ด้วย AI เมื่อการค้นคำไม่เจอ (แบบเดียวกับ Desktop)
+
+- ปัญหา: "ปีหน้าลางานได้กี่วัน" Desktop ตอบได้ แต่ Webapp ตอบว่ายังไม่พบข้อมูล การค้นคำ (`OrganizationKnowledge.search`)
+  ของทั้งสองตัวไม่เจอเอกสารเหมือนกัน และตัวเลือก Skill แบบคำค้นก็ไม่เลือก `hr-policy-lookup` แต่ Desktop มี tool loop
+  ที่ให้ AI เห็นทะเบียนเอกสารและเปิดหัวข้อเองได้ Webapp ตอบรอบเดียว AI จึงไม่เคยเห็นเอกสาร
+- แก้ใน worker (bug fix ภายใต้ feature freeze): ถ้าไม่ได้เลือก Skill หรือเครื่องมือร่างเอง และการค้นคำไม่เจอเอกสารหรือ Skill
+  จะถาม AI หนึ่งครั้งให้เลือกจากทะเบียนเอกสาร (ชื่อ สาระ และหัวข้อ) และรายการ Skill ไม่เกิน 2 เอกสาร 3 หัวข้อ และ 1 Skill
+  โดยใช้บทสนทนาก่อนหน้า 4 ข้อความเพื่อตีความคำถามต่อเนื่อง แล้วอ่านเฉพาะหัวข้อที่เลือก (รวมหัวข้อย่อย) ไม่เกิน 10,000 ตัวอักษร
+  รหัสที่ไม่อยู่ในทะเบียนถูกทิ้ง คำตอบที่อ่านไม่ได้ถือว่าไม่ได้เลือก ส่วน ACCESS_DENIED/RUN_INTERRUPTED ยังหยุดงานเหมือนเดิม
+- โค้ดอยู่ใน `packages/harness-core/src/reference-selection.ts` ทะเบียนเอกสารใช้ `OrganizationKnowledge.registry()` เดิมของ Desktop
+- ค่าใช้จ่าย: งานที่เข้าเงื่อนไขมีการเรียก AI เพิ่ม 1 ครั้ง ทะเบียนจาก pack ปัจจุบัน (38 เอกสาร, 43 Skill) ประมาณ 24,000 ตัวอักษร
+  นับรวมใน input/output token ของงาน และยังอยู่ในวงเงินที่จองไว้ต่องาน (64,000 input token)
+- Test: worker 6 test ใหม่ (เลือกหัวข้อและ Skill, คำถามต่อเนื่อง, AI เลือกไม่ได้แล้วตอบแบบผู้ช่วยทั่วไป, ถูกถอนสิทธิ์ระหว่างเลือก)
+  และ unit test ของการเลือกหัวข้อ/การอ่านคำตอบ ไม่เรียก AI จริง ยังไม่ได้วัดความแม่นยำการเลือกด้วยโมเดลจริง
+- ซ้อนบน PR #38 ต้อง deploy `worker` จึงจะมีผล ไม่มี migration หรือ secret ใหม่ งาน Cloud Workspace (server/) ยังปิด tool loop อยู่
+
+## 2026-10-26 · คำขอที่มีคำว่า STeP แต่ไม่มีเอกสาร ได้คำตอบแบบผู้ช่วยทั่วไปแทนการปฏิเสธ
+
+- ปัญหา: คำขอเชิงสร้างสรรค์ เช่น "คิด Big idea สำหรับงาน STeP Innovation Day…" ได้ข้อความ "ยังไม่พบเอกสารองค์กรที่ยืนยันเรื่องนี้ครับ…"
+  ทันที เพราะ worker ถือว่าทุกคำขอที่มีคำว่า STeP เป็นคำถามองค์กร และปฏิเสธเมื่อค้นเอกสารไม่เจอ แม้ระบบจะจับคู่ Skill ได้เอง
+  (Skill ที่ auto-match ไม่ทำให้ข้ามกฎ มีแต่ Skill ที่ผู้ใช้เลือกเอง) และแม้ผู้ใช้จะแนบเอกสารมาแล้ว
+- แก้ (bug fix ภายใต้ feature freeze): worker ไม่ตอบข้อความปฏิเสธสำเร็จรูปอีก แต่ส่งงานให้ AI พร้อม Skill ที่ auto-match ความจำ
+  และบทสนทนา ถ้าไม่มีเอกสารองค์กร เอกสารแนบ ข้อมูลปฏิทิน เครื่องมือร่างเอกสาร หรือ Skill ที่เลือกเอง จะเพิ่มกฎ
+  `NO_ORGANIZATION_SOURCE_RULE` ใน system prompt: ช่วยเต็มที่แบบผู้ช่วยทั่วไป บอกหนึ่งประโยคว่าไม่ได้อ้างอิงเอกสาร STeP
+  ห้ามแต่งนโยบาย ขั้นตอน ระเบียบ ตัวเลข หรือบุคลากรของ STeP และถ้าเป็นคำถามข้อเท็จจริงขององค์กรให้บอกว่ายังไม่พบเอกสารยืนยัน
+- การตรวจสิทธิ์ผู้มีอำนาจ (authority preflight) ยังทำงานก่อนเหมือนเดิม คำถามที่ต้องให้ผู้มีอำนาจตัดสินยังได้ข้อความเดิม
+- ต้อง deploy `worker` จึงจะมีผลบน homelab ยังไม่ได้ deploy ไม่มี migration
+
+## 2026-10-26 · Cloud Workspace ระยะ 2: engine ของ Desktop รันใน runtime ของแต่ละ Workspace
+
+- `runtime-main.ts` เปิด engine headless (`server/src/engine.ts`) บน `<ws>/workspace.sqlite` ของ Workspace นั้น และตอบ Manager
+  ผ่าน IPC แบบ request/reply (`connect`, `ask`, `conversations`, `health`) ส่งออกเฉพาะ error code ไม่ส่งข้อความที่อาจมีเนื้อหาผู้ใช้
+- `RuntimeManager` เพิ่ม `ask`/`conversations` (resume Workspace ที่หยุดให้เอง), `grant()` ที่ออก endpoint/token ทุกครั้งที่ start
+  และไม่หยุด runtime ที่มีงานค้างแม้เกินเวลา idle (ปิด Browser แล้วงานยังทำต่อ)
+- test ใหม่ 4 ตัว ใช้ endpoint สังเคราะห์บน loopback (ไม่เรียก AI จริง): คำถามพนักงานผ่าน process จริง 60/60 ข้อที่ไม่ต้องค้นเว็บ,
+  stop แล้ว resume บทสนทนาเดิมต่อได้และ token ไม่อยู่ใน SQLite, ใช้ session ของอีกคนไม่ได้, งานค้างไม่ถูกหยุดเป็น idle
+- ช่องว่าง: คำถาม "วันหยุดราชการปีนี้" ต้องใช้ web search ของ provider ซึ่ง endpoint แบบ compatible ไม่มี และ AI skill selection
+  ยังปิดเพราะผูกกับ tool loop (ดู server/README.md) ยังไม่มี Gateway/HTTP/event stream (ระยะ 3), ไม่มี deploy หรือ secret ใหม่
+
+## 2026-10-26 · Cloud Workspace ระยะ 1: Workspace contract และ Runtime Manager
+
+- เพิ่ม `server/src/workspace/`: contract ของ Workspace (id, เจ้าของ, สถานะ runtime, error code), โฟลเดอร์ตาม ADR 0001 §2
+  (`users/<user>/workspaces/<ws>/{workspace.json,files,snapshots}` สิทธิ์ 0700) และ `RuntimeManager` ที่สั่ง
+  create/list/get/start/stop/resume/health/touch ได้เฉพาะเจ้าของ Workspace; id ของคนอื่นตอบเหมือนไม่มีอยู่ (`WORKSPACE_NOT_FOUND`)
+- Runtime ผ่าน `RuntimeDriver` contract: ตอนนี้มี process driver (หนึ่ง Workspace = หนึ่ง Node process, cwd อยู่ใน `files/`,
+  environment มีแค่ 5 ค่า ไม่สืบทอด key ของ provider/Supabase) ส่วน Docker/Podman/systemd sandbox ยังรอตัดสินตาม ADR
+- มี admission control (`maxRunning`), หยุด runtime ที่ idle (`sweepIdle`), runtime ล้มแล้วสถานะเป็น `failed` และ start ใหม่ได้
+- `npm run test:engine` เพิ่ม 6 test: ผู้ใช้สองคนแยกกันและเรียก Workspace ของอีกคนไม่ได้, id ที่พยายามออกนอก data root ถูกปฏิเสธ,
+  process แยกและไม่รับ secret, stop/resume แล้วไฟล์อยู่ครบ, crash แล้วกู้ได้, capacity และ idle
+- ข้อจำกัด: process driver ไม่ใช่ security boundary ระดับ host (ไม่มี namespace/cgroup/network policy); runtime ยังไม่เปิด engine
+  (ระยะ 2) และยังไม่มี Gateway/login/HTTP (ระยะ 3) ไม่มีการ deploy, migration หรือ secret ใหม่
+
+## 2026-10-26 · ปรับ ADR 0001 เป็น STeP Cloud Workspace
+
+- เปลี่ยนปลายทางจากการคิดเป็น engine เดียวต่อผู้ใช้ ไปเป็น Cloud Workspace แบบ Codex/Claude Cloud:
+  Web เป็น client/gateway, Linux Server ใช้ทรัพยากรร่วมกัน และแต่ละ Workspace มี Runtime, filesystem,
+  SQLite และสิทธิ์แยกกัน ผู้ใช้หนึ่งคนสร้างได้หลาย Workspace และกลับมา Resume หลังปิด Browser ได้
+- ระบุขอบเขตว่าเป็น headless cloud workbench ไม่ใช่ Windows/Linux VDI: รุ่นแรกไม่ส่งภาพ Desktop และไม่เปิด
+  Host filesystem, privileged Docker, raw VNC/CDP หรือสิทธิ์ข้าม Workspace
+- เพิ่ม Runtime Manager, queue/quota, persistent volume, backup, event stream, approval, audit metadata,
+  Local LLM router และลำดับพัฒนา ตั้งแต่ headless isolation จนถึง optional Browser/MCP runner
+- งานนี้แก้เอกสาร ADR/progress เท่านั้น ยังไม่มีการเปลี่ยน runtime, migration, deployment หรือ secret
+
+## 2026-10-26 · Web App ปรับการส่งออก TOR และเอกสารราชการให้ตรงกับ Desktop
+
+- แก้ browser DOCX/PDF exporter ให้ชื่อเรื่องอยู่กึ่งกลาง แต่บล็อกหน่วยงาน/ข้อมูลต้นเรื่องและเนื้อหา TOR ชิดซ้ายอย่างชัดเจน
+  ตารางข้อความกำหนดชิดซ้ายและตัวเลขชิดขวาเหมือนกันทั้ง Word และหน้า PDF
+- เพิ่ม `th-TH` ทั้ง language และ East Asian line-breaking metadata ใน DOCX เพื่อให้ Word ตัดบรรทัดภาษาไทยถูกต้องขึ้น
+  โดยยังคงใส่ zero-width break เฉพาะสำเนาส่งออก ไม่แก้ร่างต้นฉบับ
+- เพิ่ม source-backed organization reference สำหรับการร่าง: ใช้ชื่อเต็ม
+  `อุทยานวิทยาศาสตร์และเทคโนโลยี มหาวิทยาลัยเชียงใหม่` และที่อยู่ของอุทยานเมื่อเอกสารมีช่องหน่วยงานที่รับผิดชอบ/ผู้ส่ง
+  พร้อมคงหน่วยงานอื่นที่ผู้ใช้ระบุและแจ้งความขัดแย้ง ไม่เติมช่องหน่วยงานขึ้นมาเอง
+- Validation: `check`, `build`, unit/API/PWA 91/91, PostgreSQL 29/29, engine 3/3 และ engine pin `desktop-v0.6.20`
+  ผ่าน; targeted document tests 25/25 ผ่าน
+- หลัง merge main รันซ้ำบน Windows: check, build, unit/API/PWA 96/96, PostgreSQL 29/29, engine pin และ
+  Playwright desktop/mobile 76/76 ผ่าน; engine isolation ล้มเฉพาะ POSIX mode 0700 ที่ Windows ไม่รองรับ
+  (ข้อจำกัดเดิม) และผ่าน 3/3 ใน Linux CI ของ PR
+- ต้อง rebuild/deploy frontend และ deploy `worker` (และ `api`) ด้วย เพราะ `document-contract.ts` และ
+  `documentRequest` ที่เพิ่ม organization reference อยู่ในเส้นทางร่างของ worker ไม่มี migration
+- Merge main หลัง #32/#33 เข้ามาแล้ว (คู่มือ TOR content-by-type และ saraban guide) ขัดแย้งเฉพาะ progress นี้
 
 ## 2026-10-25 · Rollout คู่มือ TOR/หนังสือราชการและปิด PR ที่ค้าง
 

@@ -1,4 +1,5 @@
 import { parseThaiDate, formatThaiDate } from './thai-date.ts';
+import { stepOrganizationReference } from './organization-profile.ts';
 
 /** Fixed document profiles: the host selects actual Skills and working templates from this allowlist. */
 export type DocumentToolId = 'tor' | 'memo' | 'letter' | 'project' | 'minutes';
@@ -222,7 +223,17 @@ export function documentRequest(
       ];
     }),
   );
-  const sourceText = JSON.stringify({ document: profile.title, variant: kind.label, attachmentRole, fields }, null, 2);
+  const sourceText = JSON.stringify(
+    {
+      document: profile.title,
+      variant: kind.label,
+      attachmentRole,
+      organizationReference: stepOrganizationReference,
+      fields,
+    },
+    null,
+    2,
+  );
   if (sourceText.length > 90_000) throw new Error('INPUT_LIMIT');
   const task =
     profile.id === 'memo' ? profile.title + kind.label : profile.variants.length > 1 ? `${profile.title} (${kind.label})` : profile.title;

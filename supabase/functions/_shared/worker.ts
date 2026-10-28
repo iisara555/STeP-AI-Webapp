@@ -2,12 +2,12 @@ import { z } from 'zod';
 import {
   OrganizationKnowledge,
   SYSTEM_RULES,
+  NO_ORGANIZATION_SOURCE_RULE,
   RECEIPT_BUYER,
   assertSafeText,
   boundedContext,
   chunkText,
   chooseSkill,
-  createAuthorityEngine,
   estimateTextTokens,
   rankSources,
   selectMemories,
@@ -32,6 +32,13 @@ import { calendarEvents, driveText, wantsCalendar } from './google.ts';
 import { imageBase64 } from './files.ts';
 import { normalizeReceipt } from './receipt.ts';
 import { skillContext } from '../../../packages/harness-core/src/skill-context.ts';
+import {
+  SELECTION_SYSTEM,
+  documentExcerpts,
+  parseSelection,
+  selectionCatalog,
+  selectionPrompt,
+} from '../../../packages/harness-core/src/reference-selection.ts';
 const textSchema = z.object({ text: z.string().max(200000), truncated: z.boolean() });
 // The estimator counts a Thai character as 0.9 token, about twice what Gemini reports (measured runs: about 15,000
 // estimated for 8,211 counted, and about 31,000 for 17,372). Chat keeps that margin. A drafting run needs the template,
@@ -41,6 +48,8 @@ const CONTEXT_TOKENS = 27000;
 const DOCUMENT_CONTEXT_TOKENS = 48000;
 // Estimated tokens a document run keeps free for organization answers, memories and history after its working files.
 const DOCUMENT_OPTIONAL_TOKENS = 3000;
+// Characters of AI-chosen document sections, about the 9,000 Desktop sends for its own keyword matches.
+const SELECTED_DOCUMENT_CHARS = 10000;
 // Fail closed if material already assembled into a prompt was removed, expired or replaced.
 // worker_payload also rechecks the live lease, membership and each selected document's ACL.
 function resourceSnapshot(payload: {
@@ -126,199 +135,236 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
       }[];
       const authority = registered.find((s) => s.source_key === '__authority');
       const roster = registered.find((s) => s.source_key === '__organization');
-      const engine = createAuthorityEngine(roster?.body || '');
       if (!authority || !roster) throw new Error('HARNESS_NOT_IMPORTED');
-      const decision = engine.evaluateAuthorityPreflight(
-        query,
-        engine.parseAuthorityRegistry(authority.body),
+      // No authority preflight stops a chat turn, as in Desktop (checks.authority is off by default): the web chat
+      // has no tool to approve, sign, number or send a document, and STeP signs and approves on paper. The
+      // Skills' Human Authority boundaries and the drafting contract still keep the AI from claiming either.
+      const sources: SourceRef[] = [];
+      const knowledge = new OrganizationKnowledge(
+        registered
+          .filter((s) => !s.source_key.startsWith('__') && s.provenance.kind !== 'skill-support')
+          .map((s) => ({
+            ...s.provenance,
+            id: s.source_key,
+            title: s.title,
+            body: s.body,
+            path: String(s.provenance.path || s.source_key),
+          })),
       );
-      if (decision.status !== 'ALLOW') {
-        result = {
-          text: 'งานนี้ต้องให้ผู้มีอำนาจของ STeP ตรวจและตัดสินใจครับ ผมช่วยเตรียมร่างหรือรายการข้อมูลประกอบได้ แต่ไม่สามารถอนุมัติหรือลงนามแทนได้',
-          sources: [],
-        };
-      } else {
-        const sources: SourceRef[] = [];
-        const knowledge = new OrganizationKnowledge(
-          registered
-            .filter((s) => !s.source_key.startsWith('__') && s.provenance.kind !== 'skill-support')
-            .map((s) => ({
-              ...s.provenance,
-              id: s.source_key,
-              title: s.title,
-              body: s.body,
-              path: String(s.provenance.path || s.source_key),
-            })),
-        );
-        const found = await knowledge.search(query);
-        const parts: string[] = [];
-        if (wantsCalendar(query)) {
-          if (context.session.visibility === 'workspace') throw new Error('GOOGLE_PRIVATE_CONTEXT');
-          if (!job.input.googleConsent) throw new Error('GOOGLE_CONSENT_REQUIRED');
-          const calendar = await calendarEvents(service, job.tenant_id, job.actor_id, query, env, jobFetch);
-          parts.push(untrusted('google-calendar', JSON.stringify(calendar)));
-          sources.push({
-            id: 'google-calendar',
-            title: 'Google Calendar · บัญชีของคุณ',
-            location: calendar.range.timeMin + ' — ' + calendar.range.timeMax,
-            kind: 'google',
-          });
-        }
-        const orgQuestion =
-          /(?:STeP|สเต็ป|AFP|อุทยาน|มหาวิทยาลัย|เบิก|ลาพัก|ลาป่วย|ลาคลอด|พัสดุ|งบประมาณ|นโยบาย|ขั้นตอนงาน|QM-|QP-|WI-|FM-)/i.test(
-            query,
-          );
-        const skill = chooseSkill(
-          (context.skills as Skill[]).filter((s) => !s.metadata.developerOnly && !s.metadata.webUnsupported),
+      const found = await knowledge.search(query);
+      const parts: string[] = [];
+      if (wantsCalendar(query)) {
+        if (context.session.visibility === 'workspace') throw new Error('GOOGLE_PRIVATE_CONTEXT');
+        if (!job.input.googleConsent) throw new Error('GOOGLE_CONSENT_REQUIRED');
+        const calendar = await calendarEvents(service, job.tenant_id, job.actor_id, query, env, jobFetch);
+        parts.push(untrusted('google-calendar', JSON.stringify(calendar)));
+        sources.push({
+          id: 'google-calendar',
+          title: 'Google Calendar · บัญชีของคุณ',
+          location: calendar.range.timeMin + ' — ' + calendar.range.timeMax,
+          kind: 'google',
+        });
+      }
+      const orgQuestion =
+        /(?:STeP|สเต็ป|AFP|อุทยาน|มหาวิทยาลัย|เบิก|ลาพัก|ลาป่วย|ลาคลอด|พัสดุ|งบประมาณ|นโยบาย|ขั้นตอนงาน|QM-|QP-|WI-|FM-)/i.test(
           query,
-          job.input.skill || undefined,
         );
-        // A chosen, registered Skill (every document form sends one) is guided drafting, not a question to answer
-        // from documents. An unknown Skill name does not lift the rule.
-        if (orgQuestion && !found.length && !parts.length && !tool && !(job.input.skill && skill)) {
-          result = {
-            text: 'ยังไม่พบเอกสารองค์กรที่ยืนยันเรื่องนี้ครับ กรุณาแนบเอกสารที่เกี่ยวข้อง หรือให้ผู้ดูแลนำเข้าเอกสาร STeP เพิ่มก่อน',
-            sources: [],
-          };
-        } else {
-          const contextBudget = tool ? DOCUMENT_CONTEXT_TOKENS : CONTEXT_TOKENS;
-          // The user's query precedes optional references so budget trimming never drops it.
-          parts.unshift(`คำขอปัจจุบัน: ${query}`);
-          if (skill) {
-            const selected = skillContext(
-              skill,
-              registered,
-              query,
-              tool ? { fullExamples: true, maxTokens: contextBudget - DOCUMENT_OPTIONAL_TOKENS } : {},
-            );
-            parts.push(...selected.parts);
-            sources.push(...selected.sources);
-          }
-          if (tool) {
-            // After the first answer, revisions start from the saved draft and change only what was asked.
-            const revising = (context.history as { role: string }[]).some((m) => m.role === 'assistant');
-            const current = String(context.session?.draft || '').trim();
-            const revision = revising && current ? untrusted('current_draft', current) : '';
-            // The Skill's own files are already in; the working files fill what is left of the budget, after room
-            // for the saved draft and for the answers, memories and history that follow.
-            const drafting = documentContext(tool, context.skills as Skill[], registered, {
-              loaded: sources.map((s) => s.id),
-              budgetTokens:
-                contextBudget -
-                DOCUMENT_OPTIONAL_TOKENS -
-                estimateTextTokens(parts.join('\n') + revision).estimatedTokens,
-            });
-            parts.push(...drafting.parts);
-            sources.push(...drafting.sources);
-            if (revision) parts.push(revision);
-          }
-          // Required Skill material and the current request must fit before optional context.
-          if (estimateTextTokens(parts.join('\n')).estimatedTokens > contextBudget)
-            throw new Error('CONTEXT_LIMIT');
-          for (const section of found) {
-            const id = section.id;
-            parts.push(untrusted(id, `${section.title}\n${section.heading}\n${section.text}`));
-            if (!sources.some((s) => s.id === id))
-              sources.push({
-                id,
-                title: section.title,
-                location: section.heading,
-                version: registered.find((s) => s.source_key === id)?.source_version,
-                kind: 'organization',
-              });
-          }
-          const memories = selectMemories(context.memories as Memory[], query, context.session.visibility);
-          if (memories.length)
-            parts.push(
-              untrusted('ความจำที่ยืนยันแล้ว', memories.map((m) => `${m.title}: ${m.body}`).join('\n')),
-            );
-          for (const doc of context.documents) {
-            let text = String(doc.extracted_text || '');
-            if (doc.source_kind === 'drive')
-              text = (await driveText(service, job.tenant_id, job.actor_id, doc.drive_file_id, env, jobFetch))
-                .text;
-            if (!text.trim()) throw new Error('DOCUMENT_NEEDS_OCR');
-            assertSafeText(text);
-            const chunks = chunkText(text).map((c) => ({
-              title: doc.name,
-              body: c.content,
-              location: c.location,
-            }));
-            const matching = rankSources(chunks, query, 4);
-            const selected = matching.length ? matching : chunks.slice(0, 4);
-            for (const chunk of selected)
-              parts.push(untrusted(doc.id, `${doc.name}\n${chunk.location}\n${chunk.body}`));
-            if (selected.length)
-              sources.push({
-                id: doc.id,
-                title: doc.name,
-                location: selected.map((c) => c.location).join(', '),
-                kind: 'document',
-              });
-          }
-          // Authorised vectors only: query results are checked again under the job's actor in SQL.
-          if (
-            !info.textOnly &&
-            context.documents.some((d: { source_kind: string }) => d.source_kind === 'upload')
-          ) {
-            const vector = await ai.embed(query);
-            inputTokens += estimateTextTokens(query).estimatedTokens;
-            const hits = await checked(
-              service.rpc('worker_search', {
-                job_id: job.id,
-                lease: job.lease_token,
-                query_embedding: JSON.stringify(vector),
-              }),
-            );
-            for (const hit of hits || [])
-              parts.push(untrusted(hit.document_id, `${hit.location}\n${hit.content}`));
-          }
+      const usable = (context.skills as Skill[]).filter(
+        (s) => !s.metadata.developerOnly && !s.metadata.webUnsupported,
+      );
+      let skill = chooseSkill(usable, query, job.input.skill || undefined);
+      // Desktop's tool loop lets the AI open a registered document or Skill the keyword match missed ("ปีหน้าลางาน
+      // ได้กี่วัน"). The web asks the AI once to choose from the same registry, then reads only those sections.
+      if (!tool && !job.input.skill && (!found.length || !skill)) {
+        const documents = found.length ? [] : await knowledge.registry();
+        const choices = skill ? [] : usable;
+        if (documents.length || choices.length) {
           const history = (context.history as { role: string; body: string }[])
             .slice(0, -1)
-            .map((m) => `${m.role}: ${m.body}`)
+            .slice(-4)
+            .map((m) => `${m.role}: ${m.body.slice(0, 600)}`)
             .join('\n');
-          if (history) parts.push(untrusted('บทสนทนาก่อนหน้า', history));
-          const prompt = boundedContext(parts, contextBudget);
-          assertSafeText(prompt);
-          // Only the run owner's own preferences, behind the same fresh access gate.
-          const profile = await checked<MemberProfile | null>(
-            jobService
-              .from('member_profiles')
-              .select('*')
-              .eq('tenant_id', job.tenant_id)
-              .eq('user_id', job.actor_id)
-              .maybeSingle(),
-          );
-          const answer = await ai.generate({
-            system: chatSystem(SYSTEM_RULES, tool, profile ? profileRules(profile) : undefined),
-            prompt,
-            // A full document and its review may need more room, within the cost this run reserved.
-            maxOutputTokens: tool
-              ? documentOutputTokens(
-                  Number(context.run?.reserved_cents),
-                  Number(context.run?.input_rate),
-                  Number(context.run?.output_rate),
-                )
-              : undefined,
-            signal: AbortSignal.timeout(80000),
-          });
-          inputTokens += answer.usage.input;
-          outputTokens += answer.usage.output;
-          result = {
-            text:
-              answer.text +
-              (answer.truncated
-                ? '\n\nคำตอบยังไม่ครบเพราะถึงความยาวสูงสุด คุณขอให้ขยายเฉพาะส่วนที่ต้องการต่อได้ครับ'
-                : ''),
-            sources: sources.filter(
-              (s, i) =>
-                sources.findIndex((other) => other.id === s.id) === i &&
-                prompt.includes(`<reference name=${JSON.stringify(s.id)}>`),
-            ),
-            truncated: answer.truncated,
-          };
+          try {
+            const picked = await ai.generate({
+              system: SELECTION_SYSTEM,
+              prompt: selectionPrompt(query, history, selectionCatalog(documents, choices)),
+              json: info.provider === 'gemini',
+              maxOutputTokens: 2048,
+              signal: AbortSignal.timeout(25000),
+            });
+            inputTokens += picked.usage.input;
+            outputTokens += picked.usage.output;
+            const choice = parseSelection(
+              picked.text,
+              documents.map((d) => d.id),
+              choices.map((s) => s.skill_key),
+            );
+            let room = SELECTED_DOCUMENT_CHARS;
+            for (const { id, sections } of choice.documents) {
+              const source = registered.find((s) => s.source_key === id)!;
+              const excerpts = documentExcerpts(
+                { id, title: source.title, path: String(source.provenance.path || id), body: source.body },
+                sections,
+                query,
+                room,
+              );
+              room -= excerpts.reduce((n, e) => n + e.text.length, 0);
+              found.push(...excerpts);
+            }
+            if (choice.skill) skill = choices.find((s) => s.skill_key === choice.skill);
+          } catch (error) {
+            // Access and lease failures stop the run; a failed or unreadable choice only loses the extra context.
+            if (['ACCESS_DENIED', 'RUN_INTERRUPTED', 'DATA_ERROR'].includes(safeCode(error))) throw error;
+          }
         }
       }
+      // A STeP request with no organization document, attachment, calendar data, document tool or chosen Skill is
+      // still answered, as general help that says it is not based on STeP documents. An auto-matched Skill is used.
+      const noOrganizationSource =
+        orgQuestion &&
+        !found.length &&
+        !parts.length &&
+        !tool &&
+        !(job.input.skill && skill) &&
+        !context.documents.length;
+      const contextBudget = tool ? DOCUMENT_CONTEXT_TOKENS : CONTEXT_TOKENS;
+      // The user's query precedes optional references so budget trimming never drops it.
+      parts.unshift(`คำขอปัจจุบัน: ${query}`);
+      if (skill) {
+        const selected = skillContext(
+          skill,
+          registered,
+          query,
+          tool ? { fullExamples: true, maxTokens: contextBudget - DOCUMENT_OPTIONAL_TOKENS } : {},
+        );
+        parts.push(...selected.parts);
+        sources.push(...selected.sources);
+      }
+      if (tool) {
+        // After the first answer, revisions start from the saved draft and change only what was asked.
+        const revising = (context.history as { role: string }[]).some((m) => m.role === 'assistant');
+        const current = String(context.session?.draft || '').trim();
+        const revision = revising && current ? untrusted('current_draft', current) : '';
+        // The Skill's own files are already in; the working files fill what is left of the budget, after room
+        // for the saved draft and for the answers, memories and history that follow.
+        const drafting = documentContext(tool, context.skills as Skill[], registered, {
+          loaded: sources.map((s) => s.id),
+          budgetTokens:
+            contextBudget -
+            DOCUMENT_OPTIONAL_TOKENS -
+            estimateTextTokens(parts.join('\n') + revision).estimatedTokens,
+        });
+        parts.push(...drafting.parts);
+        sources.push(...drafting.sources);
+        if (revision) parts.push(revision);
+      }
+      // Required Skill material and the current request must fit before optional context.
+      if (estimateTextTokens(parts.join('\n')).estimatedTokens > contextBudget)
+        throw new Error('CONTEXT_LIMIT');
+      for (const section of found) {
+        const id = section.id;
+        parts.push(untrusted(id, `${section.title}\n${section.heading}\n${section.text}`));
+        if (!sources.some((s) => s.id === id))
+          sources.push({
+            id,
+            title: section.title,
+            location: section.heading,
+            version: registered.find((s) => s.source_key === id)?.source_version,
+            kind: 'organization',
+          });
+      }
+      const memories = selectMemories(context.memories as Memory[], query, context.session.visibility);
+      if (memories.length)
+        parts.push(untrusted('ความจำที่ยืนยันแล้ว', memories.map((m) => `${m.title}: ${m.body}`).join('\n')));
+      for (const doc of context.documents) {
+        let text = String(doc.extracted_text || '');
+        if (doc.source_kind === 'drive')
+          text = (await driveText(service, job.tenant_id, job.actor_id, doc.drive_file_id, env, jobFetch))
+            .text;
+        if (!text.trim()) throw new Error('DOCUMENT_NEEDS_OCR');
+        assertSafeText(text);
+        const chunks = chunkText(text).map((c) => ({
+          title: doc.name,
+          body: c.content,
+          location: c.location,
+        }));
+        const matching = rankSources(chunks, query, 4);
+        const selected = matching.length ? matching : chunks.slice(0, 4);
+        for (const chunk of selected)
+          parts.push(untrusted(doc.id, `${doc.name}\n${chunk.location}\n${chunk.body}`));
+        if (selected.length)
+          sources.push({
+            id: doc.id,
+            title: doc.name,
+            location: selected.map((c) => c.location).join(', '),
+            kind: 'document',
+          });
+      }
+      // Authorised vectors only: query results are checked again under the job's actor in SQL.
+      if (
+        !info.textOnly &&
+        context.documents.some((d: { source_kind: string }) => d.source_kind === 'upload')
+      ) {
+        const vector = await ai.embed(query);
+        inputTokens += estimateTextTokens(query).estimatedTokens;
+        const hits = await checked(
+          service.rpc('worker_search', {
+            job_id: job.id,
+            lease: job.lease_token,
+            query_embedding: JSON.stringify(vector),
+          }),
+        );
+        for (const hit of hits || [])
+          parts.push(untrusted(hit.document_id, `${hit.location}\n${hit.content}`));
+      }
+      const history = (context.history as { role: string; body: string }[])
+        .slice(0, -1)
+        .map((m) => `${m.role}: ${m.body}`)
+        .join('\n');
+      if (history) parts.push(untrusted('บทสนทนาก่อนหน้า', history));
+      const prompt = boundedContext(parts, contextBudget);
+      assertSafeText(prompt);
+      // Only the run owner's own preferences, behind the same fresh access gate.
+      const profile = await checked<MemberProfile | null>(
+        jobService
+          .from('member_profiles')
+          .select('*')
+          .eq('tenant_id', job.tenant_id)
+          .eq('user_id', job.actor_id)
+          .maybeSingle(),
+      );
+      const answer = await ai.generate({
+        system: chatSystem(
+          noOrganizationSource ? SYSTEM_RULES + '\n' + NO_ORGANIZATION_SOURCE_RULE : SYSTEM_RULES,
+          tool,
+          profile ? profileRules(profile) : undefined,
+        ),
+        prompt,
+        // A full document and its review may need more room, within the cost this run reserved.
+        maxOutputTokens: tool
+          ? documentOutputTokens(
+              Number(context.run?.reserved_cents),
+              Number(context.run?.input_rate),
+              Number(context.run?.output_rate),
+            )
+          : undefined,
+        signal: AbortSignal.timeout(80000),
+      });
+      inputTokens += answer.usage.input;
+      outputTokens += answer.usage.output;
+      result = {
+        text:
+          answer.text +
+          (answer.truncated
+            ? '\n\nคำตอบยังไม่ครบเพราะถึงความยาวสูงสุด คุณขอให้ขยายเฉพาะส่วนที่ต้องการต่อได้ครับ'
+            : ''),
+        sources: sources.filter(
+          (s, i) =>
+            sources.findIndex((other) => other.id === s.id) === i &&
+            prompt.includes(`<reference name=${JSON.stringify(s.id)}>`),
+        ),
+        truncated: answer.truncated,
+      };
     } else {
       const doc = context.document;
       if (job.kind === 'document' && doc.extracted_text) {
