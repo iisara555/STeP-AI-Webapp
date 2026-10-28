@@ -9,20 +9,22 @@ import { defaultPolicy, type Policy } from '../../harness/desktop/electron/polic
 import { searchPublicWeb } from '../../harness/desktop/electron/public-search.ts';
 import type { ProviderAdapter, ProviderContext } from '../../harness/desktop/electron/providers.ts';
 import type { Connection, RunEvent } from '../../harness/desktop/src/types.ts';
+import { PUBLIC_WEB_INSTRUCTIONS, publicWebHost, type PublicWebOptions } from './public-web.ts';
 
 export const HARNESS_ROOT = resolve(import.meta.dirname, '../../harness');
 
 /**
  * The server profile of the Desktop policy. The privacy check is on because staff data passes through a shared
- * machine; authority checks keep the Desktop default. The tool loop stays off until the server has its own
- * restricted tool host (ADR 0001, item 5).
+ * machine; authority checks keep the Desktop default. The tool loop stays off unless the single-user CLI
+ * opts in to the restricted public web host; Cloud Workspace does not enable it.
  */
-export function serverPolicy(): Policy {
+export function serverPolicy(options: { publicWeb?: boolean } = {}): Policy {
   const policy = defaultPolicy();
   policy.source = 'managed';
   policy.checks = { ...policy.checks, privacy: true };
   for (const off of [
     'toolLoop',
+    'hybridSkillSelection',
     'autoMode',
     'shellByAi',
     'autopilot',
@@ -35,6 +37,7 @@ export function serverPolicy(): Policy {
     'vault',
   ] as const)
     policy.features[off] = false;
+  policy.features.toolLoop = options.publicWeb === true;
   return policy;
 }
 
@@ -52,6 +55,8 @@ export type EngineOptions = {
   root?: string;
   /** Public web search for public facts; tests pass a synthetic one. */
   publicSearch?: (query: string, signal: AbortSignal) => Promise<string>;
+  /** Explicit per-run consent for the public-only CLI trial; absent for Workspace runtimes. */
+  publicWeb?: { fetchPage?: PublicWebOptions['fetchPage'] };
 };
 
 const load = (root: string, path: string) => import(pathToFileURL(join(root, path)).href);
@@ -62,6 +67,7 @@ export async function createEngine({
   emit = () => {},
   policy = serverPolicy(),
   root = HARNESS_ROOT,
+  publicWeb,
   publicSearch = (query, signal) => searchPublicWeb(query, signal, policy.network?.proxyUrl),
 }: EngineOptions) {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -91,11 +97,27 @@ export async function createEngine({
     modelLimits: (connection) =>
       policy.modelLimits?.[connection.model] || policy.modelLimits?.[connection.provider + ':*'] || {},
     privacy: scanText,
-    publicSearch,
+    publicSearch: async (query, signal) => {
+      const found = await publicSearch(query, signal);
+      // WorkService records returned sources. Reject unreviewed content before it enters its trace.
+      if (publicWeb) {
+        const review = scanText(found);
+        if (review.action !== 'pass' || review.redactedText !== found)
+          throw new Error('PRIVACY_REVIEW_REQUIRED');
+      }
+      return found;
+    },
     catalog: skillCatalog.createSkillCatalog(root),
     documentMetadata: routing.loadDocumentContextMetadata,
     documentCatalog: routing.loadDocumentCatalog,
-    toolLoop: () => policy.features.toolLoop,
+    toolLoop: () => Boolean(publicWeb && policy.features.toolLoop),
+    ...(publicWeb && policy.features.toolLoop
+      ? {
+          toolInstructions: () => PUBLIC_WEB_INSTRUCTIONS,
+          tools: async (scope) =>
+            publicWebHost(scope, { privacy: scanText, proxyUrl: policy.network?.proxyUrl, ...publicWeb }),
+        }
+      : {}),
     hybridSkillSelection: () => policy.features.hybridSkillSelection,
     visionEnabled: () => policy.features.vision,
     answerCheck: () => policy.features.answerCheck,

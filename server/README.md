@@ -5,7 +5,7 @@
 
 - engine มาจาก submodule `harness/` ที่ล็อกไว้ที่ `desktop-v0.6.20` (`npm run check:engine-pin` ตรวจว่าเป็น release tag)
 - `src/engine.ts` สร้าง engine ของผู้ใช้ 1 คน มีโฟลเดอร์ของตัวเอง (`<data>/users/<id>/workspace.sqlite`, สิทธิ์ 0700)
-  ใช้ `serverPolicy()`: เปิด privacy check, ปิด tool loop, shell, sandbox, MCP, Copilot, Vault, autopilot และ staff Skills
+  ใช้ `serverPolicy()`: เปิด privacy check, ปิด tool loop, shell, sandbox, MCP, Copilot, Vault, autopilot และ staff Skills โดยปริยาย
 - `src/register.mjs` แทน `@github/copilot-sdk` ด้วย module ที่ไม่ยอมเริ่มทำงาน เพราะ `providers.ts` import มาแบบ static
   แต่ Copilot ปิดบน server ทำให้ไม่ต้องติดตั้ง native client
 - dependencies ของ server มีแค่ 2 ตัว คือ `mdast-util-from-markdown` และ `@xmldom/xmldom` เวอร์ชันเดียวกับ Desktop
@@ -22,7 +22,7 @@
 - ระยะ 2: runtime เปิด engine ของ Desktop บน `<ws>/workspace.sqlite` ของตัวเอง Manager ส่งคำขอผ่านช่องทางส่วนตัว
   (`connect`/`ask`/`conversations`) `ask` กับ Workspace ที่หยุดอยู่จะ resume ให้เอง และ runtime ที่ยังมีงานค้างจะไม่ถูกหยุดเพราะ idle
 - AI endpoint และ token มาจาก `grant()` ทุกครั้งที่ start/resume token อยู่ใน memory ของ runtime เท่านั้น ไม่ลง SQLite
-  และไม่อยู่ใน environment ส่วนการค้นเว็บสาธารณะปิดไว้จนกว่า Workspace จะให้ consent (`publicSearch`)
+  และไม่อยู่ใน environment; Workspace ยังไม่ต่อ tool host สำหรับค้นเว็บ แม้ `publicSearch` จะเป็น true
 
 ช่องว่างที่รู้แล้วของระยะ 2:
 
@@ -30,6 +30,39 @@
   แบบ OpenAI-compatible ค้นเว็บไม่ได้ test จึงวัด 60/60 ข้อที่เหลือ และระบุข้อนี้ไว้ชัด รอ router proxy (ADR §7) หรือ engine
 - AI skill selection (hybrid) ของ Desktop ทำงานเฉพาะเมื่อเปิด tool loop ซึ่ง server profile ยังปิด คำขอที่ router แบบกฎหา Skill
   ไม่เจอจึงได้คำตอบแบบ general assist แต่ยังไม่ใช้ขั้นตอนของ Skill
+
+## ทดลองค้นเว็บสาธารณะผ่าน ToolLoop
+
+โหมดนี้ใช้กับ `engine:ask` และ `engine:bench` สำหรับเจ้าของโครงการคนเดียว โดยปิดเป็นค่าเริ่มต้น
+เพิ่ม `--public-web` **เฉพาะรอบที่ผู้รันยินยอม** ให้ส่งข้อความคำถามสาธารณะทั้งข้อความไป Bing และให้ AI
+อ่านหน้าสาธารณะที่อยู่ในผลค้นหา (รวม redirect ไปยังเว็บสาธารณะ) รวมถึงส่งผลค้นหา/เนื้อหาหน้าไปยัง AI endpoint
+ที่ตั้งไว้ ใช้เฉพาะคำถามและเอกสารสาธารณะ ห้ามใส่ข้อมูลส่วนตัว ข้อมูลภายใน หรือ credential
+
+```bash
+STEP_AI_KEY=ollama STEP_AI_MODEL=gemma4:12b-32k STEP_AI_BASE_URL=http://127.0.0.1:11435/v1 \
+  npm run engine:ask -- --public-web --user owner "วันหยุดราชการปีนี้"
+
+STEP_AI_KEY=ollama STEP_AI_MODEL=gemma4:12b-32k STEP_AI_BASE_URL=http://127.0.0.1:11435/v1 \
+  npm run engine:bench -- --public-web --question "วันหยุดราชการปีนี้"
+```
+
+ใช้ `11434` แทน `11435` เมื่อรันตรงบนเครื่อง Ollama; homelab ต้องมี reverse tunnel ตามตัวอย่างข้างล่าง
+และต้องออกอินเทอร์เน็ตเพื่อค้น/อ่านเว็บได้เองด้วย การค้นเว็บไม่ได้ผ่าน tunnel ของ Ollama
+`--question` เลือกคำถามที่ตรงทั้งข้อความจากชุด benchmark; ละตัวเลือกนี้เพื่อรันครบ 61 ข้อ
+
+- Host เปิดเฉพาะ `web_search`/`web_fetch` และให้ค้นได้เฉพาะคำถามปัจจุบันตามตัวอักษร ไม่ส่ง query ที่ AI แต่งขึ้น
+  อ่านได้เฉพาะ URL ที่ปรากฏในผลค้นหาของรอบนั้น ไม่เกิน 2 ครั้งค้นและ 5 ครั้งอ่าน เครื่องมืออื่นถูกปฏิเสธ
+  และ AI skill selection ยังปิดในโหมดทดลองนี้
+- ใช้ `searchPublicWeb` และ `fetchPublic` ของ Desktop เพื่อตรวจ public URL, DNS และ redirect;
+  ผ่าน privacy scan ทั้งคำถาม URL ผลค้นและหน้าเว็บ หากต้องตรวจเพิ่มจะปฏิเสธแทนการส่งต่อ
+- ผลเว็บเป็นข้อมูลที่ไม่น่าเชื่อถือ ไม่ใช่คำสั่ง AI ต้องตรวจแหล่งอ้างอิงและคำตอบเอง รายงาน benchmark เพิ่ม
+  `webSearchSucceeded`, `webReadSucceeded`, `webToolFailures`, `webSources` และ `webCited`; การนับนี้ไม่ยืนยันว่าข้อมูลถูกต้อง
+  หรือ URL ที่อ้างเป็น URL เดียวกับหน้าที่อ่าน หากโมเดลไม่ขอใช้ tool หรือค้นไม่สำเร็จ ต้องตรวจคำตอบเป็นพิเศษ
+- เมื่อเปิดโหมดนี้ CLI แสดงคำตอบหลังจบงาน เพื่อไม่ให้คำขอ tool ระหว่างทางปะปนกับคำตอบ ค่า latency และ token
+  อาจเพิ่มจากการเรียกโมเดลหลายรอบ และต้อง benchmark กับโมเดลจริงอีกครั้ง `firstTextP50Seconds` คือข้อความแรก
+  ของ provider ซึ่งอาจเป็นคำขอ tool ไม่ใช่เวลาเริ่มตอบให้ผู้ใช้
+- นี่เป็นทดลอง CLI ยังไม่เปิดบน Cloud Workspace: `publicSearch` grant ยังไม่ใช่หน้ารับ consent สำหรับ
+  การส่ง query ไป Bing และการส่งผลเว็บไป provider ต้องมี gateway และ consent ก่อนเปิดให้ผู้ใช้หลายคน
 
 ## ตรวจ
 
@@ -81,6 +114,6 @@ homelab ไม่มี GPU ให้รัน engine บน homelab แล้�
 
 - ยังไม่บังคับนโยบายข้อมูลของ provider (`data_collection: deny`) งานนี้เป็นของ router proxy ในระยะ 4
   ระหว่างนี้ให้ถามเฉพาะคำถามที่ไม่ลับ
-- endpoint แบบ compatible ค้นเว็บไม่ได้ คำถามที่ engine เลือกส่งไปค้นเว็บ (เช่นวันหยุดราชการ) จะได้ `WEB_SEARCH_UNAVAILABLE`
-- tool loop ปิดอยู่ จนกว่า server จะมี tool host ที่จำกัดเครื่องมือเฉพาะ ADR ข้อ 5 (ระยะ 3)
+- เมื่อไม่เปิด `--public-web` endpoint แบบ compatible ไม่มี web search ของ provider และคำถามที่ต้องค้นเว็บจะไม่สำเร็จ
+- tool loop เปิดเฉพาะการทดลอง CLI เมื่อเลือก `--public-web`; ยังไม่เปิดเครื่องมืออื่นหรือ Cloud Workspace
 - ยังไม่มี gateway, login หรือการแยกผู้ใช้ระดับ process ตอนนี้เป็น process เดียวต่อคำสั่ง

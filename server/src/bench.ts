@@ -6,10 +6,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CompatibleAdapter } from '../../harness/desktop/electron/providers.ts';
-import { createEngine, HARNESS_ROOT } from './engine.ts';
+import { serverPolicy, createEngine, HARNESS_ROOT } from './engine.ts';
 
 const { values } = parseArgs({
-  options: { limit: { type: 'string' }, team: { type: 'string', default: 'cc' } },
+  options: {
+    limit: { type: 'string' },
+    question: { type: 'string' },
+    team: { type: 'string', default: 'cc' },
+    'public-web': { type: 'boolean', default: false },
+  },
 });
 const key = process.env.STEP_AI_KEY;
 const model = process.env.STEP_AI_MODEL;
@@ -21,7 +26,16 @@ const baseUrl = process.env.STEP_AI_BASE_URL || 'https://openrouter.ai/api/v1';
 const { questions: all } = JSON.parse(
   await readFile(join(HARNESS_ROOT, 'desktop/eval/knowledge-questions.json'), 'utf8'),
 ) as { questions: { q: string; doc: string | string[] }[] };
-const questions = values.limit ? all.slice(0, Number(values.limit)) : all;
+if (values.limit && (!/^[1-9]\d*$/.test(values.limit) || Number(values.limit) > all.length)) {
+  console.error(`--limit ต้องเป็นจำนวนเต็มระหว่าง 1 และ ${all.length}`);
+  process.exit(2);
+}
+const filtered = values.question ? all.filter(({ q }) => q === values.question) : all;
+if (!filtered.length) {
+  console.error('ไม่พบคำถามที่ตรงกับ --question ในชุด benchmark');
+  process.exit(2);
+}
+const questions = values.limit ? filtered.slice(0, Number(values.limit)) : filtered;
 
 const firstDocument = (prompt: string) =>
   /<organization_knowledge>[\s\S]*?\[([a-z0-9-]+)\]/.exec(prompt)?.[1] ?? null;
@@ -31,11 +45,15 @@ const cited = (text: string) => [
 ];
 
 // Each bench gets a fresh employee folder so earlier tasks and memories cannot shape the answers.
-const scratch = await mkdtemp(join(resolve(process.env.STEP_AI_DATA || '.data'), 'bench-'));
+const dataRoot = resolve(process.env.STEP_AI_DATA || '.data');
+await mkdir(dataRoot, { recursive: true, mode: 0o700 });
+const scratch = await mkdtemp(join(dataRoot, 'bench-'));
 let prompt = '';
 const real = new CompatibleAdapter();
 const engine = await createEngine({
   dataDir: join(scratch, 'users', 'bench'),
+  policy: serverPolicy({ publicWeb: values['public-web'] }),
+  ...(values['public-web'] ? { publicWeb: {} } : {}),
   runtime: async () => ({
     adapter: {
       run: (text: string, connection: any, context: any) => {
@@ -59,6 +77,11 @@ type Result = {
   ttftMs?: number;
   usage: { input: number; output: number };
   answer: string;
+  webSearchSucceeded: boolean;
+  webReadSucceeded: boolean;
+  webToolFailures: { tool: string; code: string }[];
+  webSources: { title: string; url: string }[];
+  webCited: boolean;
 };
 const results: Result[] = [];
 try {
@@ -88,8 +111,11 @@ try {
       (sum, s) => ({ input: sum.input + (s.usage?.input || 0), output: sum.output + (s.usage?.output || 0) }),
       { input: 0, output: 0 },
     );
-    const answer =
-      done.status === 'review' ? done.messages.filter((m) => m.role === 'assistant').at(-1)?.text || '' : '';
+    const message =
+      done.status === 'review' ? done.messages.filter((m) => m.role === 'assistant').at(-1) : undefined;
+    const answer = message?.text || '';
+    const tools = (run?.steps || []).flatMap((step) => step.tools || []);
+    const webSources = message?.webSources || [];
     const found = prompt ? firstDocument(prompt) : null;
     const none = doc === 'none';
     const routed = none ? found === null : expected.includes(found ?? '');
@@ -113,6 +139,13 @@ try {
       ttftMs: answerCall?.ttftMs,
       usage,
       answer,
+      webSearchSucceeded: tools.some((t) => t.tool === 'web_search' && t.ok),
+      webReadSucceeded: tools.some((t) => t.tool === 'web_fetch' && t.ok),
+      webToolFailures: tools
+        .filter((t) => ['web_search', 'web_fetch'].includes(t.tool) && !t.ok)
+        .map((t) => ({ tool: t.tool, code: t.code || 'TOOL_FAILED' })),
+      webSources,
+      webCited: webSources.some(({ url }) => answer.includes(url)),
     });
     const r = results.at(-1)!;
     console.log(
@@ -138,11 +171,15 @@ const totalSeconds = times.reduce((n, ms) => n + ms / 1000, 0);
 const summary = {
   model,
   baseUrl,
+  publicWeb: values['public-web'],
   at: new Date().toISOString(),
   questions: results.length,
   routed: count((r) => r.routed),
   answered: count((r) => r.answered),
   cites: count((r) => r.cites),
+  webSearchSucceeded: count((r) => r.webSearchSucceeded),
+  webReadSucceeded: count((r) => r.webReadSucceeded),
+  webCited: count((r) => r.webCited),
   failures: Object.fromEntries(
     [...new Set(results.map((r) => r.code).filter(Boolean))].map((c) => [c, count((r) => r.code === c)]),
   ),
