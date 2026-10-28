@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { WorkspaceError, type RuntimeDriver } from '../src/workspace/contract.ts';
 import { RuntimeManager } from '../src/workspace/manager.ts';
 import { processDriver, runtimeEnv } from '../src/workspace/process-driver.ts';
-import { workspacePaths } from '../src/workspace/storage.ts';
+import { saveRecord, workspacePaths } from '../src/workspace/storage.ts';
 
 const code = (expected: string) => (error: unknown) =>
   error instanceof WorkspaceError && error.code === expected;
@@ -181,4 +181,20 @@ test('the shared server admits only maxRunning runtimes and stops idle ones', as
     },
     { driver, maxRunning: 1, idleMs: 30 * 60_000, now: () => clock },
   );
+});
+
+test('overlapping updates of one Workspace record do not fail each other', async () => {
+  await withManager(async (manager, dataRoot) => {
+    const w = await manager.create('alice', { name: 'พร้อมกัน' });
+    const record = {
+      id: w.id,
+      ownerId: w.ownerId,
+      name: w.name,
+      createdAt: w.createdAt,
+      lastActiveAt: w.lastActiveAt,
+    };
+    // The Gateway touches a Workspace from several requests at once (a run finishing while the chat reads it).
+    await Promise.all(Array.from({ length: 25 }, () => saveRecord(dataRoot, { ...record })));
+    assert.equal((await manager.get('alice', w.id)).name, 'พร้อมกัน');
+  });
 });

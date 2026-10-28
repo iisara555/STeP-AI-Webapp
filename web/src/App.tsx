@@ -12,6 +12,8 @@ import { Command, ShieldCheck, Brain, FolderOpen, Check } from './icons.tsx';
 import type { Snapshot, Workspace, Conversation, Skill } from '../../packages/harness-core/src/contracts.ts';
 import { ApiError, configured, loadSnapshot, supabase, webHost, type Host } from './host.ts';
 import { demoHost } from './demo.ts';
+import { clearCredential, gatewayConfig, gatewayHost, pageAvailable, storedCredential } from './gateway.ts';
+import { CREDENTIAL_EVENT, GoogleSignIn, signOutOfGoogle } from './GoogleSignIn.tsx';
 import { Art, BrandSymbol, Busy, ErrorNotice, Modal } from './components.tsx';
 import { Chat, type PreparedText } from './Chat.tsx';
 import { CommandPalette } from './CommandPalette.tsx';
@@ -67,6 +69,8 @@ const headers: Record<Exclude<Page, 'chat'>, [string, string]> = {
   settings: ['การตั้งค่า', 'บัญชี การเชื่อมต่อ AI, Google Workspace และข้อมูลของคุณ'],
   help: ['คู่มือและความสามารถ', 'ตรวจได้ว่าเว็บรองรับความสามารถใดของ Desktop แล้ว'],
 };
+/** Cloud Workspace mode (ADR 0001 phase 3b) is chosen at build time; otherwise the app runs on Supabase. */
+const gateway = gatewayConfig();
 const narrow = window.matchMedia('(max-width: 900px)');
 const subscribeNarrow = (onChange: () => void) => {
   narrow.addEventListener('change', onChange);
@@ -78,12 +82,28 @@ export function App() {
   const page = routePage(pathname);
   const [demo, setDemo] = useState(new URLSearchParams(location.search).get('demo') === '1');
   const authEntry = useMemo(() => new URL(location.href), [demo]);
-  const host = useMemo(() => (demo ? demoHost() : webHost()), [demo]);
+  const host = useMemo(
+    () =>
+      demo
+        ? demoHost()
+        : gateway
+          ? gatewayHost({
+              ...gateway,
+              credential: () => storedCredential()?.token ?? null,
+              onUnauthorized: () => {
+                clearCredential();
+                window.dispatchEvent(new Event(CREDENTIAL_EVENT));
+              },
+            })
+          : webHost(),
+    [demo],
+  );
   const [settingsTab, setSettingsTab] = useState(
     new URLSearchParams(location.search).has('google') ? 'google' : 'profile',
   );
   const [signedIn, setSignedIn] = useState(demo),
-    [authReady, setAuthReady] = useState(demo || !configured());
+    // Cloud Workspace mode reads its credential first, so a signed-in tab never shows (or loads) the sign-in button.
+    [authReady, setAuthReady] = useState(demo || (!configured() && !gateway));
   const [data, setData] = useState<Snapshot | null>(null),
     [tenant, setTenant] = useState(''),
     [workspaceId, setWorkspaceId] = useState('');
@@ -128,34 +148,51 @@ export function App() {
     if (drafts.hasUnsaved()) setDiscardAction(() => action);
     else action();
   };
+  /** A different account (or none) clears everything the previous one had open. */
+  const applyIdentity = useCallback((next: string) => {
+    if (next !== authenticatedUser.current) {
+      authenticatedUser.current = next;
+      epoch.current++;
+      draftScope.current.clear();
+      setDiscardAction(null);
+      setAuthGeneration((v) => v + 1);
+      setData(null);
+      setSession(null);
+      setTenant('');
+      setWorkspaceId('');
+      setDialog(null);
+      setError(null);
+    }
+    setSignedIn(Boolean(next));
+  }, []);
+  useEffect(() => {
+    if (demo || !gateway) return;
+    // Cloud Workspace: the tab's Google ID token is the session. When it ends (about an hour), the employee
+    // signs in again; Google may do so without a click.
+    const sync = () => {
+      applyIdentity(storedCredential()?.sub ?? '');
+      setAuthReady(true);
+    };
+    sync();
+    const timer = setInterval(sync, 30_000);
+    window.addEventListener(CREDENTIAL_EVENT, sync);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener(CREDENTIAL_EVENT, sync);
+    };
+  }, [demo, applyIdentity]);
   useEffect(() => {
     if (demo) {
       setSignedIn(true);
       setAuthReady(true);
       return;
     }
-    if (!configured()) return;
+    if (!configured() || gateway) return;
     let active = true;
     let initializing = true;
     let validation = 0;
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const db = supabase();
-    const applyIdentity = (next: string) => {
-      if (next !== authenticatedUser.current) {
-        authenticatedUser.current = next;
-        epoch.current++;
-        draftScope.current.clear();
-        setDiscardAction(null);
-        setAuthGeneration((v) => v + 1);
-        setData(null);
-        setSession(null);
-        setTenant('');
-        setWorkspaceId('');
-        setDialog(null);
-        setError(null);
-      }
-      setSignedIn(Boolean(next));
-    };
     const validate = async () => {
       const current = ++validation;
       try {
@@ -233,7 +270,8 @@ export function App() {
     if (!signedIn && pathname !== '/login') navigate(loginPath(pathname), true);
     else if (signedIn && pathname === '/login')
       navigate(returnPath(new URLSearchParams(location.search).get('next')), true);
-  }, [authReady, signedIn, pathname, route]);
+    else if (signedIn && !pageAvailable(page)) navigate('/', true);
+  }, [authReady, signedIn, pathname, route, page]);
   const refresh = useCallback(async () => {
     const current = epoch.current;
     const snapshot = await loadSnapshot(host);
@@ -359,6 +397,7 @@ export function App() {
     setError(null);
     setPrepared(null);
     setPalette(false);
+    if (gateway) signOutOfGoogle();
     await host.signOut().catch(() => {});
     setSignedIn(false);
     setDemo(false);
@@ -401,7 +440,9 @@ export function App() {
             เลือกแชร์กับทีมได้เมื่อคุณพร้อม
           </p>
           {Boolean(error) && <ErrorNotice error={error} onDismiss={() => setError(null)} />}
-          {configured() ? (
+          {gateway ? (
+            <GoogleSignIn clientId={gateway.clientId} onError={setError} />
+          ) : configured() ? (
             <button className="primary login-button" onClick={() => void host.signIn().catch(setError)}>
               ลงชื่อเข้าใช้ด้วย Google
             </button>
@@ -537,7 +578,9 @@ export function App() {
     {
       label: 'ช่วยเหลือ',
       items: [
-        { id: 'settings', label: 'การตั้งค่า', hint: mod + ',', run: () => changePage('settings') },
+        ...(pageAvailable('settings')
+          ? [{ id: 'settings', label: 'การตั้งค่า', hint: mod + ',', run: () => changePage('settings') }]
+          : []),
         { id: 'help', label: 'คู่มือและความสามารถ', run: () => changePage('help') },
         { id: 'logout', label: 'ออกจากระบบ', run: () => void logout(), danger: true },
       ],
@@ -562,7 +605,8 @@ export function App() {
           setSession(null);
         }}
         onCreateWorkspace={() => setDialog('workspace')}
-        onShare={workspace?.created_by === data.user.id ? () => setDialog('share') : undefined}
+        // A Cloud Workspace is private in this release (ADR 0001 §1.2); sharing comes later by explicit ACL.
+        onShare={!gateway && workspace?.created_by === data.user.id ? () => setDialog('share') : undefined}
       />
       <div className="app">
         {mobile && (

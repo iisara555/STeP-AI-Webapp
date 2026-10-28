@@ -120,6 +120,20 @@ export function createGateway(options: GatewayOptions) {
       async ({ who, params }) => manager.conversations(who.userId, params[0]),
     ],
     [
+      'POST',
+      new RegExp(`^/api/workspaces/${WS}/conversations$`),
+      async ({ who, params }) => {
+        const conversation = await manager.newConversation(who.userId, params[0]);
+        audit({
+          actor: who.userId,
+          action: 'conversation.create',
+          workspaceId: params[0],
+          outcome: 'created',
+        });
+        return conversation;
+      },
+    ],
+    [
       'GET',
       new RegExp(`^/api/workspaces/${WS}/conversations/([A-Za-z0-9_-]{1,200})/messages$`),
       async ({ who, params }) => manager.messages(who.userId, params[0], params[1]),
