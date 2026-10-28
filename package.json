@@ -22,6 +22,7 @@
     "test:engine": "tsx --import ./server/src/register.mjs --test server/test/*.test.ts",
     "engine:ask": "tsx --import ./server/src/register.mjs server/src/ask.ts",
     "engine:bench": "tsx --import ./server/src/register.mjs server/src/bench.ts",
+    "gateway": "tsx --import ./server/src/register.mjs server/src/gateway/main.ts",
     "test:e2e": "playwright test",
     "harness:export": "node scripts/export-harness.mjs",
     "bootstrap": "tsx scripts/bootstrap.ts",
