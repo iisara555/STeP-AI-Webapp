@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="th">
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ทดลอง Desktop engine</title>
+  <style>
+    body {
+      font: 16px system-ui;
+      max-width: 48rem;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.6;
+    }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      font: inherit;
+    }
+    button {
+      font: inherit;
+      padding: 0.5rem 1rem;
+    }
+    #messages p {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .notice {
+      background: #fff4d4;
+      padding: 1rem;
+    }
+  </style>
+  <h1>ทดลอง Desktop engine</h1>
+  <p class="notice">
+    สำหรับเจ้าของโครงการเท่านั้น ใช้ข้อมูลสังเคราะห์ คำตอบมาจาก provider จำลอง ไม่ใช่ AI จริง
+  </p>
+  <div id="messages" aria-live="polite"></div>
+  <form id="form">
+    <label for="text">ข้อความทดลอง</label><textarea id="text" rows="4" maxlength="20000" required></textarea
+    ><button>ส่งข้อความ</button>
+  </form>
+  <p id="status" role="status"></p>
+  <script>
+    const token = location.hash.slice(1);
+    history.replaceState(null, '', location.pathname);
+    const form = document.querySelector('#form'),
+      input = document.querySelector('#text'),
+      status = document.querySelector('#status'),
+      messages = document.querySelector('#messages'),
+      button = form.querySelector('button');
+    let sessionId;
+    function add(label, text) {
+      const p = document.createElement('p');
+      p.textContent = label + ': ' + text;
+      messages.append(p);
+    }
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      button.disabled = true;
+      status.textContent = 'กำลังประมวลผล…';
+      add('คุณ', text);
+      input.value = '';
+      try {
+        const response = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({ text, sessionId }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error);
+        sessionId = result.sessionId;
+        add('Engine', result.answer);
+        status.textContent = '';
+      } catch (error) {
+        status.textContent = error.message || 'เชื่อมต่อไม่ได้ กรุณาลองใหม่';
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</html>

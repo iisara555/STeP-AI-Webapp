@@ -117,3 +117,20 @@ homelab ไม่มี GPU ให้รัน engine บน homelab แล้�
 - เมื่อไม่เปิด `--public-web` endpoint แบบ compatible ไม่มี web search ของ provider และคำถามที่ต้องค้นเว็บจะไม่สำเร็จ
 - tool loop เปิดเฉพาะการทดลอง CLI เมื่อเลือก `--public-web`; ยังไม่เปิดเครื่องมืออื่นหรือ Cloud Workspace
 - ยังไม่มี gateway, login หรือการแยกผู้ใช้ระดับ process ตอนนี้เป็น process เดียวต่อคำสั่ง
+
+## หน้าเว็บทดลอง engine สำหรับเจ้าของ
+
+รัน `npm run engine:owner-trial` บน homelab แล้วเปิด URL ที่แสดงใน terminal ผ่าน SSH local
+port forwarding (`ssh -L 8766:127.0.0.1:8766 <user>@homelab`); เปิด URL บนเครื่องเจ้าของ
+เท่านั้น อย่าส่ง URL ให้ผู้อื่น token ใน URL เปลี่ยนทุกครั้งที่เริ่มใหม่และเก็บไว้ในหน่วยความจำ
+ของหน้าเว็บ หลัง reload ให้เปิด URL จาก terminal อีกครั้ง ใช้ Ctrl-C เพื่อหยุด
+
+หน้านี้แยกจาก Supabase pilot และรับฟังเฉพาะ `127.0.0.1`; gateway ตรวจ token, Host และ Origin
+และส่งคำขอไปยัง Workspace ของ owner ผ่าน Runtime Manager และ Desktop engine ตัว provider จำลอง
+ทำงานใน process เดียวกัน รับข้อมูลเฉพาะในเครื่องและตอบข้อความคงที่ ไม่สามารถตั้ง provider จริง
+หรือเปิด public web ในหน้านี้ได้ ใช้เฉพาะข้อมูลสังเคราะห์ ข้อมูลบทสนทนายังคงอยู่ใน
+`.data/owner-trial` (เปลี่ยนได้ด้วย `STEP_TRIAL_DATA`) และไม่ได้เข้ารหัสโดยตัวทดลอง
+ลบทิ้งเมื่อไม่ต้องการแล้ว `STEP_TRIAL_PORT` เปลี่ยนพอร์ตได้ (ต้องปรับ SSH forwarding ให้ตรงกัน)
+
+นี่ไม่ใช่ระบบ login หรือ isolation สำหรับพนักงาน ผู้ที่เข้าถึงเครื่องหรือ URL อาจใช้การทดลองได้
+process driver ไม่ใช่ขอบเขตความปลอดภัย และยังไม่ได้ทดสอบบน homelab จริง ไม่มีการ deploy จากงานนี้
