@@ -5,6 +5,7 @@ import {
   documentContext,
   documentOutputTokens,
   pointerTargets,
+  turnDocumentTool,
 } from '../packages/harness-core/src/document-context.ts';
 import { skillContext, type RegisteredSource } from '../packages/harness-core/src/skill-context.ts';
 import { SYSTEM_RULES, estimateTextTokens } from '../packages/harness-core/src/index.ts';
@@ -107,6 +108,7 @@ async function runTor(
   sources: RegisteredSource[],
   jobSkills: Skill[],
   message = 'ร่าง TOR (จ้างงาน / บริการ) งบประมาณ [รอยืนยัน]',
+  { authority = '', documentTool = 'tor' as string | null } = {},
 ) {
   const values: Record<string, string> = {
     GEMINI_API_KEY: 'synthetic-gemini-value',
@@ -132,7 +134,7 @@ async function runTor(
           providerConsent: aiService(env).consentId,
           message,
           skill: 'tor-government-writing',
-          documentTool: 'tor',
+          documentTool,
           useMemory: false,
         },
       });
@@ -141,7 +143,7 @@ async function runTor(
         run: { reserved_cents: 7, input_rate: 75, output_rate: 375 },
         session: { visibility: 'private', draft: '' },
         sources: [
-          { source_key: '__authority', title: '', body: '', source_version: '', provenance: {} },
+          { source_key: '__authority', title: '', body: authority, source_version: '', provenance: {} },
           { source_key: '__organization', title: '', body: '', source_version: '', provenance: {} },
           ...sources,
         ],
@@ -387,4 +389,33 @@ test('oversized drafting references remain bounded and explicitly marked as part
     assert.doesNotMatch(context.parts.join('\n'), /\[นอกขอบเขตไฟล์\]/);
     assert.match(context.parts.join('\n'), /\[แสดงข้อความบางส่วน\]/);
   }
+});
+
+const signing =
+  'authorities:\n  official-signing:\n    name: "ลงนาม"\n    authorizedRole: authorized-signatory\n    humanInTheLoop: mandatory\n    triggers: [ลงนามสัญญา, ลงนามแทน]';
+
+test('a form fact such as the contract-signing date does not stop a document draft, as in Desktop', async () => {
+  const message = 'ร่าง TOR (จ้างงาน / บริการ) ระยะเวลา: 60 วันนับจากลงนามสัญญา';
+  const { generation, finished } = await runTor(registered, skills, message, { authority: signing });
+  assert.ok(generation, 'the model drafted instead of the authority reply');
+  assert.equal(finished[0].answer.text, draft);
+});
+
+test('ordinary chat still stops at the authority preflight', async () => {
+  const { generation, finished } = await runTor(registered, skills, 'ลงนามแทนให้เลย', {
+    authority: signing,
+    documentTool: null,
+  });
+  assert.equal(generation, undefined);
+  assert.match(finished[0].answer.text, /ไม่สามารถอนุมัติหรือลงนามแทนได้/);
+});
+
+test('after a draft, questions and /skill commands are chat while other turns revise the document', () => {
+  assert.equal(turnDocumentTool('tor', 'ร่าง TOR (จ้างงาน / บริการ) จากข้อมูลในฟอร์ม', false), 'tor');
+  assert.equal(turnDocumentTool('tor', 'เพิ่มหัวข้อค่าปรับ', true), 'tor');
+  assert.equal(turnDocumentTool('tor', 'ส่วนขอบเขตงานยังสั้นไป ขยายรายละเอียดบูธ', true), 'tor');
+  assert.equal(turnDocumentTool('tor', '/step:receipt-audit ตรวจใบเสร็จค่าอาหารว่าง 35 คน', true), undefined);
+  assert.equal(turnDocumentTool('tor', 'ลาพักร้อนสะสมได้กี่วัน', true), undefined);
+  assert.equal(turnDocumentTool('tor', 'ทำไมต้องมีเกณฑ์ตรวจรับ', true), undefined);
+  assert.equal(turnDocumentTool(undefined, 'เพิ่มหัวข้อค่าปรับ', true), undefined);
 });

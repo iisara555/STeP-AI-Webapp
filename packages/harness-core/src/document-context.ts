@@ -2,7 +2,7 @@
 // chosen as usual; this adds the supporting Skills, the working template and the drafting references named by the
 // tool's allowlist, resolved by their imported path. Everything here is a working reference, never policy or approval.
 import { DOCUMENT_TOOLS, documentTool, type DocumentToolId } from '../vendor/desktop/document-tools.ts';
-import { documentToolRule } from '../vendor/desktop/document-contract.ts';
+import { documentToolRule, isDocumentQuestion } from '../vendor/desktop/document-contract.ts';
 import { LIMITS, estimateTextTokens, untrusted } from './index.ts';
 import type { Skill, SourceRef } from './contracts.ts';
 import type { RegisteredSource } from './skill-context.ts';
@@ -10,6 +10,16 @@ import type { RegisteredSource } from './skill-context.ts';
 export const DOCUMENT_TOOL_IDS = DOCUMENT_TOOLS.map((t) => t.id);
 export const isDocumentTool = (value: unknown): value is DocumentToolId =>
   DOCUMENT_TOOL_IDS.includes(value as DocumentToolId);
+
+/**
+ * The document tool a chat turn in a drafting task runs with. The form request always drafts. Afterwards, as in
+ * Desktop's draft mode, a question about the draft or a "/skill" command is answered as ordinary chat, and anything
+ * else revises the document.
+ */
+export function turnDocumentTool(tool: DocumentToolId | undefined, text: string, drafted: boolean) {
+  if (!tool || !drafted) return tool;
+  return /^\s*\//.test(text) || isDocumentQuestion(tool, text) ? undefined : tool;
+}
 
 /** Drafting guides and examples must retain their closing sections; longer files remain visibly bounded. */
 export const WORKING_FILE_CHARS = 16000;
