@@ -21,6 +21,8 @@ Copied from `iisara555/STeP-AI-Harness` at
   vendored; the operator imports those working files separately with their source commit.
   The web reads the TOR content guide before the other optional references so a long worked example
   does not use up its remaining context budget first; skipped references remain explicit in the review.
+- `desktop/document-contract.ts` also keeps upstream `isDocumentQuestion` unchanged; the web uses it to send a
+  follow-up question in a drafting task as ordinary chat, as Desktop answers it beside the draft.
 - `desktop/document-contract.ts` is `documentToolRule` from upstream `desktop/electron/document-tools.ts`,
   with the public STeP organization reference added to the trusted drafting contract. The web's context
   assembly around it is in `../src/document-context.ts`.

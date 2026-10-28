@@ -96,6 +96,13 @@ test('a drafted document lands in the workbench while the review stays in the co
   const draft = page.getByRole('textbox', { name: 'ร่างเอกสาร', exact: true });
   await expect(draft).toHaveValue(/# ขอบเขตของงาน \(ตัวอย่าง\)/);
   await expect(draft).not.toHaveValue(/ผลตรวจตัวอย่าง|document_review/);
+  // As in Desktop, a later question is answered as chat and leaves the draft alone.
+  await page.getByRole('button', { name: 'ปิดร่าง', exact: true }).click();
+  await page.getByRole('textbox', { name: 'ข้อความถึง AI' }).fill('ลาพักร้อนสะสมได้กี่วัน');
+  await page.getByRole('button', { name: 'ส่งข้อความ', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'เริ่มงาน', exact: true }).click();
+  await expect(page.getByText('นี่คือคำตอบตัวอย่าง', { exact: false })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText('ร่างเอกสารอยู่ในแผงผลงาน', { exact: false })).toHaveCount(1);
 });
 test('the owning unit starts as the employee organization and stays editable', async ({ page }) => {
   await page.goto('/?demo=1');

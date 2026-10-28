@@ -40,7 +40,7 @@ import { assistantName } from '../../packages/harness-core/src/assistant-profile
 import { parseDocumentOutput } from '../../packages/harness-core/vendor/desktop/document-output.ts';
 import type { DocumentToolId } from '../../packages/harness-core/vendor/desktop/document-tools.ts';
 import { resolvePresentation } from '../../packages/harness-core/vendor/desktop/document-presentation.ts';
-import { isDocumentTool } from '../../packages/harness-core/src/document-context.ts';
+import { isDocumentTool, turnDocumentTool } from '../../packages/harness-core/src/document-context.ts';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
 import type { DraftBook } from './drafts.ts';
 // Word, PDF and the page preview load the Markdown reader, Garuda and layout only when a draft is exported or previewed.
@@ -326,7 +326,11 @@ export function Chat({
         requestId: crypto.randomUUID(),
         message: text,
         skill: skill?.skill_key,
-        documentTool,
+        documentTool: turnDocumentTool(
+          documentTool,
+          text,
+          messages.some((m) => m.role === 'assistant'),
+        ),
         documentIds: documents,
         useMemory,
         consent: true,
