@@ -1,5 +1,25 @@
 # Progress
 
+## 2026-10-28 · Rollout #42 (และหน้าเว็บของ #34/#35)
+
+- Webapp #42 merge เป็น `45ad12e` หลัง Verify PWA ผ่านครบ (รวม engine isolation บน Linux)
+- Supabase: ก่อน deploy ดาวน์โหลด `worker` v27 มาเทียบ พบว่า `_shared/worker.ts` และ `worker/index.ts` ตรงกับ `3c6b358`
+  (main ก่อน #42) เจ้าของโครงการรัน deploy `worker` จาก main `45ad12e` ด้วย CLI 2.122.0,
+  `--no-verify-jwt --use-api --import-map` ได้ v28 ACTIVE และสองไฟล์นั้นตรงกับ `45ad12e`
+  (CLI ปฏิเสธการแตกไฟล์นอก `supabase/functions` จึงเทียบไฟล์ใน `packages/` ไม่ได้)
+  `api` ยัง v24 เพราะไฟล์ของ api ไม่เปลี่ยนตั้งแต่ `4844e2a` และใช้เพียง `literalSearch` จากโค้ดกลาง
+  `google-callback` ยัง v14 ไม่มี migration/secret
+- Homelab: หน้าเว็บเดิมรัน image `pr32-e5a816c` (hash ของ `Chat.tsx`, `App.tsx`, `package.json` ตรงกับ `e5a816c`)
+  การแก้หน้าเว็บของ #34/#35 จึงขึ้นพร้อมรอบนี้ tag image เดิมเป็น `step-ai-webapp:pilot-pre42-e5a816c`
+  เก็บ source เดิมไว้ที่ `~/STeP-AI-Webapp.prev-pre42-e5a816c` แล้ว build จาก `git archive` ของ `45ad12e`
+  โดยคง `.local/homelab.env` container `step-ai-pilot-web-1` healthy และ `/healthz` ตอบ ok
+- Smoke: `verify-homelab.mjs` ผ่าน HTTPS origin เดิมใน tailnet (shell, OAuth callback, PWA cache, CSP, missing asset)
+  bundle ที่ให้บริการมี organization reference ของ #34 และตัวแยกคำถามของ #42
+- ย้อนกลับ: tag `pilot-pre42-e5a816c` กลับเป็น `pilot` แล้ว `compose up -d --no-build --wait` และ deploy `worker`
+  จาก `3c6b358`
+- ยังไม่ทำ: ทดสอบด้วยบัญชีจริงหลัง rollout (ร่าง TOR แล้วถามต่อ, คำถามที่เคยถูกหยุด เช่น "ขั้นตอนลงนามสัญญาจ้าง
+  มีอะไรบ้าง", ไฟล์ Word ที่มีชื่อและที่อยู่ของอุทยานฯ) และการเพิ่มตัวเลือก "แก้เอกสารนี้ / แชต" แบบ Desktop
+
 ## 2026-10-28 · แชตไม่หยุดด้วย authority preflight และข้อความถัดไปไม่ติดโหมดร่าง
 
 - ผู้ใช้ทดสอบ TOR จ้างจัดสัมมนา (ข้อมูลสังเคราะห์) แล้วได้ข้อความ "งานนี้ต้องให้ผู้มีอำนาจของ STeP ตรวจ..." แทนร่าง
