@@ -99,7 +99,11 @@ export function webHost(): Host {
       supabase().auth.startAutoRefresh();
       const result = await supabase().auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: location.origin + '/auth/callback', scopes: 'openid email profile' },
+        options: {
+          redirectTo: location.origin + '/auth/callback',
+          scopes: 'openid email profile',
+          queryParams: { prompt: 'select_account' },
+        },
       });
       if (result.error) throw new ApiError('GOOGLE_LOGIN_FAILED');
     },

@@ -9,11 +9,14 @@ const storageKey = 'step-auth-auth.example.test';
 // visibility, because the mobile sidebar stays closed until opened.
 const workspaceNav = (page: Page) => page.locator('nav[aria-label="เครื่องมือ"]');
 
-async function authFixture(context: BrowserContext, options: { signedIn?: boolean; invited?: boolean } = {}) {
+async function authFixture(
+  context: BrowserContext,
+  options: { signedIn?: boolean; invited?: boolean; switchToInvited?: boolean } = {},
+) {
   const host = demoHost();
   const snapshot = await host.call<Snapshot>('snapshot');
-  const user = {
-    id: snapshot.user.id,
+  let user = {
+    id: options.switchToInvited ? 'previous-account' : snapshot.user.id,
     aud: 'authenticated',
     role: 'authenticated',
     email: 'employee@example.test',
@@ -23,21 +26,25 @@ async function authFixture(context: BrowserContext, options: { signedIn?: boolea
     created_at: '2026-01-01T00:00:00Z',
   };
   const expires = Math.floor(Date.now() / 1000) + 3600;
-  const token =
-    [
-      { alg: 'HS256', typ: 'JWT' },
-      { sub: user.id, exp: expires, aud: 'authenticated', role: 'authenticated' },
-    ]
-      .map((part) => Buffer.from(JSON.stringify(part)).toString('base64url'))
-      .join('.') + '.synthetic';
-  const session = {
-    access_token: token,
-    refresh_token: 'synthetic-refresh-test-only',
-    token_type: 'bearer',
-    expires_in: 3600,
-    expires_at: expires,
-    user,
+  const makeSession = (identity: typeof user) => {
+    const token =
+      [
+        { alg: 'HS256', typ: 'JWT' },
+        { sub: identity.id, exp: expires, aud: 'authenticated', role: 'authenticated' },
+      ]
+        .map((part) => Buffer.from(JSON.stringify(part)).toString('base64url'))
+        .join('.') + '.synthetic';
+    return {
+      access_token: token,
+      refresh_token: 'synthetic-refresh-test-only',
+      token_type: 'bearer',
+      expires_in: 3600,
+      expires_at: expires,
+      user: identity,
+    };
   };
+  let session = makeSession(user);
+  let invited = options.invited !== false;
   const state = {
     userStatus: 200,
     tokenStatus: 200,
@@ -45,6 +52,10 @@ async function authFixture(context: BrowserContext, options: { signedIn?: boolea
     snapshots: 0,
     exchanges: 0,
     redirect: '',
+    prompt: '',
+    cancelAuthorization: false,
+    logouts: 0,
+    events: [] as string[],
   };
   if (options.signedIn)
     await context.addInitScript(
@@ -60,10 +71,23 @@ async function authFixture(context: BrowserContext, options: { signedIn?: boolea
     const url = new URL(route.request().url());
     if (url.pathname === '/auth/v1/authorize') {
       state.redirect = url.searchParams.get('redirect_to') || '';
+      state.prompt = url.searchParams.get('prompt') || '';
+      state.events.push('authorize');
+      if (options.switchToInvited) {
+        user = { ...user, id: snapshot.user.id, email: 'invited@example.test' };
+        session = makeSession(user);
+        invited = true;
+      }
       expect(url.searchParams.get('code_challenge')).toBeTruthy();
       await route.fulfill({
         status: 302,
-        headers: { location: origin + '/auth/callback?code=synthetic-code' },
+        headers: {
+          location:
+            origin +
+            (state.cancelAuthorization
+              ? '/auth/callback?error=access_denied'
+              : '/auth/callback?code=synthetic-code'),
+        },
       });
     } else if (url.pathname === '/auth/v1/token') {
       state.exchanges++;
@@ -80,6 +104,8 @@ async function authFixture(context: BrowserContext, options: { signedIn?: boolea
         json: state.userStatus === 200 ? user : { code: 'bad_jwt', message: 'Synthetic rejected token' },
       });
     } else if (url.pathname === '/auth/v1/logout') {
+      state.logouts++;
+      state.events.push('logout');
       await route.fulfill({ status: 204 });
     } else if (url.pathname === '/functions/v1/api') {
       const { action, input } = route.request().postDataJSON();
@@ -89,7 +115,7 @@ async function authFixture(context: BrowserContext, options: { signedIn?: boolea
           status: state.snapshotStatus,
           json:
             state.snapshotStatus === 200
-              ? { data: { ...snapshot, tenants: options.invited === false ? [] : snapshot.tenants } }
+              ? { data: { ...snapshot, tenants: invited ? snapshot.tenants : [] } }
               : { code: 'UNAUTHENTICATED' },
         });
       } else await route.fulfill({ json: { data: await host.call(action, input) } });
@@ -135,6 +161,7 @@ test('Google PKCE login returns to the requested page and exchanges the callback
   await expect(page).toHaveURL(origin + '/documents');
   await expect(page.getByRole('heading', { name: 'เอกสาร', exact: true })).toBeVisible();
   expect(state.redirect).toBe(origin + '/auth/callback');
+  expect(state.prompt).toBe('select_account');
   expect(state.exchanges).toBe(1);
   await expect(workspaceNav(page).first()).toBeAttached();
   const open = page.getByRole('button', { name: 'เปิดเมนู', exact: true });
@@ -172,6 +199,35 @@ test('verified accounts still need a tenant invitation', async ({ page, context 
   await page.goto('/documents');
   await expect(page.getByRole('heading', { name: 'บัญชีนี้ยังไม่ได้รับเชิญ' })).toBeVisible();
   await expect(workspaceNav(page)).toHaveCount(0);
+});
+
+test('an uninvited user can switch Google accounts directly', async ({ page, context }) => {
+  const state = await authFixture(context, { signedIn: true, invited: false, switchToInvited: true });
+  await page.goto('/documents');
+  await expect(page.getByRole('heading', { name: 'บัญชีนี้ยังไม่ได้รับเชิญ' })).toBeVisible();
+  await page.getByRole('button', { name: 'เปลี่ยนบัญชี' }).click();
+  await expect.poll(() => state.exchanges).toBe(1);
+  expect(state.logouts).toBe(1);
+  expect(state.prompt).toBe('select_account');
+  expect(state.events).toEqual(['logout', 'authorize']);
+  await expect(workspaceNav(page).first()).toBeAttached();
+  await expect(page.getByRole('heading', { name: 'บัญชีนี้ยังไม่ได้รับเชิญ' })).toHaveCount(0);
+});
+
+test('cancelling Google account selection returns to login without old private data', async ({
+  page,
+  context,
+}) => {
+  const state = await authFixture(context, { signedIn: true, invited: false });
+  state.cancelAuthorization = true;
+  await page.goto('/documents');
+  await expect(page.getByRole('heading', { name: 'บัญชีนี้ยังไม่ได้รับเชิญ' })).toBeVisible();
+  await page.getByRole('button', { name: 'เปลี่ยนบัญชี' }).click();
+  await expect(page).toHaveURL(origin + '/login');
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(workspaceNav(page)).toHaveCount(0);
+  expect(state.events).toEqual(['logout', 'authorize']);
+  expect(state.exchanges).toBe(0);
 });
 
 test('signing out clears both tabs and browser history cannot reopen private views', async ({
