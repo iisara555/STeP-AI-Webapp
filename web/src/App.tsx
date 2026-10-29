@@ -82,6 +82,7 @@ export function App() {
   const [settingsTab, setSettingsTab] = useState(
     new URLSearchParams(location.search).has('google') ? 'google' : 'profile',
   );
+  const [switchingAccount, setSwitchingAccount] = useState(false);
   const [signedIn, setSignedIn] = useState(demo),
     [authReady, setAuthReady] = useState(demo || !configured());
   const [data, setData] = useState<Snapshot | null>(null),
@@ -366,6 +367,20 @@ export function App() {
     navigate('/login', true);
   };
   const logout = () => protectDrafts(() => void endSession());
+  const switchAccount = () =>
+    protectDrafts(() => {
+      setSwitchingAccount(true);
+      void (async () => {
+        try {
+          await endSession();
+          await host.signIn();
+        } catch (e) {
+          setError(e);
+        } finally {
+          setSwitchingAccount(false);
+        }
+      })();
+    });
   const applyUpdate = async () => {
     const registration = await navigator.serviceWorker.getRegistration();
     if (registration?.waiting) {
@@ -378,6 +393,12 @@ export function App() {
     sidebarChoice.save(!fullSidebar);
     setFullSidebar(!fullSidebar);
   };
+  if (switchingAccount)
+    return (
+      <main className="login login-wait">
+        <Busy label="กำลังเปลี่ยนบัญชี" />
+      </main>
+    );
   if (!authReady)
     return (
       <main className="login login-wait">
@@ -474,7 +495,7 @@ export function App() {
           <button className="primary" onClick={() => void refresh().catch(setError)}>
             ตรวจอีกครั้ง
           </button>
-          <button onClick={() => void logout()}>เปลี่ยนบัญชี</button>
+          <button onClick={switchAccount}>เปลี่ยนบัญชี</button>
         </div>
       </main>
     );
