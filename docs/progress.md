@@ -1,5 +1,15 @@
 # Progress
 
+## 2026-10-29 · ทดลอง runtime หลายผู้ใช้ (#48)
+
+- Gateway ตรวจและหยุด runtime ที่ว่างอัตโนมัติ และ resume จาก SQLite เดิมเมื่อมีคำขอใหม่; กันการหยุด
+  ระหว่างคำขอและรอ process เก่าหยุดก่อนเริ่มใหม่ แก้ metadata ชนกันเมื่อมีการอัปเดตพร้อมกัน
+- ทดสอบ browser สองบัญชีพร้อมกัน, process/SQLite แยก, สิทธิ์ไฟล์ใหม่, idle/resume และ process ล้ม
+- Gateway ใช้ Bubblewrap แยก mount, user, PID, IPC และ network namespace; ทดสอบว่าอ่านไฟล์ข้าม
+  workspace ผ่าน path และ symlink ไม่ได้ และต่อ host loopback ไม่ได้ หาก sandbox เปิดไม่ได้จะปฏิเสธคำขอ
+- ยังไม่ได้ทดสอบบน host องค์กรหรือบัญชี Google จริง และยังไม่มี cgroup quota หรือ disk encryption;
+  ใช้ข้อมูลสังเคราะห์เท่านั้น ดูข้อจำกัดใน `server/README.md`
+
 ## 2026-10-29 · เปลี่ยนบัญชี Google จากหน้าไม่ได้รับเชิญ
 
 - ปุ่มเปลี่ยนบัญชีเคยออกจากระบบแล้วกลับหน้า login โดยไม่เปิดตัวเลือกบัญชี และ Google อาจเลือกบัญชีเดิมอัตโนมัติ

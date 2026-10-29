@@ -52,6 +52,7 @@ type Live = {
   state: RuntimeState;
   handle?: RuntimeHandle;
   starting?: Promise<void>;
+  stopping?: Promise<void>;
   lastActive: number;
   /** Requests in flight; a busy runtime is never stopped as idle, so work goes on after the browser closes. */
   busy: number;
@@ -62,6 +63,7 @@ export type RuntimeStats = { running: number; starting: number; failed: number; 
 
 export class RuntimeManager {
   private readonly live = new Map<string, Live>();
+  private readonly activeCalls = new Map<string, number>();
   /** Event listeners by Workspace; they outlive a runtime so a resumed Workspace keeps reporting to them. */
   private readonly listeners = new Map<string, Set<(event: RuntimeEvent) => void>>();
   private readonly dataRoot: string;
@@ -109,6 +111,10 @@ export class RuntimeManager {
     const record = await readRecord(this.dataRoot, actor, workspaceId);
     const key = this.key(record);
     const current = this.live.get(key);
+    if (current?.stopping) {
+      await current.stopping;
+      return this.start(actor, workspaceId);
+    }
     if (current?.state === 'running') return this.touchRecord(record, current);
     if (current?.starting) {
       await current.starting;
@@ -134,8 +140,8 @@ export class RuntimeManager {
         entry.state = 'running';
         handle.onExit(() => {
           if (this.live.get(key) !== entry) return;
-          if (entry.state === 'stopping') this.live.delete(key);
-          else Object.assign(entry, { state: 'failed', handle: undefined, error: 'RUNTIME_EXITED' });
+          if (entry.state !== 'stopping')
+            Object.assign(entry, { state: 'failed', handle: undefined, error: 'RUNTIME_EXITED' });
         });
       } catch {
         Object.assign(entry, { state: 'failed', error: 'RUNTIME_START_FAILED' });
@@ -243,7 +249,8 @@ export class RuntimeManager {
   async sweepIdle(): Promise<string[]> {
     const cutoff = this.now() - this.idleMs;
     const idle = [...this.live].filter(
-      ([, entry]) => entry.state === 'running' && !entry.busy && entry.lastActive < cutoff,
+      ([key, entry]) =>
+        entry.state === 'running' && !entry.busy && !this.activeCalls.get(key) && entry.lastActive < cutoff,
     );
     await Promise.all(idle.map(([key]) => this.stopKey(key)));
     return idle.map(([key]) => key.split('/')[1]);
@@ -255,29 +262,43 @@ export class RuntimeManager {
 
   private async call<T>(actor: string, workspaceId: string, fn: (handle: RuntimeHandle) => Promise<T>) {
     const record = await readRecord(this.dataRoot, actor, workspaceId);
-    await this.start(actor, workspaceId);
-    const entry = this.live.get(this.key(record));
-    if (!entry?.handle) throw new WorkspaceError('RUNTIME_NOT_RUNNING');
-    entry.busy++;
+    const key = this.key(record);
+    this.activeCalls.set(key, (this.activeCalls.get(key) ?? 0) + 1);
+    let entry: Live | undefined;
     try {
-      return await fn(entry.handle);
+      await this.start(actor, workspaceId);
+      entry = this.live.get(key);
+      if (!entry?.handle || entry.state !== 'running') throw new WorkspaceError('RUNTIME_NOT_RUNNING');
+      entry.busy++;
+      try {
+        return await fn(entry.handle);
+      } finally {
+        entry.busy--;
+        await this.touchRecord(record, entry);
+      }
     } finally {
-      entry.busy--;
-      await this.touchRecord(record, entry);
+      const remaining = (this.activeCalls.get(key) ?? 1) - 1;
+      if (remaining) this.activeCalls.set(key, remaining);
+      else this.activeCalls.delete(key);
     }
   }
 
   private async stopKey(key: string) {
     const entry = this.live.get(key);
     if (!entry) return;
-    if (entry.starting) await entry.starting.catch(() => {});
-    if (!entry.handle) {
-      this.live.delete(key);
-      return;
-    }
-    entry.state = 'stopping';
-    await entry.handle.stop();
-    this.live.delete(key);
+    if (entry.stopping) return entry.stopping;
+    entry.stopping = (async () => {
+      if (entry.starting) await entry.starting.catch(() => {});
+      try {
+        if (entry.handle) {
+          entry.state = 'stopping';
+          await entry.handle.stop();
+        }
+      } finally {
+        if (this.live.get(key) === entry) this.live.delete(key);
+      }
+    })();
+    return entry.stopping;
   }
 
   private async touchRecord(record: WorkspaceRecord, entry: Live) {
@@ -288,8 +309,9 @@ export class RuntimeManager {
   }
 
   private running() {
-    return [...this.live.values()].filter((entry) => entry.state === 'running' || entry.state === 'starting')
-      .length;
+    return [...this.live.values()].filter(
+      (entry) => entry.state === 'running' || entry.state === 'starting' || entry.state === 'stopping',
+    ).length;
   }
 
   private key(record: WorkspaceRecord) {

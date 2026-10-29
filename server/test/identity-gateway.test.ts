@@ -1,14 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { createIdentityGateway } from '../src/identity-gateway.ts';
 import { IdentityService } from '../src/identity.ts';
-import type { RuntimeDriver } from '../src/workspace/contract.ts';
+import type { RuntimeDriver, RuntimeSpec } from '../src/workspace/contract.ts';
+import { processDriver } from '../src/workspace/process-driver.ts';
 
-async function fixture(driver?: RuntimeDriver) {
+async function fixture(driver?: RuntimeDriver, timing: { idleMs?: number; sweepMs?: number } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'identity-gateway-'));
   const invitations = join(dir, 'invites.json');
   const entries = ['alice', 'bob'].map((name) => ({
@@ -38,6 +39,7 @@ async function fixture(driver?: RuntimeDriver) {
     clientId: 'synthetic',
     origin,
     driver,
+    ...timing,
   });
   await new Promise<void>((resolve) => gateway.server.listen(port, '127.0.0.1', resolve));
   async function post(path: string, data: object, token?: string) {
@@ -124,6 +126,54 @@ test('revocation during an engine request withholds its answer', async () => {
     assert.equal(result.body.answer, undefined);
   } finally {
     release();
+    await f.close();
+  }
+});
+
+test('concurrent users get separate runtimes; idle processes stop and resume their own conversations', async () => {
+  const starts: { spec: RuntimeSpec; pid?: number; exited: boolean }[] = [];
+  const real = processDriver({ isolated: true });
+  const driver: RuntimeDriver = {
+    async start(spec) {
+      const handle = await real.start(spec);
+      const record = { spec, pid: handle.pid, exited: false };
+      starts.push(record);
+      handle.onExit(() => {
+        record.exited = true;
+      });
+      return handle;
+    },
+  };
+  const f = await fixture(driver, { idleMs: 300, sweepMs: 50 });
+  try {
+    const [alice, bob] = await Promise.all(
+      ['alice', 'bob'].map(async (credential) => (await f.post('/api/login', { credential })).body.token),
+    );
+    const [a, b] = await Promise.all(
+      [alice, bob].map((token) => f.post('/api/ask', { text: 'ช่วยคิดชื่องานสัมมนาให้หน่อย' }, token)),
+    );
+    assert.equal(a.status, 200);
+    assert.equal(b.status, 200);
+    assert.notEqual(a.body.sessionId, b.body.sessionId);
+    assert.equal(starts.length, 2);
+    assert.notEqual(starts[0].pid, starts[1].pid);
+    assert.notEqual(starts[0].spec.dir, starts[1].spec.dir);
+    for (const { spec } of starts) {
+      assert.equal((await stat(spec.dir)).mode & 0o077, 0);
+      assert.equal((await stat(join(spec.dir, 'workspace.sqlite'))).mode & 0o077, 0);
+    }
+    for (let i = 0; i < 100 && starts.some((s) => !s.exited); i++)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(
+      starts.every((s) => s.exited),
+      'idle runtime processes stopped',
+    );
+    const resumed = await f.post('/api/ask', { text: 'ขออีกสามชื่อ', sessionId: a.body.sessionId }, alice);
+    assert.equal(resumed.status, 200);
+    assert.equal(resumed.body.sessionId, a.body.sessionId);
+    assert.equal(starts.length, 3);
+    assert.notEqual(starts[2].pid, starts.find((s) => s.spec.ownerId === starts[2].spec.ownerId)!.pid);
+  } finally {
     await f.close();
   }
 });

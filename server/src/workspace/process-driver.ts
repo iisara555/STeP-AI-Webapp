@@ -1,8 +1,8 @@
-// Development driver: one Workspace runtime is one Node process with its own memory, working directory and a
-// minimal environment. It is not a security boundary against the host (no namespace or cgroup); production uses a
-// container driver behind the same RuntimeDriver contract (ADR 0001 §1.3, still to be chosen).
+// Development driver: optionally runs the synthetic trial inside Linux namespaces with restricted mounts.
+// The default is unsandboxed for CLI tests; the gateway opts into the sandbox and never falls back.
 import { fork, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import {
   WorkspaceError,
   type RuntimeCalls,
@@ -39,13 +39,53 @@ export type RuntimeReply =
   | { type: 'result'; nonce: number; ok: true; result: unknown }
   | { type: 'result'; nonce: number; ok: false; code: string };
 
-export function processDriver({ startTimeoutMs = 30_000 } = {}): RuntimeDriver {
+/** Namespace mounts for the synthetic-only sandbox. Missing prerequisites fail closed. */
+export function isolatedRuntimeArgs(spec: RuntimeSpec): string[] {
+  const appRoot = resolve(import.meta.dirname, '../../..');
+  const nodeDir = dirname(process.execPath);
+  const binds = [
+    '/usr',
+    '/lib',
+    '/lib64',
+    '/bin',
+    nodeDir,
+    resolve(appRoot, 'node_modules'),
+    resolve(appRoot, 'server/src'),
+    resolve(appRoot, 'server/package.json'),
+    resolve(appRoot, 'package.json'),
+    resolve(appRoot, 'harness'),
+  ];
+  return [
+    '--unshare-all',
+    '--unshare-user',
+    '--disable-userns',
+    '--die-with-parent',
+    '--new-session',
+    '--proc',
+    '/proc',
+    '--dev',
+    '/dev',
+    '--tmpfs',
+    '/tmp',
+    ...binds.flatMap((path) => ['--ro-bind', path, path]),
+    '--bind',
+    spec.dir,
+    spec.dir,
+    '--chdir',
+    spec.filesDir,
+    '--',
+    process.execPath,
+  ];
+}
+
+export function processDriver({ startTimeoutMs = 30_000, isolated = false } = {}): RuntimeDriver {
   return {
     async start(spec) {
       const child = fork(ENTRY, [], {
         cwd: spec.filesDir,
-        env: runtimeEnv(spec),
-        execArgv: ['--import', TSX, '--import', REGISTER],
+        env: { ...runtimeEnv(spec), ...(isolated ? { STEP_SYNTHETIC_PROVIDER: '1' } : {}) },
+        ...(isolated ? { execPath: '/usr/bin/bwrap' } : {}),
+        execArgv: [...(isolated ? isolatedRuntimeArgs(spec) : []), '--import', TSX, '--import', REGISTER],
         stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
         serialization: 'json',
       });

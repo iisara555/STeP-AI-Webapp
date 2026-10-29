@@ -237,6 +237,23 @@ gateway ตรวจลายเซ็นและ audience ของ Google ID 
 ผู้ใช้ไม่สามารถเลือก owner หรือ workspace ID; runtime manager ใช้ Google subject ที่ hash เป็น owner ID
 และ SQLite แยกต่อ workspace
 
-ยังไม่มีระบบจัดการคำเชิญผ่านเว็บ ไม่มี HTTPS สำหรับเผยแพร่ ไม่มี process isolation ที่ปลอดภัยสำหรับหลายคน
+ยังไม่มีระบบจัดการคำเชิญผ่านเว็บ ไม่มี HTTPS สำหรับเผยแพร่ และยังไม่ได้ทดสอบ sandbox บนเครื่ององค์กร
 และยังไม่ได้ทดสอบ Google บัญชีจริง การผ่าน synthetic test ไม่ใช่การอนุมัติเปิดให้พนักงานใช้
 ข้อมูลทดลองอยู่ใน `.data/identity-trial` หรือ `STEP_IDENTITY_DATA`; ลบเมื่อไม่ใช้และอย่าใส่ข้อมูลจริง
+
+## ทดลอง runtime หลายผู้ใช้
+
+Gateway identity ทดลองหยุด runtime ที่ไม่มีคำขอค้างและไม่มีการใช้งานเป็นเวลา 30 นาที โดยตรวจทุก 1 นาที
+คำขอถัดไปเริ่ม process ใหม่และใช้ SQLite เดิม คำขอที่กำลังทำงานจะไม่ถูกหยุดโดยตัวตรวจ idle
+runtime สร้างไฟล์ใหม่ด้วย umask 077 และโฟลเดอร์ผู้ใช้มีสิทธิ์ 0700 ไฟล์ที่มีอยู่ก่อนหน้าต้องตรวจสิทธิ์แยก
+
+Gateway identity ใช้ Bubblewrap (`/usr/bin/bwrap`, Linux พร้อม unprivileged user namespaces) แยก mount,
+user, PID, IPC และ network namespace ต่อ runtime เปิดอ่านเฉพาะ runtime code, dependencies และ Harness
+ที่ติดตั้งโดยผู้ดูแล และเปิดเขียนเฉพาะโฟลเดอร์ workspace ของตน ไม่ mount workspace อื่นหรือ environment
+ของ gateway ไม่มี network ภายนอกและใช้ provider จำลองภายใน sandbox เท่านั้น หาก sandbox เริ่มไม่ได้จะ
+ปฏิเสธคำขอ ไม่มี fallback ไป process ปกติ ชุดทดสอบตรวจการอ่านไฟล์ข้าม workspace รวม symlink และการต่อ
+localhost ของ host รวมทั้ง browser สองบัญชีพร้อมกัน
+
+Sandbox นี้ยังไม่มี cgroup CPU/RAM quota, การทดสอบบน host องค์กร หรือ real-account acceptance และข้อมูล
+บนดิสก์ไม่ได้เข้ารหัสโดยตัวทดลอง ต้องตรวจสิ่งเหล่านี้ก่อนเปิดให้พนักงานใช้ ห้ามใส่ข้อมูลจริงใน trial
+process driver แบบไม่ sandbox ยังใช้สำหรับ CLI/test เดิมเท่านั้น
