@@ -13,6 +13,8 @@ export async function createIdentityGateway(options: {
   clientId: string;
   origin: string;
   driver?: RuntimeDriver;
+  idleMs?: number;
+  sweepMs?: number;
 }) {
   const provider = createServer(async (req, res) => {
     for await (const _ of req) {
@@ -30,8 +32,13 @@ export async function createIdentityGateway(options: {
   const manager = new RuntimeManager({
     dataRoot: options.dataRoot,
     driver: options.driver ?? processDriver(),
+    idleMs: options.idleMs,
     grant: () => ({ baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'synthetic', token: 'synthetic' }),
   });
+  const sweepMs = options.sweepMs ?? 60_000;
+  if (!Number.isFinite(sweepMs) || sweepMs <= 0) throw new Error('INVALID_SWEEP_INTERVAL');
+  const sweeper = setInterval(() => void manager.sweepIdle().catch(() => {}), sweepMs);
+  sweeper.unref();
   const workspaces = new Map<string, Promise<string>>();
   function workspace(userId: string) {
     let pending = workspaces.get(userId);
@@ -127,6 +134,7 @@ export async function createIdentityGateway(options: {
   return {
     server,
     close: async () => {
+      clearInterval(sweeper);
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await manager.shutdown();
       await new Promise<void>((resolve) => provider.close(() => resolve()));

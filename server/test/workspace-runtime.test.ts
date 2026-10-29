@@ -182,3 +182,58 @@ test('the shared server admits only maxRunning runtimes and stops idle ones', as
     { driver, maxRunning: 1, idleMs: 30 * 60_000, now: () => clock },
   );
 });
+
+test('a request waits for a stopping runtime before starting its replacement', async () => {
+  let release!: () => void;
+  let stopping!: () => void;
+  const stopped = new Promise<void>((resolve) => (release = resolve));
+  const beganStopping = new Promise<void>((resolve) => (stopping = resolve));
+  let starts = 0;
+  const driver: RuntimeDriver = {
+    async start(spec) {
+      starts++;
+      let exit: (code: number | null) => void = () => {};
+      return {
+        health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
+        call: async () => ({}) as never,
+        async stop() {
+          stopping();
+          await stopped;
+          exit(0);
+        },
+        onExit: (listener) => {
+          exit = listener;
+        },
+      };
+    },
+  };
+  await withManager(
+    async (manager) => {
+      const workspace = await manager.create('alice', { name: 'A' });
+      await manager.start('alice', workspace.id);
+      const stop = manager.stop('alice', workspace.id);
+      await beganStopping;
+      const restart = manager.start('alice', workspace.id);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(starts, 1);
+      release();
+      await stop;
+      assert.equal((await restart).state, 'running');
+      assert.equal(starts, 2);
+    },
+    { driver },
+  );
+});
+
+test('concurrent activity updates do not collide on the workspace metadata file', async () => {
+  const { driver } = fakeDriver();
+  await withManager(
+    async (manager) => {
+      const workspace = await manager.create('alice', { name: 'A' });
+      await manager.start('alice', workspace.id);
+      await Promise.all(Array.from({ length: 20 }, () => manager.touch('alice', workspace.id)));
+      assert.equal((await manager.get('alice', workspace.id)).state, 'running');
+    },
+    { driver },
+  );
+});

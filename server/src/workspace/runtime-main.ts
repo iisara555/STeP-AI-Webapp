@@ -10,6 +10,8 @@ import { createEngine } from '../engine.ts';
 import { AskInput, ProviderGrant, type AskResult, type ConversationSummary } from './contract.ts';
 import type { RuntimeReply, RuntimeRequest } from './process-driver.ts';
 
+// All new runtime files, including SQLite sidecars, are private to the service account.
+process.umask(0o077);
 const workspaceId = process.env.STEP_WORKSPACE_ID;
 const dir = process.env.STEP_WORKSPACE_DIR;
 const started = Date.now();

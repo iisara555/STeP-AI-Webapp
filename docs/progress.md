@@ -1,5 +1,13 @@
 # Progress
 
+## 2026-10-29 · ทดลอง runtime หลายผู้ใช้ (#48 ยังไม่ครบ)
+
+- Gateway ตรวจและหยุด runtime ที่ว่างอัตโนมัติ และ resume จาก SQLite เดิมเมื่อมีคำขอใหม่; กันการหยุด
+  ระหว่างคำขอและรอ process เก่าหยุดก่อนเริ่มใหม่ แก้ metadata ชนกันเมื่อมีการอัปเดตพร้อมกัน
+- ทดสอบ browser สองบัญชีพร้อมกัน, process/SQLite แยก, สิทธิ์ไฟล์ใหม่, idle/resume และ process ล้ม
+- ยังขาด isolation ระดับ OS ระหว่าง runtime: process ใช้ service account เดียวกัน จึงยังไม่เปิดให้พนักงาน
+  และยังไม่ถือว่า #48 ผ่านครบ ดูข้อจำกัดใน `server/README.md`
+
 ## 2026-10-28 · ทดลองยืนยันตัวตน gateway (#47)
 
 - เพิ่ม gateway ทดลองแยกที่ตรวจ Google ID token, hosted domain และคำเชิญที่ยังใช้งานได้;

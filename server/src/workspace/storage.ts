@@ -1,6 +1,7 @@
 // Folder layout of ADR 0001 §2. Every path is built from validated ids under the data root, and a Workspace is
 // looked up only under its owner's folder, so one user's request can never name another user's Workspace.
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, writeFile, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { parse, UserId, WorkspaceError, WorkspaceId, WorkspaceRecord, type RuntimeSpec } from './contract.ts';
 
@@ -31,8 +32,13 @@ export async function createWorkspaceFolders(dataRoot: string, record: Workspace
 export async function saveRecord(dataRoot: string, record: WorkspaceRecord) {
   const { dir } = workspacePaths(dataRoot, record.ownerId, record.id);
   const file = join(dir, 'workspace.json');
-  await writeFile(file + '.tmp', JSON.stringify(record, null, 2), { mode: 0o600 });
-  await rename(file + '.tmp', file);
+  const temp = file + '.' + randomUUID() + '.tmp';
+  try {
+    await writeFile(temp, JSON.stringify(record, null, 2), { mode: 0o600 });
+    await rename(temp, file);
+  } finally {
+    await rm(temp, { force: true });
+  }
 }
 
 /** The owner's own Workspace, or WORKSPACE_NOT_FOUND; a foreign id looks exactly like one that does not exist. */
