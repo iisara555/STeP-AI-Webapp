@@ -134,3 +134,35 @@ port forwarding (`ssh -L 8766:127.0.0.1:8766 <user>@homelab`); เปิด URL 
 
 นี่ไม่ใช่ระบบ login หรือ isolation สำหรับพนักงาน ผู้ที่เข้าถึงเครื่องหรือ URL อาจใช้การทดลองได้
 process driver ไม่ใช่ขอบเขตความปลอดภัย และยังไม่ได้ทดสอบบน homelab จริง ไม่มีการ deploy จากงานนี้
+
+## ทดลอง Google identity กับ gateway
+
+`npm run engine:identity-trial` เป็นการทดลองแยกจาก owner trial และ Supabase pilot ใช้ provider จำลอง
+ในเครื่องเท่านั้น ตั้งค่า `STEP_GOOGLE_CLIENT_ID`, `STEP_GOOGLE_DOMAIN` และ `STEP_INVITATIONS_FILE`
+(absolute path ของไฟล์ JSON ที่ operator ดูแล ไม่ commit) ก่อนรัน ใช้พอร์ต `127.0.0.1:8767` หรือ
+`STEP_IDENTITY_PORT`; เปิดผ่าน SSH local forwarding และลงทะเบียน origin localhost ที่ตรงกับพอร์ตใน
+Google OAuth client โดยเปิด `http://localhost:8767` บนเครื่องเจ้าของ ข้อมูลให้ใช้สังเคราะห์เท่านั้น
+
+ไฟล์คำเชิญเป็น JSON array เช่น (ข้อมูลสมมติ):
+
+```json
+[
+  {
+    "id": "unique-random-id-123456",
+    "email": "alice@example.org",
+    "expiresAt": "2099-01-01T00:00:00.000Z",
+    "revoked": false
+  }
+]
+```
+
+ใช้ ID สุ่มใหม่ทุกครั้งที่ออกคำเชิญ ตั้งสิทธิ์ไฟล์ให้เฉพาะ operator อ่าน/แก้ได้ และแก้แบบ atomic
+gateway ตรวจลายเซ็นและ audience ของ Google ID token ผ่าน Google auth library ตรวจ `email_verified`,
+`hd`, email และคำเชิญที่ยังไม่หมดอายุ; ทุกคำขอและก่อนตอบจะอ่านคำเชิญซ้ำ การลบหรือ revoke คำเชิญ
+ตัดสิทธิ์ session เดิม session อยู่ในหน่วยความจำและหมดอายุใน 8 ชั่วโมงหรือเมื่อ server หยุด
+ผู้ใช้ไม่สามารถเลือก owner หรือ workspace ID; runtime manager ใช้ Google subject ที่ hash เป็น owner ID
+และ SQLite แยกต่อ workspace
+
+ยังไม่มีระบบจัดการคำเชิญผ่านเว็บ ไม่มี HTTPS สำหรับเผยแพร่ ไม่มี process isolation ที่ปลอดภัยสำหรับหลายคน
+และยังไม่ได้ทดสอบ Google บัญชีจริง การผ่าน synthetic test ไม่ใช่การอนุมัติเปิดให้พนักงานใช้
+ข้อมูลทดลองอยู่ใน `.data/identity-trial` หรือ `STEP_IDENTITY_DATA`; ลบเมื่อไม่ใช้และอย่าใส่ข้อมูลจริง

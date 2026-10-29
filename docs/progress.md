@@ -1,5 +1,13 @@
 # Progress
 
+## 2026-10-28 · ทดลองยืนยันตัวตน gateway (#47)
+
+- เพิ่ม gateway ทดลองแยกที่ตรวจ Google ID token, hosted domain และคำเชิญที่ยังใช้งานได้;
+  แยก workspace ตาม Google subject และตรวจคำเชิญซ้ำก่อนเริ่มงานและก่อนส่งผลลัพธ์
+- ทดสอบสองบัญชีสังเคราะห์, ผู้ไม่มีสิทธิ์, การอ้าง session ข้ามบัญชี และถอนสิทธิ์ระหว่างงาน
+- provider เป็นตัวจำลองและ gateway เปิดเฉพาะ loopback; ยังไม่ทดสอบ Google บัญชีจริงหรือ deploy
+  และยังไม่เหมาะให้พนักงานใช้ ดูวิธีตั้งค่าและข้อจำกัดใน `server/README.md`
+
 ## 2026-10-28 · ทดลองหน้าเว็บผ่าน gateway ไป Desktop engine (#46)
 
 - เพิ่มหน้าเว็บสำหรับเจ้าของผ่าน loopback gateway, token ชั่วคราว และ Workspace runtime ของ Desktop;
