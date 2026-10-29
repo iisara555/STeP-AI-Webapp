@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="th">
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>
+    ทดลอง Workspace
+  </title>
+  <style>
+    body {
+      font: 16px system-ui;
+      max-width: 48rem;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      font: inherit;
+    }
+    button {
+      font: inherit;
+    }
+    #messages p {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+  </style>
+  <h1>ทดลอง Workspace</h1>
+  <p>สำหรับการทดสอบด้วยข้อมูลสังเคราะห์เท่านั้น คำตอบเป็นข้อความจำลอง</p>
+  <div id="signin"></div>
+  <div id="chat" hidden>
+    <button id="logout">ออกจากระบบ</button>
+    <div id="messages" aria-live="polite"></div>
+    <form>
+      <label for="text">ข้อความทดลอง</label><textarea id="text" maxlength="20000" required></textarea
+      ><button>ส่งข้อความ</button>
+    </form>
+  </div>
+  <p id="status" role="status"></p>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script>
+    let token, sessionId;
+    const chat = document.querySelector('#chat'),
+      sign = document.querySelector('#signin'),
+      status = document.querySelector('#status'),
+      form = document.querySelector('form'),
+      input = document.querySelector('#text'),
+      messages = document.querySelector('#messages');
+    async function post(path, data) {
+      const r = await fetch(path, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: 'Bearer ' + token } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      const result = await r.json();
+      if (!r.ok) throw new Error(result.error);
+      return result;
+    }
+    async function init() {
+      try {
+        const config = await (await fetch('/api/config')).json();
+        if (!window.google) {
+          setTimeout(init, 200);
+          return;
+        }
+        google.accounts.id.initialize({
+          client_id: config.clientId,
+          callback: async (reply) => {
+            try {
+              token = (await post('/api/login', { credential: reply.credential })).token;
+              sign.hidden = true;
+              chat.hidden = false;
+              status.textContent = '';
+            } catch (e) {
+              status.textContent = e.message;
+            }
+          },
+        });
+        google.accounts.id.renderButton(sign, { theme: 'outline', size: 'large' });
+      } catch {
+        status.textContent = 'ไม่สามารถเริ่มเข้าสู่ระบบได้';
+      }
+    }
+    init();
+    function add(label, text) {
+      const p = document.createElement('p');
+      p.textContent = label + ': ' + text;
+      messages.append(p);
+    }
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      const button = form.querySelector('button');
+      button.disabled = true;
+      status.textContent = 'กำลังประมวลผล…';
+      add('คุณ', text);
+      input.value = '';
+      try {
+        const result = await post('/api/ask', { text, sessionId });
+        sessionId = result.sessionId;
+        add('Engine', result.answer);
+        status.textContent = '';
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    document.querySelector('#logout').addEventListener('click', async () => {
+      try {
+        await post('/api/logout', {});
+      } finally {
+        token = undefined;
+        sessionId = undefined;
+        messages.replaceChildren();
+        chat.hidden = true;
+        sign.hidden = false;
+      }
+    });
+  </script>
+</html>

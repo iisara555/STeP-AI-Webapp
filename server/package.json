@@ -6,6 +6,7 @@
   "description": "Runs the pinned Desktop engine without Electron (ADR 0001)",
   "dependencies": {
     "@xmldom/xmldom": "0.8.15",
+    "google-auth-library": "^11.3.1",
     "mdast-util-from-markdown": "2.0.2"
   }
 }
