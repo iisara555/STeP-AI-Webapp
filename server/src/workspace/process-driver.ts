@@ -57,8 +57,6 @@ export function isolatedRuntimeArgs(spec: RuntimeSpec): string[] {
     '--unshare-all',
     '--unshare-user',
     '--disable-userns',
-    '--cap-drop',
-    'ALL',
     '--die-with-parent',
     '--new-session',
     '--proc',
