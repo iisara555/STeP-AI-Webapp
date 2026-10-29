@@ -7,7 +7,15 @@ import { z } from 'zod';
 import { CompatibleAdapter } from '../../../harness/desktop/electron/providers.ts';
 import { searchPublicWeb } from '../../../harness/desktop/electron/public-search.ts';
 import { createEngine } from '../engine.ts';
-import { AskInput, ProviderGrant, type AskResult, type ConversationSummary } from './contract.ts';
+import {
+  AskInput,
+  ProviderGrant,
+  SessionRef,
+  type AskResult,
+  type ConversationMessage,
+  type ConversationSummary,
+  type RuntimeEvent,
+} from './contract.ts';
 import type { RuntimeReply, RuntimeRequest } from './process-driver.ts';
 
 const workspaceId = process.env.STEP_WORKSPACE_ID;
@@ -18,6 +26,8 @@ const send = process.send?.bind(process);
 if (!send || !workspaceId || !dir || process.cwd() !== join(dir, 'files')) process.exit(2);
 await access(dir, constants.R_OK | constants.W_OK);
 
+const reply = (message: RuntimeReply) => send!(message);
+const FORWARDED = new Set(['delta', 'discard', 'activity', 'status']);
 let grant: ReturnType<typeof ProviderGrant.parse> | undefined;
 const engine = await createEngine({
   dataDir: dir,
@@ -27,6 +37,15 @@ const engine = await createEngine({
   }),
   publicSearch: async (query, signal) =>
     grant?.publicSearch ? searchPublicWeb(query, signal, engine.policy.network?.proxyUrl) : '',
+  // Only the answer as it streams and short progress lines go to the Manager, for the Workspace's owner.
+  emit: (event) => {
+    if (!FORWARDED.has(event.type) || !event.sessionId) return;
+    const forwarded: RuntimeEvent = { sessionId: event.sessionId, type: event.type as RuntimeEvent['type'] };
+    if (typeof event.text === 'string') forwarded.text = event.text;
+    if (typeof (event as { count?: unknown }).count === 'number')
+      forwarded.count = (event as { count: number }).count;
+    reply({ type: 'event', event: forwarded });
+  },
 });
 
 const methods: Record<string, (params: unknown) => unknown> = {
@@ -67,6 +86,21 @@ const methods: Record<string, (params: unknown) => unknown> = {
       sources: done.loadedContext ?? [],
     };
   },
+  newConversation: () => ({ sessionId: engine.store.create('central', 'cc').id }),
+  cancel(params) {
+    const { sessionId } = SessionRef.parse(params);
+    if (!engine.store.get('session', sessionId)) throw new Error('CONVERSATION_NOT_FOUND');
+    engine.work.cancel(sessionId);
+    return { ok: true };
+  },
+  messages(params): ConversationMessage[] {
+    const { sessionId } = SessionRef.parse(params);
+    if (!engine.store.get('session', sessionId)) throw new Error('CONVERSATION_NOT_FOUND');
+    return engine.store
+      .session(sessionId)
+      .messages.filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m: any) => ({ role: m.role, text: m.text || '', ...(m.at ? { at: m.at } : {}) }));
+  },
   conversations: (): ConversationSummary[] =>
     engine.store.list('session').map((s: any) => ({
       id: s.id,
@@ -76,7 +110,6 @@ const methods: Record<string, (params: unknown) => unknown> = {
     })),
 };
 
-const reply = (message: RuntimeReply) => send!(message);
 process.on('message', async ({ nonce, method, params }: RuntimeRequest) => {
   const handler = Object.hasOwn(methods, method) ? methods[method] : undefined;
   try {

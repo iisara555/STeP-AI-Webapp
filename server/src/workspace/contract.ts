@@ -75,11 +75,32 @@ export type AskResult = {
 
 export type ConversationSummary = { id: string; title: string; status: string; updatedAt?: string };
 
+export const SessionRef = z.object({ sessionId: z.string().min(1).max(200) });
+export type SessionRef = z.infer<typeof SessionRef>;
+
+export type ConversationMessage = { role: 'user' | 'assistant'; text: string; at?: string };
+
+/**
+ * Progress of a run, pushed by the runtime while it works. `text` is the answer as it streams (delta) or a short
+ * progress line (activity); it goes only to the Workspace's owner, never to logs or the audit trail.
+ */
+export type RuntimeEvent = {
+  sessionId: string;
+  type: 'delta' | 'discard' | 'activity' | 'status';
+  text?: string;
+  count?: number;
+};
+
 /** Requests a runtime answers over its private channel; the Manager is the only caller. */
 export type RuntimeCalls = {
   connect: { params: ProviderGrant; result: { ok: true } };
   ask: { params: AskInput; result: AskResult };
   conversations: { params: Record<string, never>; result: ConversationSummary[] };
+  /** A new, empty conversation, so a caller knows its id before the first answer arrives. */
+  newConversation: { params: Record<string, never>; result: SessionRef };
+  /** Stops the conversation's running answer; the run then ends as `cancelled`. */
+  cancel: { params: SessionRef; result: { ok: true } };
+  messages: { params: SessionRef; result: ConversationMessage[] };
 };
 
 export type RuntimeHandle = {
@@ -92,6 +113,8 @@ export type RuntimeHandle = {
   stop(): Promise<void>;
   /** Called once when the runtime ends for any reason, including stop(). */
   onExit(listener: (code: number | null) => void): void;
+  /** Progress events of runs inside this runtime. */
+  onEvent?(listener: (event: RuntimeEvent) => void): void;
 };
 
 /** Docker, Podman or a systemd sandbox can replace the process driver without changing the contract. */

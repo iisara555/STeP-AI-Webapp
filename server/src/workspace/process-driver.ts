@@ -7,6 +7,7 @@ import {
   WorkspaceError,
   type RuntimeCalls,
   type RuntimeDriver,
+  type RuntimeEvent,
   type RuntimeHealth,
   type RuntimeSpec,
 } from './contract.ts';
@@ -34,6 +35,7 @@ export function runtimeEnv(spec: RuntimeSpec): Record<string, string> {
 export type RuntimeRequest = { type: 'call'; nonce: number; method: string; params: unknown };
 export type RuntimeReply =
   | { type: 'ready' }
+  | { type: 'event'; event: RuntimeEvent }
   | { type: 'result'; nonce: number; ok: true; result: unknown }
   | { type: 'result'; nonce: number; ok: false; code: string };
 
@@ -74,9 +76,14 @@ export function processDriver({ startTimeoutMs = 30_000 } = {}): RuntimeDriver {
           child.once('exit', onExit);
           child.send({ type: 'call', nonce: id, method, params } satisfies RuntimeRequest);
         });
+      const eventListeners = new Set<(event: RuntimeEvent) => void>();
+      child.on('message', (message: RuntimeReply) => {
+        if (message.type === 'event') for (const listener of eventListeners) listener(message.event);
+      });
       return {
         pid: child.pid,
         onExit: (listener) => void exited.then(listener),
+        onEvent: (listener) => void eventListeners.add(listener),
         health: (timeoutMs = 2_000) =>
           (request('health', {}, timeoutMs) as Promise<RuntimeHealth>).catch(() => ({
             ok: false,

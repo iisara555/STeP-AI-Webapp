@@ -31,6 +31,57 @@
 - AI skill selection (hybrid) ของ Desktop ทำงานเฉพาะเมื่อเปิด tool loop ซึ่ง server profile ยังปิด คำขอที่ router แบบกฎหา Skill
   ไม่เจอจึงได้คำตอบแบบ general assist แต่ยังไม่ใช้ขั้นตอนของ Skill
 
+## Gateway (ระยะ 3a)
+
+`src/gateway/` เป็นทางเข้าเดียวของ Browser สู่ Cloud Workspace ตาม ADR 0001 §3 Browser ไม่เห็น port ของ runtime, IPC,
+Docker socket หรือ SQLite
+
+- `auth.ts` ตรวจ Google ID token (`Authorization: Bearer …`) จาก signing key ของ Google: audience ต้องเป็น client id ของเว็บ,
+  อีเมลยืนยันแล้ว, `hd` และโดเมนอีเมลอยู่ในรายชื่อองค์กร และอีเมลอยู่ในไฟล์รายชื่อคนที่ได้รับเชิญ ซึ่งอ่านใหม่ทุกคำขอ
+  ลบชื่อออกจากไฟล์แล้วเข้าไม่ได้ตั้งแต่คำขอถัดไป ผู้ใช้ได้ id `g<sub>` ซึ่งเป็นชื่อโฟลเดอร์ใต้ `users/`
+- `runs.ts` งาน (run) เป็นของ Gateway ไม่ได้ผูกกับ HTTP request: ปิด Browser แล้ว runtime ยังทำต่อ ผลลัพธ์อยู่ในบทสนทนาของ
+  Workspace และ event feed ต่อ Workspace เก็บ event ล่าสุด 2,000 รายการ ให้ client ที่กลับมาส่ง `Last-Event-ID`
+  แล้วได้เฉพาะส่วนที่พลาด ถ้าเก่าเกินที่เก็บไว้จะได้ event `reset` ให้โหลดผลจาก API แทน
+- ยกเลิกงาน: Gateway รอให้คำขอ ask ถูกส่งเข้า runtime ก่อนส่ง cancel (ช่อง IPC รักษาลำดับ) cancel ที่กดทันทีหลังเริ่มงานจึงไม่หลุด
+- quota ต่อผู้ใช้: Workspace ไม่เกิน 10, งานพร้อมกันไม่เกิน 2, งานต่อวัน (UTC) ไม่เกิน 300 ตั้งได้ด้วย environment
+- `audit.ts` บันทึก `<data>/audit/<วัน UTC>.jsonl` (0600) เฉพาะ actor, action, workspaceId, runId, outcome และ code
+  ไม่มีช่องสำหรับคำถาม คำตอบ หรือชื่อ Workspace
+- `GET /api/admin/health` สำหรับผู้ดูแลตาม `STEP_ADMINS`: นับ runtime และงานรายวัน ไม่มีชื่อ เจ้าของ หรือเนื้อหา และผู้ดูแลก็ยังเปิด
+  Workspace ของคนอื่นไม่ได้
+
+| Method | Path                                                  | ทำอะไร                                        |
+| ------ | ----------------------------------------------------- | --------------------------------------------- |
+| GET    | `/healthz`                                            | liveness ไม่ต้อง login                        |
+| GET    | `/api/me`                                             | ตัวตนที่ Gateway เห็น                         |
+| GET    | `/api/workspaces`                                     | Workspace ของตัวเอง                           |
+| POST   | `/api/workspaces`                                     | สร้าง `{ name }`                              |
+| GET    | `/api/workspaces/:ws`                                 | สถานะ                                         |
+| POST   | `/api/workspaces/:ws/start` · `/stop`                 | เปิด/หยุด runtime (ข้อมูลอยู่ครบ)             |
+| GET    | `/api/workspaces/:ws/conversations`                   | บทสนทนา                                       |
+| GET    | `/api/workspaces/:ws/conversations/:session/messages` | ข้อความในบทสนทนา                              |
+| POST   | `/api/workspaces/:ws/runs`                            | เริ่มงาน `{ text, sessionId? }` ได้ 202 ทันที |
+| GET    | `/api/workspaces/:ws/runs` · `/runs/:run`             | สถานะงาน                                      |
+| POST   | `/api/workspaces/:ws/runs/:run/cancel`                | ยกเลิก                                        |
+| GET    | `/api/workspaces/:ws/events`                          | SSE: `run`, `delta`, `discard`, `activity`    |
+| GET    | `/api/admin/health`                                   | ตัวเลขสำหรับผู้ดูแล                           |
+
+```bash
+STEP_DATA_ROOT=/srv/step/data \
+STEP_INVITES_FILE=/srv/step/invites.txt \
+STEP_GOOGLE_CLIENT_ID=… STEP_ALLOWED_DOMAINS=step.cmu.ac.th STEP_ADMINS=… \
+STEP_APP_ORIGIN=https://… STEP_AI_BASE_URL=… STEP_AI_MODEL=… STEP_AI_KEY=… \
+npm run gateway        # ฟังที่ 127.0.0.1:8787 ให้ reverse proxy/Cloudflare Tunnel อยู่ข้างหน้า
+```
+
+ข้อจำกัดของ 3a:
+
+- สถานะงานและ event feed อยู่ใน memory ของ Gateway: restart แล้วงานที่ค้างหายและ quota รายวันนับใหม่ ส่วนบทสนทนาในแต่ละ
+  Workspace ยังอยู่ครบ
+- ยังไม่มีหน้าเว็บ (3b) ยังไม่ได้ทดสอบกับบัญชี Google จริง และ event stream ใช้ header `Authorization` จึงต้องอ่านด้วย
+  `fetch` ไม่ใช่ `EventSource`
+- ยังไม่มีช่องอนุมัติ เพราะ server ยังไม่มีเครื่องมือเขียนข้อมูลภายนอก (tool loop ปิด) จะทำพร้อมเครื่องมือในระยะ 4 ตาม ADR 0002
+- process driver ยังไม่ใช่ security boundary ระดับ host เหมือนเดิม
+
 ## ทดลองค้นเว็บสาธารณะผ่าน ToolLoop
 
 โหมดนี้ใช้กับ `engine:ask` และ `engine:bench` สำหรับเจ้าของโครงการคนเดียว โดยปิดเป็นค่าเริ่มต้น

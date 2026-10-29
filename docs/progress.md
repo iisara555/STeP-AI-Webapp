@@ -24,6 +24,24 @@
   ด้วย Playwright ทั้ง desktop และ mobile ดูวิธี SSH forwarding และข้อจำกัดใน `server/README.md`
 - ยังไม่ได้ deploy หรือทดลองบน homelab จริง; ไม่ใช่ระบบ login หรือ process isolation สำหรับพนักงาน
 
+## 2026-10-28 · Cloud Workspace ระยะ 3a: Gateway, งานที่รันต่อหลังปิด Browser, event stream และยกเลิกงาน
+
+- เพิ่ม `server/src/gateway/` เป็นทางเข้าเดียวของ Browser สู่ Workspace (ADR 0001 §3): login ด้วย Google ID token
+  (โดเมนองค์กร + ไฟล์รายชื่อคนที่ได้รับเชิญที่อ่านใหม่ทุกคำขอ), HTTP API ของ Workspace/บทสนทนา/งาน, SSE ต่อ Workspace
+  ที่ต่อกลับด้วย `Last-Event-ID` แล้วได้เฉพาะส่วนที่พลาด, ยกเลิกงาน, quota ต่อผู้ใช้, audit log แบบไม่มีเนื้อหา และ
+  `/api/admin/health` ที่มีแต่ตัวเลข รายละเอียดใน `server/README.md`
+- runtime ส่ง event ระหว่างตอบ (`delta`/`discard`/`activity`) ให้ Manager และเพิ่มคำสั่ง `newConversation`, `cancel`, `messages`
+  ใน contract โดยไม่แก้ engine
+- เจอระหว่างทำและแก้แล้ว: cancel ที่กดทันทีหลังเริ่มงานแซงคำขอ ask ใน IPC ได้ แล้วงานรันจนจบ ตอนนี้ cancel รอให้ ask ถูกส่งก่อน
+  และ `GET …/runs` ของ Workspace คนอื่นตอบ 200 รายการว่างแทน 404 ทั้งสองข้อมี test และลองเอาการแก้ออกแล้ว test ล้ม
+- เกณฑ์ผ่านของระยะ 3 ทดสอบกับของจริงทั้งเส้น (Gateway HTTP + runtime process + engine ของ Desktop + AI endpoint สังเคราะห์บน
+  loopback): ปิดการเชื่อมต่อระหว่าง AI ยังคิด งานทำต่อจนจบ ต่อกลับแล้วได้คำตอบที่ stream มาระหว่างนั้นพร้อมผลและเอกสารอ้างอิง
+  และยกเลิกงานถัดไปในบทสนทนาเดียวกันได้ ไม่มีการเรียก AI จริงหรือบัญชีจริง
+- Test ใหม่ 11 ข้อ: Gateway 7 (สิทธิ์และ origin, ปิด Browser/กลับมา, ยกเลิก, แยกผู้ใช้, quota, admin/audit, ตรวจ input),
+  Google ID token 3, end-to-end 1
+- ยังไม่ทำ: หน้าเว็บ (3b), ช่องอนุมัติ (มาพร้อมเครื่องมือเขียนภายนอกในระยะ 4), เก็บสถานะงานข้าม restart ของ Gateway, ทดสอบกับบัญชี
+  Google จริง และ container driver ไม่มี deploy migration หรือ secret ใหม่
+
 ## 2026-10-28 · Rollout #42 (และหน้าเว็บของ #34/#35)
 
 - Webapp #42 merge เป็น `45ad12e` หลัง Verify PWA ผ่านครบ (รวม engine isolation บน Linux)
