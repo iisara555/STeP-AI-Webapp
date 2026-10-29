@@ -21,7 +21,14 @@ import {
   type Workspace,
   type WorkspaceRecord,
 } from './contract.ts';
-import { createWorkspaceFolders, listRecords, readRecord, saveRecord, workspacePaths } from './storage.ts';
+import {
+  createWorkspaceFolders,
+  listRecords,
+  readConversationIndex,
+  readRecord,
+  saveRecord,
+  workspacePaths,
+} from './storage.ts';
 
 export type RuntimeManagerOptions = {
   dataRoot: string;
@@ -173,8 +180,12 @@ export class RuntimeManager {
     });
   }
 
+  /** A running runtime answers itself; a stopped one is listed from its index, without being woken. */
   async conversations(actor: string, workspaceId: string): Promise<ConversationSummary[]> {
-    return this.call(actor, workspaceId, (handle) => handle.call('conversations', {}));
+    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const entry = this.live.get(this.key(record));
+    if (entry?.handle && entry.state === 'running') return entry.handle.call('conversations', {});
+    return readConversationIndex(this.dataRoot, record.ownerId, record.id);
   }
 
   async newConversation(actor: string, workspaceId: string): Promise<SessionRef> {

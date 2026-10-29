@@ -132,6 +132,12 @@ test('a conversation survives a stop and continues after resume; the token never
     );
 
     await manager.stop('alice', w.id);
+    // A stopped Workspace is listed from its own index, without waking its runtime.
+    assert.deepEqual(
+      (await manager.conversations('alice', w.id)).map((c) => [c.id, c.status]),
+      [[first.sessionId, 'review']],
+    );
+    assert.equal((await manager.get('alice', w.id)).state, 'stopped');
     const db = await readFile(join(workspacePaths(dataRoot, 'alice', w.id).dir, 'workspace.sqlite'));
     assert.equal(db.includes(TOKEN), false, 'token written to workspace.sqlite');
   });

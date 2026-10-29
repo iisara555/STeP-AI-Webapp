@@ -24,6 +24,25 @@
   ด้วย Playwright ทั้ง desktop และ mobile ดูวิธี SSH forwarding และข้อจำกัดใน `server/README.md`
 - ยังไม่ได้ deploy หรือทดลองบน homelab จริง; ไม่ใช่ระบบ login หรือ process isolation สำหรับพนักงาน
 
+## 2026-10-28 · Cloud Workspace ระยะ 3b: หน้าจอเดิมของ Webapp ทำงานผ่าน Gateway
+
+- ใช้หน้าจอเดิมทั้งหมด เพิ่ม `Host` แบบที่สาม (`web/src/gateway.ts`) ที่ส่งคำสั่งเดิมของหน้าจอไป Gateway เลือกโหมดตอน build ด้วย
+  `VITE_GATEWAY_URL` + `VITE_GOOGLE_CLIENT_ID` ถ้าไม่ตั้ง แอปเป็นโหมด Supabase เหมือนเดิม
+- โหมดนี้ login ด้วยปุ่ม Google Identity Services (ID token อยู่ใน `sessionStorage` ของแท็บ) แสดงเฉพาะแชต ค้นงานเก่า และคู่มือ
+  ซ่อนความจำ เอกสาร ใบเสร็จ Skill แบบฟอร์ม สื่อ การตั้งค่า และปุ่มแชร์/เลือกเอกสาร/ความจำ/ใช้เป็นร่าง ที่ Gateway ยังไม่มี
+- Server: runtime เขียนดัชนีบทสนทนาในโฟลเดอร์ Workspace ของตัวเอง Manager อ่านดัชนีนี้เมื่อ runtime หยุดอยู่ การเปิดหน้าเว็บจึงไม่ปลุก
+  runtime ทุกตัว และเพิ่ม `POST …/conversations` สร้างบทสนทนาเปล่า
+- Bug ที่เจอและแก้ (มี test ที่ล้มเมื่อเอาการแก้ออก):
+  - `workspace.json` เขียนผ่านไฟล์ `.tmp` ชื่อเดียว คำขอที่ทับกันใน Workspace เดียว (งานจบระหว่างแชตอ่านข้อความ) ทำให้ `rename` ล้มด้วย
+    `ENOENT` ตอนนี้แต่ละครั้งใช้ไฟล์ชั่วคราวของตัวเอง
+  - หน้าเว็บโหมด Cloud Workspace แสดงหน้า login ชั่วครู่ก่อนอ่าน credential จึงโหลด script ของ Google แม้แท็บ login อยู่แล้ว
+  - ปุ่มหยุดงานกดไม่ได้ เพราะงานจาก Gateway ไม่มี `actor_id` ของผู้ใช้ (หน้าแชตให้เฉพาะเจ้าของงานกดหยุด) Playwright จับได้
+- Validation (cloud container, Node 22.22.0, ข้อมูลสังเคราะห์, ไม่เรียก AI หรือ Google จริง): `check`, `check:engine-pin`, `npm test` (รวม
+  `gateway-host` 4 ข้อ), `test:db`, `test:engine`, `build` และ Playwright ทั้งชุด ผ่าน ยกเว้น test ดาวน์โหลด Word 2 ข้อ (desktop/mobile) ที่ล้ม
+  แบบเดียวกันบน main ที่ไม่ได้แก้ใน container นี้ (Chromium ตั้งชื่อไฟล์ `download`) ใหม่: `cloud-workspace.spec.ts` 2 ข้อ ส่งคำถามจากหน้าแรก
+  ดูคำตอบ stream, reload กลางทาง, เปิดงานเดิมแล้วได้คำตอบที่จบ, กดหยุดงานถัดไประหว่าง stream แล้วไม่มีคำตอบตามมา และไม่มีคำขอออกนอกเครื่อง
+- ยังไม่ทำ: ลองกับบัญชี Google จริงและ Gateway บน homelab, CSP ของ nginx สำหรับโหมดนี้, ร่างเอกสาร/ความจำ/ไฟล์ใน Cloud Workspace (ระยะ 4) ไม่มี deploy migration หรือ secret ใหม่
+
 ## 2026-10-28 · Cloud Workspace ระยะ 3a: Gateway, งานที่รันต่อหลังปิด Browser, event stream และยกเลิกงาน
 
 - เพิ่ม `server/src/gateway/` เป็นทางเข้าเดียวของ Browser สู่ Workspace (ADR 0001 §3): login ด้วย Google ID token

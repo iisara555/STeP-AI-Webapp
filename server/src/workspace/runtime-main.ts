@@ -1,7 +1,7 @@
 // Entry of one Workspace runtime process (process driver). It opens the pinned Desktop engine headless on this
 // Workspace's own <dir>/workspace.sqlite (ADR 0001 phase 2) and answers the Manager over its private channel.
 // The provider token arrives by `connect` and stays in this process's memory only.
-import { access, constants } from 'node:fs/promises';
+import { access, constants, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { CompatibleAdapter } from '../../../harness/desktop/electron/providers.ts';
@@ -17,6 +17,7 @@ import {
   type RuntimeEvent,
 } from './contract.ts';
 import type { RuntimeReply, RuntimeRequest } from './process-driver.ts';
+import { CONVERSATION_INDEX } from './storage.ts';
 
 const workspaceId = process.env.STEP_WORKSPACE_ID;
 const dir = process.env.STEP_WORKSPACE_DIR;
@@ -48,6 +49,26 @@ const engine = await createEngine({
   },
 });
 
+const listConversations = (): ConversationSummary[] =>
+  engine.store.list('session').map((s: any) => ({
+    id: s.id,
+    title: s.title || '',
+    status: s.status,
+    ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}),
+  }));
+/** Keeps <dir>/conversations.json current, so the Manager can list this Workspace after it stops. */
+let indexing: Promise<void> = Promise.resolve();
+const writeIndex = () => {
+  const file = join(dir, CONVERSATION_INDEX);
+  indexing = indexing
+    .then(async () => {
+      await writeFile(file + '.tmp', JSON.stringify(listConversations()), { mode: 0o600 });
+      await rename(file + '.tmp', file);
+    })
+    .catch(() => {});
+  return indexing;
+};
+
 const methods: Record<string, (params: unknown) => unknown> = {
   health: () => ({
     ok: true,
@@ -75,7 +96,11 @@ const methods: Record<string, (params: unknown) => unknown> = {
     const { text, sessionId } = AskInput.parse(params);
     const id = sessionId ?? engine.store.create('central', 'cc').id;
     if (!engine.store.get('session', id)) throw new Error('CONVERSATION_NOT_FOUND');
-    await engine.work.run(id, text, '', true, undefined, 'chat');
+    try {
+      await engine.work.run(id, text, '', true, undefined, 'chat');
+    } finally {
+      await writeIndex();
+    }
     const done = engine.store.session(id);
     const answer = done.messages.filter((m) => m.role === 'assistant').at(-1)?.text;
     return {
@@ -86,7 +111,11 @@ const methods: Record<string, (params: unknown) => unknown> = {
       sources: done.loadedContext ?? [],
     };
   },
-  newConversation: () => ({ sessionId: engine.store.create('central', 'cc').id }),
+  async newConversation() {
+    const sessionId = engine.store.create('central', 'cc').id;
+    await writeIndex();
+    return { sessionId };
+  },
   cancel(params) {
     const { sessionId } = SessionRef.parse(params);
     if (!engine.store.get('session', sessionId)) throw new Error('CONVERSATION_NOT_FOUND');
@@ -101,13 +130,7 @@ const methods: Record<string, (params: unknown) => unknown> = {
       .messages.filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m: any) => ({ role: m.role, text: m.text || '', ...(m.at ? { at: m.at } : {}) }));
   },
-  conversations: (): ConversationSummary[] =>
-    engine.store.list('session').map((s: any) => ({
-      id: s.id,
-      title: s.title || '',
-      status: s.status,
-      ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}),
-    })),
+  conversations: listConversations,
 };
 
 process.on('message', async ({ nonce, method, params }: RuntimeRequest) => {
@@ -131,4 +154,5 @@ process.on('disconnect', () => {
   engine.close();
   process.exit(0);
 });
+await writeIndex();
 reply({ type: 'ready' });

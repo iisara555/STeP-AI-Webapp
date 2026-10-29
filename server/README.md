@@ -49,21 +49,22 @@ Docker socket หรือ SQLite
 - `GET /api/admin/health` สำหรับผู้ดูแลตาม `STEP_ADMINS`: นับ runtime และงานรายวัน ไม่มีชื่อ เจ้าของ หรือเนื้อหา และผู้ดูแลก็ยังเปิด
   Workspace ของคนอื่นไม่ได้
 
-| Method | Path                                                  | ทำอะไร                                        |
-| ------ | ----------------------------------------------------- | --------------------------------------------- |
-| GET    | `/healthz`                                            | liveness ไม่ต้อง login                        |
-| GET    | `/api/me`                                             | ตัวตนที่ Gateway เห็น                         |
-| GET    | `/api/workspaces`                                     | Workspace ของตัวเอง                           |
-| POST   | `/api/workspaces`                                     | สร้าง `{ name }`                              |
-| GET    | `/api/workspaces/:ws`                                 | สถานะ                                         |
-| POST   | `/api/workspaces/:ws/start` · `/stop`                 | เปิด/หยุด runtime (ข้อมูลอยู่ครบ)             |
-| GET    | `/api/workspaces/:ws/conversations`                   | บทสนทนา                                       |
-| GET    | `/api/workspaces/:ws/conversations/:session/messages` | ข้อความในบทสนทนา                              |
-| POST   | `/api/workspaces/:ws/runs`                            | เริ่มงาน `{ text, sessionId? }` ได้ 202 ทันที |
-| GET    | `/api/workspaces/:ws/runs` · `/runs/:run`             | สถานะงาน                                      |
-| POST   | `/api/workspaces/:ws/runs/:run/cancel`                | ยกเลิก                                        |
-| GET    | `/api/workspaces/:ws/events`                          | SSE: `run`, `delta`, `discard`, `activity`    |
-| GET    | `/api/admin/health`                                   | ตัวเลขสำหรับผู้ดูแล                           |
+| Method | Path                                                  | ทำอะไร                                                      |
+| ------ | ----------------------------------------------------- | ----------------------------------------------------------- |
+| GET    | `/healthz`                                            | liveness ไม่ต้อง login                                      |
+| GET    | `/api/me`                                             | ตัวตนที่ Gateway เห็น                                       |
+| GET    | `/api/workspaces`                                     | Workspace ของตัวเอง                                         |
+| POST   | `/api/workspaces`                                     | สร้าง `{ name }`                                            |
+| GET    | `/api/workspaces/:ws`                                 | สถานะ                                                       |
+| POST   | `/api/workspaces/:ws/start` · `/stop`                 | เปิด/หยุด runtime (ข้อมูลอยู่ครบ)                           |
+| GET    | `/api/workspaces/:ws/conversations`                   | บทสนทนา (Workspace ที่หยุดอยู่อ่านจากดัชนี ไม่ปลุก runtime) |
+| POST   | `/api/workspaces/:ws/conversations`                   | สร้างบทสนทนาเปล่า                                           |
+| GET    | `/api/workspaces/:ws/conversations/:session/messages` | ข้อความในบทสนทนา                                            |
+| POST   | `/api/workspaces/:ws/runs`                            | เริ่มงาน `{ text, sessionId? }` ได้ 202 ทันที               |
+| GET    | `/api/workspaces/:ws/runs` · `/runs/:run`             | สถานะงาน                                                    |
+| POST   | `/api/workspaces/:ws/runs/:run/cancel`                | ยกเลิก                                                      |
+| GET    | `/api/workspaces/:ws/events`                          | SSE: `run`, `delta`, `discard`, `activity`                  |
+| GET    | `/api/admin/health`                                   | ตัวเลขสำหรับผู้ดูแล                                         |
 
 ```bash
 STEP_DATA_ROOT=/srv/step/data \
@@ -77,10 +78,32 @@ npm run gateway        # ฟังที่ 127.0.0.1:8787 ให้ reverse pro
 
 - สถานะงานและ event feed อยู่ใน memory ของ Gateway: restart แล้วงานที่ค้างหายและ quota รายวันนับใหม่ ส่วนบทสนทนาในแต่ละ
   Workspace ยังอยู่ครบ
-- ยังไม่มีหน้าเว็บ (3b) ยังไม่ได้ทดสอบกับบัญชี Google จริง และ event stream ใช้ header `Authorization` จึงต้องอ่านด้วย
-  `fetch` ไม่ใช่ `EventSource`
+- ยังไม่ได้ทดสอบกับบัญชี Google จริง และ event stream ใช้ header `Authorization` จึงต้องอ่านด้วย `fetch` ไม่ใช่ `EventSource`
 - ยังไม่มีช่องอนุมัติ เพราะ server ยังไม่มีเครื่องมือเขียนข้อมูลภายนอก (tool loop ปิด) จะทำพร้อมเครื่องมือในระยะ 4 ตาม ADR 0002
 - process driver ยังไม่ใช่ security boundary ระดับ host เหมือนเดิม
+
+## หน้าเว็บโหมด Cloud Workspace (ระยะ 3b)
+
+หน้าจอเดิมของ Webapp ใช้ Gateway แทน Supabase เมื่อ build ด้วย 2 ค่านี้ ถ้าไม่ตั้ง แอปทำงานกับ Supabase เหมือนเดิมทุกอย่าง
+
+```bash
+VITE_GATEWAY_URL=https://…/gateway   # แนะนำให้ reverse proxy เสิร์ฟ Gateway ใต้ origin เดียวกับหน้าเว็บ
+VITE_GOOGLE_CLIENT_ID=….apps.googleusercontent.com   # client id เดียวกับ STEP_GOOGLE_CLIENT_ID ของ Gateway
+```
+
+- `web/src/gateway.ts` เป็น `Host` แบบที่สามของหน้าจอ (คู่กับ Supabase และ demo) แปลงคำสั่งเดิม (`snapshot`, `session.create`,
+  `session.read`, `run.start`, `run.read`, `run.cancel`, `workspace.create`) ไปเป็น API ของ Gateway และตาม event stream เพื่อให้
+  `run.read` มีข้อความที่กำลัง stream เหมือนเดิม คำสั่งอื่นตอบ `CLOUD_NOT_AVAILABLE`
+- Workspace แรกของผู้ใช้เก็บงานของหน้าแรก (สร้างให้เมื่อเริ่มงานแรก ชื่อ "งานของฉัน") Workspace อื่นอยู่ในตัวเลือก workspace เดิม
+  ทุกงานเป็นส่วนตัว และไม่มีปุ่มแชร์
+- เมนูที่แสดง: แชต, ค้นงานเก่า, คู่มือ ส่วนความจำ เอกสาร ใบเสร็จ Skill แบบฟอร์ม สื่อภายใน และการตั้งค่า ถูกซ่อน และในแชตไม่มีปุ่ม
+  เลือกเอกสาร ใช้ความจำ บันทึกความจำ หรือใช้เป็นร่าง จนกว่า server จะรองรับ (ระยะ 4–5)
+- Login: ปุ่ม Google Identity Services ให้ ID token ที่ Gateway ตรวจ เก็บไว้ใน `sessionStorage` ของแท็บเท่านั้น หมดอายุราวหนึ่งชั่วโมง
+  แล้วต้องลงชื่อใหม่ (Google อาจทำให้เองโดยไม่ต้องกด)
+- CSP ของหน้าเว็บโหมดนี้ต้องเพิ่ม `https://accounts.google.com` ใน `script-src` และ `style-src` และ origin ของ Gateway ใน `connect-src`
+  (ไม่ต้องเพิ่มถ้าเสิร์ฟใต้ origin เดียวกัน) `deploy/homelab/nginx.conf` ของ pilot ยังไม่ได้เปลี่ยน
+- Test: `test/gateway-host.test.ts` เรียกคำสั่งของหน้าจอกับ Gateway จริง และ `test/e2e/cloud-workspace.spec.ts` เปิดหน้าจอจริงในโหมดนี้กับ
+  Gateway ทดสอบ (`server/test/support/e2e-gateway.ts`) ส่งคำถาม ดูคำตอบ stream แล้ว reload กลางทาง และได้คำตอบที่จบแล้ว
 
 ## ทดลองค้นเว็บสาธารณะผ่าน ToolLoop
 

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { Conversation, Skill, Snapshot } from '../../packages/harness-core/src/contracts.ts';
 import { Modal } from './components.tsx';
 import { tools } from './Sidebar.tsx';
+import { pageAvailable } from './gateway.ts';
+import type { Page } from './routes.ts';
 /** Search tasks, pages and Skills in one list, as Desktop's command bar does. */
 export function CommandPalette({
   data,
@@ -36,7 +38,9 @@ export function CommandPalette({
       !s.metadata.webUnsupported &&
       (s.title + ' ' + s.skill_key).toLowerCase().includes(q.replace(/^\//, '')),
   );
-  const shownPages = pages.filter(([key, label]) => (key + ' ' + label).toLowerCase().includes(q));
+  const shownPages = pages.filter(
+    ([key, label]) => pageAvailable(key as Page) && (key + ' ' + label).toLowerCase().includes(q),
+  );
   return (
     <Modal title="ค้นหางานและคำสั่ง" onClose={onClose}>
       <label>
