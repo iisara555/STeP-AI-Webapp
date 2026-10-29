@@ -9,6 +9,13 @@
   workspace ผ่าน path และ symlink ไม่ได้ และต่อ host loopback ไม่ได้ หาก sandbox เปิดไม่ได้จะปฏิเสธคำขอ
 - ยังไม่ได้ทดสอบบน host องค์กรหรือบัญชี Google จริง และยังไม่มี cgroup quota หรือ disk encryption;
   ใช้ข้อมูลสังเคราะห์เท่านั้น ดูข้อจำกัดใน `server/README.md`
+## 2026-10-29 · เปลี่ยนบัญชี Google จากหน้าไม่ได้รับเชิญ
+
+- ปุ่มเปลี่ยนบัญชีเคยออกจากระบบแล้วกลับหน้า login โดยไม่เปิดตัวเลือกบัญชี และ Google อาจเลือกบัญชีเดิมอัตโนมัติ
+- ปุ่มล้าง session เดิมแล้วเริ่ม Google login ใหม่พร้อม `prompt=select_account`; login ปกติก็ขอให้เลือกบัญชี
+  และแสดงสถานะระหว่างเปลี่ยนบัญชี หาก login ล้มเหลวกลับหน้า login พร้อมข้อความข้อผิดพลาด
+- ทดสอบด้วย Auth จำลอง: บัญชีไม่ได้รับเชิญเปลี่ยนเป็นบัญชีที่ได้รับเชิญ, ยกเลิกการเลือกบัญชี,
+  PKCE, การออกจากระบบข้ามแท็บ และขอบเขตข้อมูลส่วนตัว ยังไม่ได้ตรวจ Google หรือ deploy ด้วยบัญชีจริง
 
 ## 2026-10-28 · ทดลองยืนยันตัวตน gateway (#47)
 
@@ -25,6 +32,43 @@
 - ตรวจเส้นทาง browser → gateway → engine → provider จำลอง และการปฏิเสธคำขอที่ไม่มีสิทธิ์
   ด้วย Playwright ทั้ง desktop และ mobile ดูวิธี SSH forwarding และข้อจำกัดใน `server/README.md`
 - ยังไม่ได้ deploy หรือทดลองบน homelab จริง; ไม่ใช่ระบบ login หรือ process isolation สำหรับพนักงาน
+
+## 2026-10-28 · Cloud Workspace ระยะ 3b: หน้าจอเดิมของ Webapp ทำงานผ่าน Gateway
+
+- ใช้หน้าจอเดิมทั้งหมด เพิ่ม `Host` แบบที่สาม (`web/src/gateway.ts`) ที่ส่งคำสั่งเดิมของหน้าจอไป Gateway เลือกโหมดตอน build ด้วย
+  `VITE_GATEWAY_URL` + `VITE_GOOGLE_CLIENT_ID` ถ้าไม่ตั้ง แอปเป็นโหมด Supabase เหมือนเดิม
+- โหมดนี้ login ด้วยปุ่ม Google Identity Services (ID token อยู่ใน `sessionStorage` ของแท็บ) แสดงเฉพาะแชต ค้นงานเก่า และคู่มือ
+  ซ่อนความจำ เอกสาร ใบเสร็จ Skill แบบฟอร์ม สื่อ การตั้งค่า และปุ่มแชร์/เลือกเอกสาร/ความจำ/ใช้เป็นร่าง ที่ Gateway ยังไม่มี
+- Server: runtime เขียนดัชนีบทสนทนาในโฟลเดอร์ Workspace ของตัวเอง Manager อ่านดัชนีนี้เมื่อ runtime หยุดอยู่ การเปิดหน้าเว็บจึงไม่ปลุก
+  runtime ทุกตัว และเพิ่ม `POST …/conversations` สร้างบทสนทนาเปล่า
+- Bug ที่เจอและแก้ (มี test ที่ล้มเมื่อเอาการแก้ออก):
+  - `workspace.json` เขียนผ่านไฟล์ `.tmp` ชื่อเดียว คำขอที่ทับกันใน Workspace เดียว (งานจบระหว่างแชตอ่านข้อความ) ทำให้ `rename` ล้มด้วย
+    `ENOENT` ตอนนี้แต่ละครั้งใช้ไฟล์ชั่วคราวของตัวเอง
+  - หน้าเว็บโหมด Cloud Workspace แสดงหน้า login ชั่วครู่ก่อนอ่าน credential จึงโหลด script ของ Google แม้แท็บ login อยู่แล้ว
+  - ปุ่มหยุดงานกดไม่ได้ เพราะงานจาก Gateway ไม่มี `actor_id` ของผู้ใช้ (หน้าแชตให้เฉพาะเจ้าของงานกดหยุด) Playwright จับได้
+- Validation (cloud container, Node 22.22.0, ข้อมูลสังเคราะห์, ไม่เรียก AI หรือ Google จริง): `check`, `check:engine-pin`, `npm test` (รวม
+  `gateway-host` 4 ข้อ), `test:db`, `test:engine`, `build` และ Playwright ทั้งชุด ผ่าน ยกเว้น test ดาวน์โหลด Word 2 ข้อ (desktop/mobile) ที่ล้ม
+  แบบเดียวกันบน main ที่ไม่ได้แก้ใน container นี้ (Chromium ตั้งชื่อไฟล์ `download`) ใหม่: `cloud-workspace.spec.ts` 2 ข้อ ส่งคำถามจากหน้าแรก
+  ดูคำตอบ stream, reload กลางทาง, เปิดงานเดิมแล้วได้คำตอบที่จบ, กดหยุดงานถัดไประหว่าง stream แล้วไม่มีคำตอบตามมา และไม่มีคำขอออกนอกเครื่อง
+- ยังไม่ทำ: ลองกับบัญชี Google จริงและ Gateway บน homelab, CSP ของ nginx สำหรับโหมดนี้, ร่างเอกสาร/ความจำ/ไฟล์ใน Cloud Workspace (ระยะ 4) ไม่มี deploy migration หรือ secret ใหม่
+
+## 2026-10-28 · Cloud Workspace ระยะ 3a: Gateway, งานที่รันต่อหลังปิด Browser, event stream และยกเลิกงาน
+
+- เพิ่ม `server/src/gateway/` เป็นทางเข้าเดียวของ Browser สู่ Workspace (ADR 0001 §3): login ด้วย Google ID token
+  (โดเมนองค์กร + ไฟล์รายชื่อคนที่ได้รับเชิญที่อ่านใหม่ทุกคำขอ), HTTP API ของ Workspace/บทสนทนา/งาน, SSE ต่อ Workspace
+  ที่ต่อกลับด้วย `Last-Event-ID` แล้วได้เฉพาะส่วนที่พลาด, ยกเลิกงาน, quota ต่อผู้ใช้, audit log แบบไม่มีเนื้อหา และ
+  `/api/admin/health` ที่มีแต่ตัวเลข รายละเอียดใน `server/README.md`
+- runtime ส่ง event ระหว่างตอบ (`delta`/`discard`/`activity`) ให้ Manager และเพิ่มคำสั่ง `newConversation`, `cancel`, `messages`
+  ใน contract โดยไม่แก้ engine
+- เจอระหว่างทำและแก้แล้ว: cancel ที่กดทันทีหลังเริ่มงานแซงคำขอ ask ใน IPC ได้ แล้วงานรันจนจบ ตอนนี้ cancel รอให้ ask ถูกส่งก่อน
+  และ `GET …/runs` ของ Workspace คนอื่นตอบ 200 รายการว่างแทน 404 ทั้งสองข้อมี test และลองเอาการแก้ออกแล้ว test ล้ม
+- เกณฑ์ผ่านของระยะ 3 ทดสอบกับของจริงทั้งเส้น (Gateway HTTP + runtime process + engine ของ Desktop + AI endpoint สังเคราะห์บน
+  loopback): ปิดการเชื่อมต่อระหว่าง AI ยังคิด งานทำต่อจนจบ ต่อกลับแล้วได้คำตอบที่ stream มาระหว่างนั้นพร้อมผลและเอกสารอ้างอิง
+  และยกเลิกงานถัดไปในบทสนทนาเดียวกันได้ ไม่มีการเรียก AI จริงหรือบัญชีจริง
+- Test ใหม่ 11 ข้อ: Gateway 7 (สิทธิ์และ origin, ปิด Browser/กลับมา, ยกเลิก, แยกผู้ใช้, quota, admin/audit, ตรวจ input),
+  Google ID token 3, end-to-end 1
+- ยังไม่ทำ: หน้าเว็บ (3b), ช่องอนุมัติ (มาพร้อมเครื่องมือเขียนภายนอกในระยะ 4), เก็บสถานะงานข้าม restart ของ Gateway, ทดสอบกับบัญชี
+  Google จริง และ container driver ไม่มี deploy migration หรือ secret ใหม่
 
 ## 2026-10-28 · Rollout #42 (และหน้าเว็บของ #34/#35)
 

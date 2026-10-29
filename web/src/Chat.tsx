@@ -43,6 +43,8 @@ import { resolvePresentation } from '../../packages/harness-core/vendor/desktop/
 import { isDocumentTool, turnDocumentTool } from '../../packages/harness-core/src/document-context.ts';
 import type { PreparedWork } from '../../packages/harness-core/src/desktop-workflows.ts';
 import type { DraftBook } from './drafts.ts';
+import { cloudMode } from './gateway.ts';
+const cloud = cloudMode();
 // Word, PDF and the page preview load the Markdown reader, Garuda and layout only when a draft is exported or previewed.
 const DraftExport = lazy(() => import('./DraftExport.tsx').then((m) => ({ default: m.DraftExport })));
 const DraftPage = lazy(() => import('./DraftExport.tsx').then((m) => ({ default: m.DraftPage })));
@@ -496,7 +498,7 @@ export function Chat({
               )}
             </small>
           </div>
-          {session && (
+          {session && !cloud && (
             <div className="topbar-actions">
               <button onClick={() => setDraftOpen((v) => !v)} aria-pressed={draftOpen}>
                 <FileText size={16} />
@@ -613,19 +615,23 @@ export function Chat({
                   >
                     <Copy size={14} />
                   </button>
-                  <button onClick={() => setRemember(m)}>
-                    <Brain size={14} />
-                    บันทึกความจำ
-                  </button>
-                  <button
-                    onClick={() => {
-                      setDraft(documentParts(m.body, documentTool)?.draft ?? m.body);
-                      setDraftOpen(true);
-                    }}
-                  >
-                    <FileText size={14} />
-                    ใช้เป็นร่าง
-                  </button>
+                  {!cloud && (
+                    <>
+                      <button onClick={() => setRemember(m)}>
+                        <Brain size={14} />
+                        บันทึกความจำ
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDraft(documentParts(m.body, documentTool)?.draft ?? m.body);
+                          setDraftOpen(true);
+                        }}
+                      >
+                        <FileText size={14} />
+                        ใช้เป็นร่าง
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </article>
@@ -687,17 +693,19 @@ export function Chat({
               rows={1}
             />
             <div className="composer-tools">
-              <button
-                type="button"
-                className="composer-add"
-                aria-label={documents.length ? `เอกสารที่เลือก ${documents.length} รายการ` : 'เลือกเอกสาร'}
-                title="เลือกเอกสารให้ AI อ่าน"
-                onClick={() => setShowFiles((v) => !v)}
-              >
-                <Plus size={15} />
-                {documents.length ? `${documents.length} เอกสาร` : 'เอกสาร'}
-              </button>
-              {session?.visibility !== 'workspace' && (
+              {!cloud && (
+                <button
+                  type="button"
+                  className="composer-add"
+                  aria-label={documents.length ? `เอกสารที่เลือก ${documents.length} รายการ` : 'เลือกเอกสาร'}
+                  title="เลือกเอกสารให้ AI อ่าน"
+                  onClick={() => setShowFiles((v) => !v)}
+                >
+                  <Plus size={15} />
+                  {documents.length ? `${documents.length} เอกสาร` : 'เอกสาร'}
+                </button>
+              )}
+              {!cloud && session?.visibility !== 'workspace' && (
                 <label className="pill">
                   <input
                     type="checkbox"

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { WorkspaceError, type RuntimeDriver } from '../src/workspace/contract.ts';
 import { RuntimeManager } from '../src/workspace/manager.ts';
 import { isolatedRuntimeArgs, processDriver, runtimeEnv } from '../src/workspace/process-driver.ts';
-import { workspacePaths } from '../src/workspace/storage.ts';
+import { saveRecord, workspacePaths } from '../src/workspace/storage.ts';
 
 const code = (expected: string) => (error: unknown) =>
   error instanceof WorkspaceError && error.code === expected;
@@ -300,4 +300,19 @@ test('an isolated runtime crash is reported and the next request resumes its con
     },
     { driver, grant: () => ({ baseUrl: 'http://127.0.0.1:1/v1', model: 'synthetic' }) },
   );
+});
+test('overlapping updates of one Workspace record do not fail each other', async () => {
+  await withManager(async (manager, dataRoot) => {
+    const w = await manager.create('alice', { name: 'พร้อมกัน' });
+    const record = {
+      id: w.id,
+      ownerId: w.ownerId,
+      name: w.name,
+      createdAt: w.createdAt,
+      lastActiveAt: w.lastActiveAt,
+    };
+    // The Gateway touches a Workspace from several requests at once (a run finishing while the chat reads it).
+    await Promise.all(Array.from({ length: 25 }, () => saveRecord(dataRoot, { ...record })));
+    assert.equal((await manager.get('alice', w.id)).name, 'พร้อมกัน');
+  });
 });

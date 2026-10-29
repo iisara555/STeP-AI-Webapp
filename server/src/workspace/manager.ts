@@ -10,15 +10,25 @@ import {
   WorkspaceError,
   WorkspaceName,
   type AskResult,
+  type ConversationMessage,
   type ConversationSummary,
+  SessionRef,
   type RuntimeDriver,
+  type RuntimeEvent,
   type RuntimeHandle,
   type RuntimeHealth,
   type RuntimeState,
   type Workspace,
   type WorkspaceRecord,
 } from './contract.ts';
-import { createWorkspaceFolders, listRecords, readRecord, saveRecord, workspacePaths } from './storage.ts';
+import {
+  createWorkspaceFolders,
+  listRecords,
+  readConversationIndex,
+  readRecord,
+  saveRecord,
+  workspacePaths,
+} from './storage.ts';
 
 export type RuntimeManagerOptions = {
   dataRoot: string;
@@ -49,9 +59,13 @@ type Live = {
   error?: string;
 };
 
+export type RuntimeStats = { running: number; starting: number; failed: number; max: number; busy: number };
+
 export class RuntimeManager {
   private readonly live = new Map<string, Live>();
   private readonly activeCalls = new Map<string, number>();
+  /** Event listeners by Workspace; they outlive a runtime so a resumed Workspace keeps reporting to them. */
+  private readonly listeners = new Map<string, Set<(event: RuntimeEvent) => void>>();
   private readonly dataRoot: string;
   private readonly driver: RuntimeDriver;
   private readonly maxRunning: number;
@@ -119,6 +133,9 @@ export class RuntimeManager {
           await handle.stop();
           throw error;
         }
+        handle.onEvent?.((event) => {
+          for (const listener of this.listeners.get(key) ?? []) listener(event);
+        });
         entry.handle = handle;
         entry.state = 'running';
         handle.onExit(() => {
@@ -155,13 +172,70 @@ export class RuntimeManager {
    * Runs one request in the Workspace's engine, resuming the runtime first when it is stopped. The request keeps
    * running if the caller goes away; its result stays in the Workspace's conversation history.
    */
-  async ask(actor: string, workspaceId: string, input: AskInput): Promise<AskResult> {
+  async ask(
+    actor: string,
+    workspaceId: string,
+    input: AskInput,
+    onDispatch?: () => void,
+  ): Promise<AskResult> {
     const request = parse(AskInput, input, 'INVALID_INPUT');
-    return this.call(actor, workspaceId, (handle) => handle.call('ask', request));
+    // onDispatch runs just before the request is sent; the channel keeps order, so a later cancel comes after it.
+    return this.call(actor, workspaceId, (handle) => {
+      onDispatch?.();
+      return handle.call('ask', request);
+    });
   }
 
+  /** A running runtime answers itself; a stopped one is listed from its index, without being woken. */
   async conversations(actor: string, workspaceId: string): Promise<ConversationSummary[]> {
-    return this.call(actor, workspaceId, (handle) => handle.call('conversations', {}));
+    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const entry = this.live.get(this.key(record));
+    if (entry?.handle && entry.state === 'running') return entry.handle.call('conversations', {});
+    return readConversationIndex(this.dataRoot, record.ownerId, record.id);
+  }
+
+  async newConversation(actor: string, workspaceId: string): Promise<SessionRef> {
+    return this.call(actor, workspaceId, (handle) => handle.call('newConversation', {}));
+  }
+
+  async messages(actor: string, workspaceId: string, sessionId: string): Promise<ConversationMessage[]> {
+    const ref = parse(SessionRef, { sessionId }, 'INVALID_INPUT');
+    return this.call(actor, workspaceId, (handle) => handle.call('messages', ref));
+  }
+
+  /** Cancels a running answer. A stopped runtime has nothing running, so there is nothing to cancel. */
+  async cancel(actor: string, workspaceId: string, sessionId: string) {
+    const ref = parse(SessionRef, { sessionId }, 'INVALID_INPUT');
+    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const entry = this.live.get(this.key(record));
+    if (!entry?.handle || entry.state !== 'running') throw new WorkspaceError('RUNTIME_NOT_RUNNING');
+    await entry.handle.call('cancel', ref);
+  }
+
+  /** Receives the progress events of the owner's Workspace, across stops and resumes. Returns an unsubscribe. */
+  async subscribe(actor: string, workspaceId: string, listener: (event: RuntimeEvent) => void) {
+    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const key = this.key(record);
+    const set = this.listeners.get(key) ?? new Set();
+    set.add(listener);
+    this.listeners.set(key, set);
+    return () => {
+      set.delete(listener);
+      if (!set.size && this.listeners.get(key) === set) this.listeners.delete(key);
+    };
+  }
+
+  /** Counts only, for the administrators' health page: no Workspace names, owners or content. */
+  stats(): RuntimeStats {
+    const entries = [...this.live.values()];
+    const count = (state: RuntimeState) => entries.filter((entry) => entry.state === state).length;
+    return {
+      running: count('running'),
+      starting: count('starting'),
+      failed: count('failed'),
+      max: this.maxRunning,
+      busy: entries.filter((entry) => entry.busy > 0).length,
+    };
   }
 
   /** Records user or job activity so the idle policy leaves the runtime running. */

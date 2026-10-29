@@ -23,6 +23,7 @@ import { Avatar, BrandSymbol, Segmented } from './components.tsx';
 import { mod } from './TitleBar.tsx';
 import type { Page } from './App.tsx';
 import { useReducedMotion } from './reduced-motion.ts';
+import { pageAvailable } from './gateway.ts';
 import { BlocksIcon } from './animated-icons/blocks.tsx';
 import { BrainIcon } from './animated-icons/brain.tsx';
 import { FileTextIcon } from './animated-icons/file-text.tsx';
@@ -38,7 +39,7 @@ import { SlidersHorizontalIcon } from './animated-icons/sliders-horizontal.tsx';
 type Handle = { startAnimation: () => void; stopAnimation: () => void };
 type AnimatedIcon = ForwardRefExoticComponent<{ size?: number; className?: string } & RefAttributes<Handle>>;
 
-export const tools: { id: Page; label: string; icon: LucideIcon; motion: AnimatedIcon; beta?: boolean }[] = [
+const allTools: { id: Page; label: string; icon: LucideIcon; motion: AnimatedIcon; beta?: boolean }[] = [
   { id: 'document-tools', label: 'เครื่องมือร่างเอกสาร', icon: FileText, motion: FileTextIcon },
   { id: 'media', label: 'สื่อภายใน', icon: Megaphone, motion: MegaphoneIcon },
   { id: 'skills', label: 'ศูนย์รวม Skill', icon: Blocks, motion: BlocksIcon },
@@ -47,6 +48,8 @@ export const tools: { id: Page; label: string; icon: LucideIcon; motion: Animate
   { id: 'history', label: 'ค้นงานเก่า', icon: HistoryStill, motion: HistoryIcon },
   { id: 'receipt', label: 'ตรวจใบเสร็จ AFP', icon: Receipt, motion: ReceiptIcon, beta: true },
 ];
+/** The tools this build serves; Cloud Workspace mode shows only what the Gateway supports (gateway.ts). */
+export const tools = allTools.filter((t) => pageAvailable(t.id));
 const DAY = 86_400_000;
 /** Recency buckets like Desktop, newest first. Tasks without a date stay in the most recent group. */
 export function groupSessions(sessions: Conversation[], now = new Date()) {
@@ -263,14 +266,16 @@ export function Sidebar({
           </button>
         ))}
       </nav>
-      <button
-        className={'settings-button ' + (page === 'settings' ? 'nav-active' : '')}
-        aria-current={page === 'settings' ? 'page' : undefined}
-        onClick={() => onPage('settings')}
-      >
-        <SlidersHorizontal size={18} />
-        การตั้งค่า
-      </button>
+      {pageAvailable('settings') && (
+        <button
+          className={'settings-button ' + (page === 'settings' ? 'nav-active' : '')}
+          aria-current={page === 'settings' ? 'page' : undefined}
+          onClick={() => onPage('settings')}
+        >
+          <SlidersHorizontal size={18} />
+          การตั้งค่า
+        </button>
+      )}
       {update && (
         <div className="update-card" role="status">
           <strong>มีแอปรุ่นใหม่</strong>
@@ -378,14 +383,16 @@ export function SidebarRail({
           ))}
         </nav>
         <span className="rail-spacer" />
-        <RailButton
-          icon={SlidersHorizontalIcon}
-          still={SlidersHorizontal}
-          size={18}
-          label="การตั้งค่า"
-          current={page === 'settings'}
-          onClick={() => onPage('settings')}
-        />
+        {pageAvailable('settings') && (
+          <RailButton
+            icon={SlidersHorizontalIcon}
+            still={SlidersHorizontal}
+            size={18}
+            label="การตั้งค่า"
+            current={page === 'settings'}
+            onClick={() => onPage('settings')}
+          />
+        )}
         <button
           className="rail-profile"
           aria-label={'บัญชีของฉัน · ' + profile.name}

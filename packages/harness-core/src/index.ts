@@ -129,6 +129,43 @@ export function errorView(code: string): ErrorView {
       action: 'ปิดข้อความ',
       retry: false,
     },
+    CLOUD_NOT_AVAILABLE: {
+      title: 'Cloud Workspace ยังไม่มีส่วนนี้',
+      detail:
+        'รุ่นนี้ใช้ได้กับแชตและงานเก่าก่อน ส่วนนี้จะเปิดเมื่อเครื่องมือบน server พร้อม ระหว่างนี้ใช้ STeP Desktop ได้',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    QUOTA_ACTIVE_RUNS: {
+      title: 'มีงานกำลังทำอยู่ครบจำนวนแล้ว',
+      detail: 'รอให้งานที่กำลังทำเสร็จหรือยกเลิกงานหนึ่งก่อน แล้วส่งใหม่',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    QUOTA_DAILY_RUNS: {
+      title: 'ใช้งานครบจำนวนของวันนี้แล้ว',
+      detail: 'จำนวนงานต่อวันเริ่มนับใหม่เวลา 07:00 น. หากต้องใช้เพิ่มให้ติดต่อผู้ดูแล',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    QUOTA_WORKSPACES: {
+      title: 'สร้าง Workspace ครบจำนวนแล้ว',
+      detail: 'ใช้ Workspace ที่มีอยู่ต่อ หรือติดต่อผู้ดูแลเพื่อเพิ่มจำนวน',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    RUN_ALREADY_ACTIVE: {
+      title: 'งานนี้ยังตอบไม่เสร็จ',
+      detail: 'รอคำตอบเดิมก่อน หรือกดยกเลิกแล้วส่งใหม่',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
+    RUNTIME_CAPACITY: {
+      title: 'เครื่องของระบบกำลังเต็ม',
+      detail: 'มีผู้ใช้เปิด Workspace พร้อมกันครบจำนวนแล้ว ลองใหม่อีกสักครู่',
+      action: 'ลองอีกครั้ง',
+      retry: true,
+    },
     HARNESS_INCOMPLETE: {
       title: 'Skill หรือเอกสารประกอบยังไม่พร้อม',
       detail:
