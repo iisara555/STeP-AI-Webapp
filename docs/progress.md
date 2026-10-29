@@ -1,5 +1,31 @@
 # Progress
 
+## 2026-10-29 · Homelab rollout of main `344e185`
+
+- Fast-forwarded the local `main` to `344e185f37793735923c9aed62f313a3f9a55517`.
+  The exact commit's [Verify PWA job](https://github.com/iisara555/STeP-AI-Webapp/actions/runs/40807181838/job/123228813079)
+  passed all required checks, including Linux engine isolation and the complete Playwright suite.
+- Built the existing Supabase pilot frontend on the homelab from `git -c core.autocrlf=false archive`.
+  Archive SHA-256: `3a7b41f78afd1e75286a7e654c31b461040c8879772d525b7c678fb62c0c8fa1`.
+  Confirmed the deployed `Chat.tsx`, `App.tsx` and `package.json` hashes match Git blobs at that commit.
+- Tested the candidate image on loopback port 18080 before replacing the service. The running image is
+  `step-ai-webapp:pilot` (also tagged `pilot-344e185`), digest
+  `sha256:dd2cf02331bc2405e7ddb60dd626d0106a546e317e439e1b39fae6fb3f66cf13`.
+  `step-ai-pilot-web-1` is healthy, non-root and read-only, listening only on loopback port 8080.
+  Preserved the existing environment and tailnet-only HTTPS origin; the temporary candidate was removed.
+- Hosting smoke passed on the candidate, localhost and the existing HTTPS origin, including a second
+  HTTPS check from the client. Chromium verified the deployed Google login screen on desktop/mobile
+  with no JavaScript errors or anonymous private-API requests. The served bundle is `index-srT-Qyei.js`.
+- Local synthetic validation: 117 unit tests, 29 database tests, build, release-pin check and 22 relevant
+  Playwright tests passed (two Cloud Workspace mobile cases are intentionally skipped by their tests).
+  Windows checkout formatting initially failed because `core.autocrlf=true`; the full `npm run check`
+  passed on the LF archive without modifying tracked source. Linux engine isolation is evidenced by CI.
+- Rollback: retag `step-ai-webapp:pilot-pre344e185-45ad12e-20261029` as `step-ai-webapp:pilot`, then run
+  `sudo env STEP_IMAGE_TAG=pilot docker compose --env-file .local/homelab.env -f deploy/homelab/compose.yml up -d --no-build --wait`
+  from `~/STeP-AI-Webapp`. The previous source remains at `~/STeP-AI-Webapp.prev-45ad12e-20261029`.
+- No Supabase function, migration, provider configuration or experimental Gateway was deployed.
+  Real Google sign-in, account switching and live AI acceptance still require a real-account check.
+
 ## 2026-10-29 · ทดลอง runtime หลายผู้ใช้ (#48)
 
 - Gateway ตรวจและหยุด runtime ที่ว่างอัตโนมัติ และ resume จาก SQLite เดิมเมื่อมีคำขอใหม่; กันการหยุด
