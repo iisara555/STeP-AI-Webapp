@@ -132,7 +132,7 @@ test('revocation during an engine request withholds its answer', async () => {
 
 test('concurrent users get separate runtimes; idle processes stop and resume their own conversations', async () => {
   const starts: { spec: RuntimeSpec; pid?: number; exited: boolean }[] = [];
-  const real = processDriver();
+  const real = processDriver({ isolated: true });
   const driver: RuntimeDriver = {
     async start(spec) {
       const handle = await real.start(spec);

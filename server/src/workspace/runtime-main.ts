@@ -2,6 +2,7 @@
 // Workspace's own <dir>/workspace.sqlite (ADR 0001 phase 2) and answers the Manager over its private channel.
 // The provider token arrives by `connect` and stays in this process's memory only.
 import { access, constants } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { CompatibleAdapter } from '../../../harness/desktop/electron/providers.ts';
@@ -20,6 +21,23 @@ const send = process.send?.bind(process);
 if (!send || !workspaceId || !dir || process.cwd() !== join(dir, 'files')) process.exit(2);
 await access(dir, constants.R_OK | constants.W_OK);
 
+let syntheticBaseUrl: string | undefined;
+if (process.env.STEP_SYNTHETIC_PROVIDER === '1') {
+  const provider = createServer(async (req, res) => {
+    for await (const _chunk of req) {
+      /* never leave the sandbox */
+    }
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: 'คำตอบจำลองจาก Desktop engine' } }] })}\n\n`,
+    );
+    res.end('data: [DONE]\n\n');
+  });
+  await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve));
+  const address = provider.address();
+  if (!address || typeof address === 'string') throw new Error('SYNTHETIC_PROVIDER_FAILED');
+  syntheticBaseUrl = `http://127.0.0.1:${address.port}/v1`;
+}
 let grant: ReturnType<typeof ProviderGrant.parse> | undefined;
 const engine = await createEngine({
   dataDir: dir,
@@ -41,6 +59,8 @@ const methods: Record<string, (params: unknown) => unknown> = {
   }),
   connect(params) {
     grant = ProviderGrant.parse(params);
+    if (syntheticBaseUrl)
+      grant = { ...grant, baseUrl: syntheticBaseUrl, token: 'synthetic', publicSearch: false };
     // The connection row carries no secret: the key is handed to the adapter per run from memory.
     engine.store.put('connection', 'central', {
       id: 'central',

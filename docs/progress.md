@@ -1,12 +1,14 @@
 # Progress
 
-## 2026-10-29 · ทดลอง runtime หลายผู้ใช้ (#48 ยังไม่ครบ)
+## 2026-10-29 · ทดลอง runtime หลายผู้ใช้ (#48)
 
 - Gateway ตรวจและหยุด runtime ที่ว่างอัตโนมัติ และ resume จาก SQLite เดิมเมื่อมีคำขอใหม่; กันการหยุด
   ระหว่างคำขอและรอ process เก่าหยุดก่อนเริ่มใหม่ แก้ metadata ชนกันเมื่อมีการอัปเดตพร้อมกัน
 - ทดสอบ browser สองบัญชีพร้อมกัน, process/SQLite แยก, สิทธิ์ไฟล์ใหม่, idle/resume และ process ล้ม
-- ยังขาด isolation ระดับ OS ระหว่าง runtime: process ใช้ service account เดียวกัน จึงยังไม่เปิดให้พนักงาน
-  และยังไม่ถือว่า #48 ผ่านครบ ดูข้อจำกัดใน `server/README.md`
+- Gateway ใช้ Bubblewrap แยก mount, user, PID, IPC และ network namespace; ทดสอบว่าอ่านไฟล์ข้าม
+  workspace ผ่าน path และ symlink ไม่ได้ และต่อ host loopback ไม่ได้ หาก sandbox เปิดไม่ได้จะปฏิเสธคำขอ
+- ยังไม่ได้ทดสอบบน host องค์กรหรือบัญชี Google จริง และยังไม่มี cgroup quota หรือ disk encryption;
+  ใช้ข้อมูลสังเคราะห์เท่านั้น ดูข้อจำกัดใน `server/README.md`
 
 ## 2026-10-28 · ทดลองยืนยันตัวตน gateway (#47)
 

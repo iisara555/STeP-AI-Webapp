@@ -31,7 +31,7 @@ export async function createIdentityGateway(options: {
   if (!address || typeof address === 'string') throw new Error('PROVIDER_START_FAILED');
   const manager = new RuntimeManager({
     dataRoot: options.dataRoot,
-    driver: options.driver ?? processDriver(),
+    driver: options.driver ?? processDriver({ isolated: true }),
     idleMs: options.idleMs,
     grant: () => ({ baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'synthetic', token: 'synthetic' }),
   });

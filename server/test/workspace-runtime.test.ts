@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile, symlink } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorkspaceError, type RuntimeDriver } from '../src/workspace/contract.ts';
 import { RuntimeManager } from '../src/workspace/manager.ts';
-import { processDriver, runtimeEnv } from '../src/workspace/process-driver.ts';
+import { isolatedRuntimeArgs, processDriver, runtimeEnv } from '../src/workspace/process-driver.ts';
 import { workspacePaths } from '../src/workspace/storage.ts';
 
 const code = (expected: string) => (error: unknown) =>
@@ -235,5 +237,67 @@ test('concurrent activity updates do not collide on the workspace metadata file'
       assert.equal((await manager.get('alice', workspace.id)).state, 'running');
     },
     { driver },
+  );
+});
+
+test('isolated runtime cannot read another workspace or connect to the host loopback', async () => {
+  await withManager(async (manager, root) => {
+    const a = await manager.create('alice', { name: 'A' });
+    const b = await manager.create('bob', { name: 'B' });
+    const first = workspacePaths(root, 'alice', a.id);
+    const other = workspacePaths(root, 'bob', b.id);
+    const secret = join(other.filesDir, 'private.txt');
+    await writeFile(secret, 'synthetic private data');
+    await writeFile(join(first.filesDir, 'own.txt'), 'own');
+    await symlink(secret, join(first.filesDir, 'link'));
+    const listener = createServer((socket) => socket.end());
+    await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+    const port = (listener.address() as { port: number }).port;
+    try {
+      const script = `const fs=require('node:fs'); const net=require('node:net'); const check=p=>{try{fs.readFileSync(p);return true}catch{return false}}; const socket=net.connect(${port},'127.0.0.1'); socket.setTimeout(1000); socket.on('connect',()=>{console.log(JSON.stringify({own:check('own.txt'),other:check(${JSON.stringify(secret)}),link:check('link'),network:true}));socket.destroy()});socket.on('error',()=>console.log(JSON.stringify({own:check('own.txt'),other:check(${JSON.stringify(secret)}),link:check('link'),network:false})));socket.on('timeout',()=>{socket.destroy();process.exit(2)});`;
+      const child = spawn('/usr/bin/bwrap', [...isolatedRuntimeArgs(first), '-e', script], {
+        cwd: first.filesDir,
+        env: runtimeEnv(first),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let output = '',
+        error = '';
+      child.stdout.on('data', (chunk) => (output += chunk));
+      child.stderr.on('data', (chunk) => (error += chunk));
+      const status = await new Promise<number | null>((resolve) => child.on('exit', resolve));
+      assert.equal(status, 0, error);
+      assert.deepEqual(JSON.parse(output), { own: true, other: false, link: false, network: false });
+    } finally {
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+    }
+  });
+});
+
+test('an isolated runtime crash is reported and the next request resumes its conversation', async () => {
+  let pid = 0;
+  const sandbox = processDriver({ isolated: true });
+  const driver: RuntimeDriver = {
+    async start(spec) {
+      const handle = await sandbox.start(spec);
+      pid = handle.pid!;
+      return handle;
+    },
+  };
+  await withManager(
+    async (manager) => {
+      const w = await manager.create('alice', { name: 'A' });
+      const first = await manager.ask('alice', w.id, { text: 'ช่วยคิดชื่องานสัมมนาให้หน่อย' });
+      assert.equal(first.status, 'review');
+      const oldPid = pid;
+      process.kill(oldPid, 'SIGKILL');
+      for (let i = 0; i < 100 && (await manager.get('alice', w.id)).state !== 'failed'; i++)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal((await manager.get('alice', w.id)).state, 'failed');
+      const next = await manager.ask('alice', w.id, { text: 'ขออีกสามชื่อ', sessionId: first.sessionId });
+      assert.equal(next.status, 'review');
+      assert.equal(next.sessionId, first.sessionId);
+      assert.notEqual(pid, oldPid);
+    },
+    { driver, grant: () => ({ baseUrl: 'http://127.0.0.1:1/v1', model: 'synthetic' }) },
   );
 });
