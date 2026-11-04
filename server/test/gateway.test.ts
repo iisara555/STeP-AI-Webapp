@@ -751,6 +751,8 @@ test('SSE disconnects on event burst while authorization is stalled', async () =
 });
 
 test('SSE disconnects when the response applies backpressure', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const store = new InvitationStore(':memory:', ['step.example'], new Set(['root@step.example']));
   let emit!: (event: { id: number; type: string; data: unknown }) => void;
   let stopped = false;
   const original = ServerResponse.prototype.write;
@@ -766,6 +768,7 @@ test('SSE disconnects when the response applies backpressure', async () => {
     } as unknown as RunService,
     authenticate: async () => PEOPLE.alice,
     audit: () => {},
+    invitations: store,
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   try {
@@ -780,7 +783,14 @@ test('SSE disconnects when the response applies backpressure', async () => {
     emit({ id: 1, type: 'delta', data: 'synthetic' });
     await until(async () => (stopped ? true : undefined), 300);
     assert.equal(stopped, true);
+    store.change(
+      'root@step.example',
+      'alice@step.example',
+      false,
+      new Set(['root@step.example', 'alice@step.example']),
+    );
   } finally {
+    store.close();
     ServerResponse.prototype.write = original;
     server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
@@ -921,5 +931,190 @@ test('a revoke in another process waits until the synchronous runtime send compl
     child.kill();
     store.close();
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('private HTTP delivery rejects a cross-process revoke after the last authentication read', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'step-http-fence-'));
+  const db = join(dir, 'invites.sqlite');
+  const store = new InvitationStore(db, ['step.example'], new Set(['root@step.example']));
+  const moduleUrl = new URL('../src/gateway/invitation-store.ts', import.meta.url).href;
+  let count = 0;
+  const server = createGateway({
+    manager: {} as RuntimeManager,
+    runs: {} as RunService,
+    invitations: store,
+    audit: () => {},
+    authenticate: async () => {
+      if (++count === 2) {
+        const script = `import { InvitationStore } from ${JSON.stringify(moduleUrl)}; const s = new InvitationStore(process.argv[1], ['step.example'], new Set(['root@step.example'])); s.change('root@step.example', 'alice@step.example', false, new Set(['root@step.example','alice@step.example'])); s.close();`;
+        const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, db], {
+          stdio: 'ignore',
+        });
+        const [code] = await once(child, 'exit');
+        assert.equal(code, 0);
+      }
+      return PEOPLE.alice; // Deliberately stale result, as if revoke followed the DB read.
+    },
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/me`);
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { code: 'UNAUTHENTICATED' });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('SSE suppresses an event when another process revokes after authentication read', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'step-sse-fence-'));
+  const db = join(dir, 'invites.sqlite');
+  const store = new InvitationStore(db, ['step.example'], new Set(['root@step.example']));
+  const moduleUrl = new URL('../src/gateway/invitation-store.ts', import.meta.url).href;
+  let count = 0;
+  let emit!: (event: { id: number; type: string; data: unknown }) => void;
+  let stopped = false;
+  const server = createGateway({
+    manager: {} as RuntimeManager,
+    runs: {
+      follow: async (_u: string, _w: string, _a: number, cb: typeof emit) => {
+        emit = cb;
+        return () => {
+          stopped = true;
+        };
+      },
+    } as unknown as RunService,
+    invitations: store,
+    audit: () => {},
+    authenticate: async () => {
+      if (++count === 3) {
+        const script = `import { InvitationStore } from ${JSON.stringify(moduleUrl)}; const s = new InvitationStore(process.argv[1], ['step.example'], new Set(['root@step.example'])); s.change('root@step.example', 'alice@step.example', false, new Set(['root@step.example','alice@step.example'])); s.close();`;
+        const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, db], {
+          stdio: 'ignore',
+        });
+        const [code] = await once(child, 'exit');
+        assert.equal(code, 0);
+      }
+      return PEOPLE.alice;
+    },
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/workspaces/ws_${'a'.repeat(32)}/events`,
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+    emit({ id: 1, type: 'delta', data: 'PRIVATE' });
+    const next = await reader.read();
+    assert.equal(next.done, true);
+    assert.equal(stopped, true);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('cross-process revocation waits for synchronous HTTP enqueue and then completes', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'step-http-order-'));
+  const db = join(dir, 'invites.sqlite');
+  const store = new InvitationStore(db, ['step.example'], new Set(['root@step.example']));
+  const marker = (name: string) => join(dir, name);
+  const moduleUrl = new URL('../src/gateway/invitation-store.ts', import.meta.url).href;
+  const script = `import { InvitationStore } from ${JSON.stringify(moduleUrl)};
+    import { existsSync, writeFileSync } from 'node:fs';
+    const [db, ready, go, attempted, done] = process.argv.slice(1);
+    const s = new InvitationStore(db, ['step.example'], new Set(['root@step.example']));
+    writeFileSync(ready, '');
+    while (!existsSync(go)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    writeFileSync(attempted, '');
+    s.change('root@step.example', 'alice@step.example', false, new Set(['root@step.example','alice@step.example']));
+    writeFileSync(done, ''); s.close();`;
+  const child = spawn(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      '--input-type=module',
+      '-e',
+      script,
+      db,
+      marker('ready'),
+      marker('go'),
+      marker('attempted'),
+      marker('done'),
+    ],
+    { stdio: 'ignore' },
+  );
+  const exit = once(child, 'exit');
+  const original = ServerResponse.prototype.end;
+  let observed = false;
+  const server = createGateway({
+    manager: {} as RuntimeManager,
+    runs: {} as RunService,
+    invitations: store,
+    authenticate: async () => PEOPLE.alice,
+    audit: () => {},
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    await until(async () => (existsSync(marker('ready')) ? true : undefined));
+    ServerResponse.prototype.end = function (this: ServerResponse, ...args: Parameters<typeof original>) {
+      if (!observed) {
+        observed = true;
+        writeFileSync(marker('go'), '');
+        const deadline = Date.now() + 3000;
+        while (!existsSync(marker('attempted')) && Date.now() < deadline)
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+        assert.ok(existsSync(marker('attempted')));
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+        assert.equal(existsSync(marker('done')), false);
+      }
+      return original.apply(this, args);
+    } as typeof original;
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/me`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).email, 'alice@step.example');
+    assert.equal((await exit)[0], 0);
+    assert.ok(observed && existsSync(marker('done')));
+    assert.throws(() => store.dispatch('alice@step.example', () => assert.fail()), /UNAUTHENTICATED/);
+  } finally {
+    ServerResponse.prototype.end = original;
+    child.kill();
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('HTTP delivery fails closed when the invitation fence is unavailable', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const store = new InvitationStore(':memory:', ['step.example'], new Set(['root@step.example']));
+  store.close();
+  const server = createGateway({
+    manager: {} as RuntimeManager,
+    runs: {} as RunService,
+    invitations: store,
+    authenticate: async () => PEOPLE.alice,
+    audit: () => {},
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/me`);
+    assert.equal(response.status, 502);
+    assert.doesNotMatch(await response.text(), /alice@step.example/);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
   }
 });

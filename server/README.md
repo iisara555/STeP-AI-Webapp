@@ -90,7 +90,13 @@ received event ID. A replay exceeding that pending limit emits a `reset` instead
 the client must reload conversation state. Run preparation can create an empty conversation or start a runtime
 before admission. For administrator revocations, the gateway serializes the SQLite denial and the synchronous
 `ask` IPC enqueue in the same invitation database: if the denial commits first, that ask is not enqueued;
-if enqueue happens first, revocation can succeed afterwards and does not cancel the run. A 202 response means
+if enqueue happens first, revocation can succeed afterwards and does not cancel the run. The same SQLite
+ordering fences each private HTTP response enqueue and each private SSE event write: a denial committed first
+prevents that enqueue; a write first may still reach the client after the denial. Serialization is done before
+acquiring the lock, and the lock is held only for the synchronous Node write/enqueue, never for socket drain.
+SSE backpressure closes the stream after releasing the lock. Lock acquisition has SQLite's five-second busy
+timeout; failure to acquire or validate the fence sends no private response/event. A failure after Node has
+already accepted bytes cannot retract them. A 202 response means
 admitted, not necessarily dispatched; a later denial can make the run fail with `UNAUTHENTICATED`, and the
 admission still consumes quota. An administrator can explicitly re-invite the address, allowing dispatch again.
 This guarantee requires every gateway and admin writer to use this code and the same SQLite database on a
@@ -98,11 +104,10 @@ filesystem with working SQLite locks; separate database copies, older processes,
 ignore the protocol are not coordinated. It covers IPC enqueue, not when the child receives the message or
 makes provider requests, and does not stop existing runs or other in-flight side effects.
 
-An operator file edit is **not** serialized with dispatch: it takes effect on subsequent file reads, but a
-previously authorized run can still be dispatched after the file is changed. Use the admin revocation API
-for the ordering guarantee. File edits, token expiry, and other external identity changes cannot be made
-atomic by the SQLite lock. Already-buffered bytes cannot be retracted, and SSE checks and writes are not
-atomic with revocation. Authentication/file errors fail closed. No
+An operator file edit is **not** serialized with dispatch or delivery: it takes effect on subsequent file
+reads, but previously authorized work or private output can still be enqueued after the file is changed.
+Use the admin revocation API for the ordering guarantee. File edits, token expiry, and other external identity changes cannot be made
+atomic by the SQLite lock. Already-buffered bytes cannot be retracted. Authentication/file errors fail closed. No
 invitation email is sent. UI, expiry, per-target audit, live Google acceptance and production rollout
 remain open.
 

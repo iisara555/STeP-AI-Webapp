@@ -262,7 +262,9 @@ export function createGateway(options: GatewayOptions) {
         const current = await authenticate(req.headers.authorization);
         if (!current || current.userId !== who.userId || current.email !== who.email)
           throw new GatewayError('UNAUTHENTICATED');
-        return send(res, res.statusCode, result);
+        const body = result === undefined ? undefined : JSON.stringify(result);
+        const deliver = () => sendEncoded(res, res.statusCode, body);
+        return options.invitations ? options.invitations.dispatch(who.email, deliver) : deliver();
       }
       throw new GatewayError('NOT_FOUND');
     } catch (error) {
@@ -314,8 +316,10 @@ export function createGateway(options: GatewayOptions) {
             const current = await authenticate(req.headers.authorization);
             if (closed) return;
             if (!current || current.userId !== who.userId || current.email !== who.email) return close();
-            if (!res.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`))
-              close();
+            const frame = `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
+            const write = () => res.write(frame);
+            const accepted = options.invitations ? options.invitations.dispatch(who.email, write) : write();
+            if (!accepted) close();
           })
           .catch(close)
           .finally(() => {
@@ -344,11 +348,15 @@ export function createGateway(options: GatewayOptions) {
 }
 
 function send(res: ServerResponse, status: number, body?: unknown) {
+  return sendEncoded(res, status, body === undefined ? undefined : JSON.stringify(body));
+}
+
+function sendEncoded(res: ServerResponse, status: number, body?: string) {
   if (body === undefined) {
     res.writeHead(status).end();
     return;
   }
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }).end(body);
 }
 
 async function readJson(req: IncomingMessage) {

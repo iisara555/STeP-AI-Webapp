@@ -25,7 +25,9 @@ export class InvitationStore {
     }
     return result;
   }
-  /** Serialize the synchronous IPC send with administrator invitation changes across SQLite connections. */
+  /** Serialize a synchronous enqueue with administrator invitation changes across SQLite connections.
+   * Never wait for IO or backpressure in this callback; the transaction must not span an async operation.
+   */
   dispatch<T>(email: string, send: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     try {
