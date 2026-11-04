@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
+import { ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AuditEntry } from '../src/gateway/audit.ts';
@@ -634,5 +635,131 @@ test('an in-flight private response is withheld after revocation', async () => {
   } finally {
     server.closeAllConnections();
     await new Promise<void>((done) => server.close(() => done()));
+  }
+});
+
+test('revocation during run preparation prevents admission and dispatch', async () => {
+  let allowed = true,
+    release!: () => void,
+    entered!: () => void,
+    asks = 0;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const waiting = new Promise<void>((r) => {
+    entered = r;
+  });
+  const manager = {
+    get: async () => {
+      entered();
+      await gate;
+    },
+    subscribe: async () => () => {},
+    newConversation: async () => ({ sessionId: 'synthetic' }),
+    ask: async () => {
+      asks++;
+      return { status: 'review' };
+    },
+  } as unknown as RuntimeManager;
+  const runs = new RunService(manager, () => {});
+  const server = createGateway({
+    manager,
+    runs,
+    authenticate: async () => (allowed ? PEOPLE.alice : null),
+    audit: () => {},
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const result = fetch(
+      `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/workspaces/ws_${'a'.repeat(32)}/runs`,
+      { ...post({ text: 'synthetic' }), headers: { 'content-type': 'application/json' } },
+    );
+    await waiting;
+    allowed = false;
+    release();
+    assert.equal((await result).status, 401);
+    assert.equal(asks, 0);
+    assert.equal(runs.stats().today.started, 0);
+  } finally {
+    release();
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test('SSE disconnects on event burst while authorization is stalled', async () => {
+  let emit!: (event: { id: number; type: string; data: unknown }) => void;
+  let stopped = false,
+    block = false,
+    release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const server = createGateway({
+    manager: {} as RuntimeManager,
+    runs: {
+      follow: async (_u: string, _w: string, _a: number, cb: typeof emit) => {
+        emit = cb;
+        return () => {
+          stopped = true;
+        };
+      },
+    } as unknown as RunService,
+    authenticate: async () => {
+      if (block) await gate;
+      return PEOPLE.alice;
+    },
+    audit: () => {},
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/workspaces/ws_${'a'.repeat(32)}/events`,
+    );
+    await response.body!.getReader().read();
+    block = true;
+    for (let i = 0; i < 3000; i++) emit({ id: i, type: 'delta', data: 'synthetic' });
+    assert.equal(stopped, true);
+  } finally {
+    release();
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test('SSE disconnects when the response applies backpressure', async () => {
+  let emit!: (event: { id: number; type: string; data: unknown }) => void;
+  let stopped = false;
+  const original = ServerResponse.prototype.write;
+  const server = createGateway({
+    manager: {} as RuntimeManager,
+    runs: {
+      follow: async (_u: string, _w: string, _a: number, cb: typeof emit) => {
+        emit = cb;
+        return () => {
+          stopped = true;
+        };
+      },
+    } as unknown as RunService,
+    authenticate: async () => PEOPLE.alice,
+    audit: () => {},
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/workspaces/ws_${'a'.repeat(32)}/events`,
+    );
+    await response.body!.getReader().read();
+    ServerResponse.prototype.write = function (this: ServerResponse, ...args: Parameters<typeof original>) {
+      original.apply(this, args);
+      return false;
+    } as typeof original;
+    emit({ id: 1, type: 'delta', data: 'synthetic' });
+    await until(async () => (stopped ? true : undefined), 300);
+    assert.equal(stopped, true);
+  } finally {
+    ServerResponse.prototype.write = original;
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
   }
 });

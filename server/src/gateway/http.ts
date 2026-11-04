@@ -152,7 +152,11 @@ export function createGateway(options: GatewayOptions) {
       async ({ req, res, who, params }) => {
         const input = parseBody(AskInput, await readJson(req));
         res.statusCode = 202;
-        return runs.start(who.userId, params[0], input);
+        return runs.start(who.userId, params[0], input, async () => {
+          const current = await authenticate(req.headers.authorization);
+          if (!current || current.userId !== who.userId || current.email !== who.email)
+            throw new GatewayError('UNAUTHENTICATED');
+        });
       },
     ],
     [
@@ -285,8 +289,11 @@ export function createGateway(options: GatewayOptions) {
       ready = resolve;
     });
     let pending = Promise.resolve();
+    let queued = 0;
     try {
       stop = await runs.follow(who.userId, workspaceId, after, (event) => {
+        if (closed) return;
+        if (++queued > 128) return close();
         pending = pending
           .then(async () => {
             await opened;
@@ -294,9 +301,13 @@ export function createGateway(options: GatewayOptions) {
             const current = await authenticate(req.headers.authorization);
             if (closed) return;
             if (!current || current.userId !== who.userId || current.email !== who.email) return close();
-            res.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
+            if (!res.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`))
+              close();
           })
-          .catch(close);
+          .catch(close)
+          .finally(() => {
+            queued--;
+          });
       });
       if (closed) {
         stop();
@@ -309,8 +320,10 @@ export function createGateway(options: GatewayOptions) {
         return;
       }
       res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive' });
-      res.write(': connected\n\n');
-      heartbeat = setInterval(() => res.write(': heartbeat\n\n'), heartbeatMs);
+      if (!res.write(': connected\n\n')) return close();
+      heartbeat = setInterval(() => {
+        if (!res.write(': heartbeat\n\n')) close();
+      }, heartbeatMs);
     } finally {
       ready();
     }

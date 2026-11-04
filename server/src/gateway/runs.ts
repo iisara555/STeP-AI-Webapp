@@ -99,7 +99,12 @@ export class RunService {
     private readonly quotaStore?: QuotaStore,
   ) {}
 
-  async start(actor: string, workspaceId: string, input: { text: string; sessionId?: string }): Promise<Run> {
+  async start(
+    actor: string,
+    workspaceId: string,
+    input: { text: string; sessionId?: string },
+    authorize: () => Promise<void> = async () => {},
+  ): Promise<Run> {
     await this.manager.get(actor, workspaceId);
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
     const dayKey = `${actor}:${this.day()}`;
@@ -111,6 +116,7 @@ export class RunService {
     // Listen before asking, so the first streamed words are in the feed.
     const feed = await this.feed(actor, workspaceId);
     const sessionId = input.sessionId ?? (await this.manager.newConversation(actor, workspaceId)).sessionId;
+    await authorize();
     const key = this.sessionKey(actor, workspaceId, sessionId);
     if (this.active.has(key)) throw new GatewayError('RUN_ALREADY_ACTIVE');
     // Checked again after the awaits above, so two requests at once cannot both pass the limit.
