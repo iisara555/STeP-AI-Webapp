@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { AskResult, RuntimeEvent } from '../workspace/contract.ts';
 import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
+import type { QuotaStore } from './quota-store.ts';
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -95,6 +96,7 @@ export class RunService {
     private readonly audit: Audit,
     private readonly quotas: Quotas = DEFAULT_QUOTAS,
     private readonly now: () => number = Date.now,
+    private readonly quotaStore?: QuotaStore,
   ) {}
 
   async start(actor: string, workspaceId: string, input: { text: string; sessionId?: string }): Promise<Run> {
@@ -114,6 +116,16 @@ export class RunService {
     // Checked again after the awaits above, so two requests at once cannot both pass the limit.
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
 
+    // Reserve at admission, after all awaits. SQLite serializes competing processes.
+    const day = this.day();
+    const admissionKey = `${actor}:${day}`;
+    if (this.quotaStore) {
+      if (!this.quotaStore.reserve(actor, day, this.quotas.runsPerUserPerDay))
+        throw new GatewayError('QUOTA_DAILY_RUNS');
+    } else if ((this.daily.get(admissionKey) ?? 0) >= this.quotas.runsPerUserPerDay) {
+      throw new GatewayError('QUOTA_DAILY_RUNS');
+    }
+
     let dispatched!: () => void;
     const run: OwnedRun = {
       id: `run_${randomUUID().replaceAll('-', '')}`,
@@ -126,7 +138,7 @@ export class RunService {
     };
     this.runs.set(run.id, run);
     this.active.set(key, run.id);
-    this.daily.set(dayKey, (this.daily.get(dayKey) ?? 0) + 1);
+    this.daily.set(admissionKey, (this.daily.get(admissionKey) ?? 0) + 1);
     this.count('started');
     feed.push('run', this.view(run));
     this.audit({ actor, action: 'run.start', workspaceId, runId: run.id, outcome: 'accepted' });

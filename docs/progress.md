@@ -19,6 +19,15 @@
   cgroup root ไม่เปิดให้ user เขียน แต่ user systemd transient scope ใช้ได้บนเครื่องนี้; ยังไม่ได้ตรวจ
   host องค์กร ห้ามใช้ผลนี้รับรอง production
 
+## Cloud quota persistence (#58, partial)
+
+- Gateway daily run admissions now use a local SQLite counter, atomically reserved and retained across
+  gateway restarts. Accepted runs count even if they fail or the gateway crashes; counters use UTC days.
+- Synthetic tests exercise concurrent HTTP admission across a gateway object restart and independent OS
+  processes contending for the same counter. This is not yet the per-user monthly AI quota: administrator-
+  configurable limits, usage reporting, invitation management, process-level gateway restart and production
+  acceptance remain outstanding. Existing invite-file revocation and owner-only Workspace access remain in place.
+
 ## 2026-10-29 · ทดลอง runtime หลายผู้ใช้ (#48)
 
 - Gateway ตรวจและหยุด runtime ที่ว่างอัตโนมัติ และ resume จาก SQLite เดิมเมื่อมีคำขอใหม่; กันการหยุด
