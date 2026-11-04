@@ -2,10 +2,22 @@
 
 ## #57 · ตรวจขอบเขต process เพิ่มเติม (ยังไม่เสร็จ)
 
+- ทดสอบ runtime จริง: เมื่อ mount ของ Bubblewrap ไม่มีอยู่ การเริ่มล้มเหลวและไม่มี runtime ทำงาน;
+  เมื่อแก้ mount แล้วเริ่ม sandbox เดิมได้อีกครั้ง เป็นการตรวจ isolation ไม่ใช่ quota
+- เครื่องพัฒนารัน transient user systemd scope โดยไม่ใช้สิทธิ์ root ได้: `CPUQuota=20%` ได้
+  `cpu.max=20000 100000` และ CPU throttled 22 ครั้งในงานประมาณ 2 วินาที; `MemoryMax=64M`,
+  `MemorySwapMax=0` ทำให้งานจัดสรร 128 MiB ถูกฆ่า (`oom_kill=1`, exit 137) แต่ scope ถูกยุติด้วย
+  จึงยังไม่ได้พิสูจน์การกู้คืน runtime หลัง OOM ทั้งนี้ยังไม่ได้เชื่อม scope กับ Workspace
+- Disk บนเครื่องพัฒนาเป็น ext4 โดย mount options ไม่แสดง project quota; ยังไม่ได้ตรวจ quota ของ
+  host เป้าหมาย ไม่ควรใช้การนับขนาด directory แทนการบังคับ quota เพราะมี race และ hard link/open file
+- ยังต้องออกแบบการเริ่ม process ภายใต้ cgroup ก่อนรันโค้ดที่ไม่น่าเชื่อถือ, ตรวจ limit ทุกตัวแบบ fail-closed,
+  จัดการ process ลูกและ cleanup หลัง crash, บังคับ disk quota รวมทุกข้อมูลที่เขียนได้ และทดสอบปฏิเสธ/กู้คืน
+  ด้วย backend จริงบน host เป้าหมาย; fake พิสูจน์เพียง control flow ไม่พิสูจน์ kernel enforcement
 - เพิ่ม test สังเคราะห์ว่า sandbox มองไม่เห็นและส่งสัญญาณไปยัง process บน host ไม่ได้;
   เป็นการตรวจบนเครื่องพัฒนา ไม่ใช่การรับรอง host องค์กร
 - ยังไม่มี CPU, RAM หรือ disk quota ต่อ Workspace และยังไม่ได้ทดสอบการปฏิเสธ/กู้คืนเมื่อเกิน quota;
-  เครื่องพัฒนานี้ไม่เปิดให้เขียน cgroup และยังไม่ได้ตรวจ host องค์กร ห้ามใช้ผลนี้รับรอง production
+  cgroup root ไม่เปิดให้ user เขียน แต่ user systemd transient scope ใช้ได้บนเครื่องนี้; ยังไม่ได้ตรวจ
+  host องค์กร ห้ามใช้ผลนี้รับรอง production
 
 ## 2026-10-29 · ทดลอง runtime หลายผู้ใช้ (#48)
 

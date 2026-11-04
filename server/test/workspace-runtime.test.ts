@@ -328,6 +328,26 @@ test('an isolated runtime crash is reported and the next request resumes its con
     { driver, grant: () => ({ baseUrl: 'http://127.0.0.1:1/v1', model: 'synthetic' }) },
   );
 });
+
+test('an unavailable sandbox fails closed and a later isolated start can recover', async () => {
+  const sandbox = processDriver({ isolated: true });
+  let unavailable = true;
+  const driver: RuntimeDriver = {
+    start: (spec) =>
+      sandbox.start(unavailable ? { ...spec, dir: join(spec.dir, 'missing-sandbox-mount') } : spec),
+  };
+  await withManager(
+    async (manager) => {
+      const w = await manager.create('alice', { name: 'A' });
+      await assert.rejects(() => manager.start('alice', w.id), code('RUNTIME_START_FAILED'));
+      assert.equal((await manager.health('alice', w.id)).ok, false);
+      unavailable = false;
+      assert.equal((await manager.start('alice', w.id)).state, 'running');
+      assert.equal((await manager.health('alice', w.id)).ok, true);
+    },
+    { driver },
+  );
+});
 test('overlapping updates of one Workspace record do not fail each other', async () => {
   await withManager(async (manager, dataRoot) => {
     const w = await manager.create('alice', { name: 'พร้อมกัน' });
