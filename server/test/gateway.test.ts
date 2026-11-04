@@ -687,6 +687,26 @@ test('revocation during run preparation prevents admission and dispatch', async 
   }
 });
 
+test('oversized replay produces one reset rather than an endless reconnect loop', async () => {
+  let emit!: (event: RuntimeEvent) => void;
+  const manager = {
+    get: async () => ({}),
+    subscribe: async (_actor: string, _workspace: string, cb: typeof emit) => {
+      emit = cb;
+      return () => {};
+    },
+    ask: async () => new Promise<AskResult>(() => {}),
+  } as unknown as RuntimeManager;
+  const runs = new RunService(manager, () => {});
+  const workspace = `ws_${'a'.repeat(32)}`;
+  await runs.start('alice', workspace, { text: 'synthetic', sessionId: 'synthetic' });
+  for (let i = 0; i < 128; i++) emit({ type: 'delta', sessionId: 'synthetic', text: 'x' });
+  const events: { id: number; type: string }[] = [];
+  const stop = await runs.follow('alice', workspace, 0, (event) => events.push(event));
+  stop();
+  assert.deepEqual(events, [{ id: 129, type: 'reset', data: {} }]);
+});
+
 test('SSE disconnects on event burst while authorization is stalled', async () => {
   let emit!: (event: { id: number; type: string; data: unknown }) => void;
   let stopped = false,

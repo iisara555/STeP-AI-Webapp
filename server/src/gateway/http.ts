@@ -8,7 +8,14 @@ import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
 import type { Authenticator, Identity } from './auth.ts';
 import type { InvitationStore } from './invitation-store.ts';
-import { codeOf, DEFAULT_QUOTAS, GatewayError, type Quotas, type RunService } from './runs.ts';
+import {
+  codeOf,
+  DEFAULT_QUOTAS,
+  GatewayError,
+  STREAM_PENDING_LIMIT,
+  type Quotas,
+  type RunService,
+} from './runs.ts';
 
 export type GatewayOptions = {
   manager: RuntimeManager;
@@ -293,7 +300,7 @@ export function createGateway(options: GatewayOptions) {
     try {
       stop = await runs.follow(who.userId, workspaceId, after, (event) => {
         if (closed) return;
-        if (++queued > 128) return close();
+        if (++queued > STREAM_PENDING_LIMIT) return close();
         pending = pending
           .then(async () => {
             await opened;

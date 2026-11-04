@@ -45,6 +45,8 @@ export class GatewayError extends Error {
 
 /** Events kept per Workspace for a returning client; older ones are replaced by a `reset` telling it to reload. */
 const FEED_LIMIT = 2_000;
+/** Maximum replay that fits the HTTP stream's pending-event budget. */
+export const STREAM_PENDING_LIMIT = 128;
 /** Finished runs kept for status reads; the answers themselves stay in the Workspace's conversations. */
 const FINISHED_LIMIT = 500;
 
@@ -65,7 +67,8 @@ class Feed {
   since(after: number): FeedEvent[] {
     if (after >= this.seq) return [];
     const first = this.events[0]?.id ?? this.seq + 1;
-    if (after < first - 1) return [{ id: this.seq, type: 'reset', data: {} }];
+    if (after < first - 1 || this.seq - after > STREAM_PENDING_LIMIT)
+      return [{ id: this.seq, type: 'reset', data: {} }];
     return this.events.filter((event) => event.id > after);
   }
 }

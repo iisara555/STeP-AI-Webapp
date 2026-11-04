@@ -86,8 +86,8 @@ extend the file allowlist. Back up both the file and database, and edit the file
 Authentication is checked again immediately before run admission, before an HTTP response and for each
 private SSE event. An unauthorized stream closes on its next event; idle streams may remain open. Streams
 also close on socket backpressure or more than 128 pending events; clients must reconnect from the last
-received event ID. A replay exceeding that pending limit can repeatedly disconnect and requires a client
-reload rather than reliable replay. Run preparation can create an empty conversation or start a runtime
+received event ID. A replay exceeding that pending limit emits a `reset` instead of replaying the gap;
+the client must reload conversation state. Run preparation can create an empty conversation or start a runtime
 before admission. Revocation after the admission check can still race admission and the later runtime
 dispatch; an admitted run is not cancelled. Other in-flight side effects can also complete after revocation.
 Already-buffered bytes cannot be retracted, and the check and write are not atomic with file changes.
