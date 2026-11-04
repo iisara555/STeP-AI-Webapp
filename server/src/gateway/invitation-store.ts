@@ -25,6 +25,20 @@ export class InvitationStore {
     }
     return result;
   }
+  /** Serialize the synchronous IPC send with administrator invitation changes across SQLite connections. */
+  dispatch<T>(email: string, send: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const row = this.db.prepare('SELECT active FROM invitations WHERE email = ?').get(email);
+      if (row?.active === 0) throw new GatewayError('UNAUTHENTICATED');
+      const result = send();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
   change(actor: string, email: string, active: boolean, base: Set<string>): void {
     const normalized = email.toLowerCase();
     if (

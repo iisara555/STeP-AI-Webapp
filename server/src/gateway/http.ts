@@ -159,11 +159,17 @@ export function createGateway(options: GatewayOptions) {
       async ({ req, res, who, params }) => {
         const input = parseBody(AskInput, await readJson(req));
         res.statusCode = 202;
-        return runs.start(who.userId, params[0], input, async () => {
-          const current = await authenticate(req.headers.authorization);
-          if (!current || current.userId !== who.userId || current.email !== who.email)
-            throw new GatewayError('UNAUTHENTICATED');
-        });
+        return runs.start(
+          who.userId,
+          params[0],
+          input,
+          async () => {
+            const current = await authenticate(req.headers.authorization);
+            if (!current || current.userId !== who.userId || current.email !== who.email)
+              throw new GatewayError('UNAUTHENTICATED');
+          },
+          (send) => (options.invitations ? options.invitations.dispatch(who.email, send) : send()),
+        );
       },
     ],
     [

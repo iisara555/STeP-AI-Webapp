@@ -177,13 +177,16 @@ export class RuntimeManager {
     workspaceId: string,
     input: AskInput,
     onDispatch?: () => void,
+    dispatch: (send: () => Promise<AskResult>) => Promise<AskResult> = (send) => send(),
   ): Promise<AskResult> {
     const request = parse(AskInput, input, 'INVALID_INPUT');
     // onDispatch runs just before the request is sent; the channel keeps order, so a later cancel comes after it.
-    return this.call(actor, workspaceId, (handle) => {
-      onDispatch?.();
-      return handle.call('ask', request);
-    });
+    return this.call(actor, workspaceId, (handle) =>
+      dispatch(() => {
+        onDispatch?.();
+        return handle.call('ask', request);
+      }),
+    );
   }
 
   /** A running runtime answers itself; a stopped one is listed from its index, without being woken. */

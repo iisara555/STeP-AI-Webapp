@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { existsSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -781,5 +784,142 @@ test('SSE disconnects when the response applies backpressure', async () => {
     ServerResponse.prototype.write = original;
     server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test('admin revoke before runtime dispatch prevents the queued ask across invitation store connections', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'step-dispatch-revoke-'));
+  const base = new Set(['root@step.example', 'alice@step.example']);
+  const first = new InvitationStore(
+    join(dir, 'invites.sqlite'),
+    ['step.example'],
+    new Set(['root@step.example']),
+  );
+  const second = new InvitationStore(
+    join(dir, 'invites.sqlite'),
+    ['step.example'],
+    new Set(['root@step.example']),
+  );
+  const manager = new RuntimeManager({ dataRoot: dir, driver: heldDriver().driver });
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const ready = new Promise<void>((resolve) => (entered = resolve));
+  const ask = manager.ask.bind(manager);
+  manager.ask = async (...args) => {
+    entered();
+    await gate;
+    return ask(...args);
+  };
+  const audit = () => {};
+  const runs = new RunService(manager, audit);
+  const server = createGateway({
+    manager,
+    runs,
+    audit,
+    authenticate: async (header) => {
+      const who = PEOPLE[header?.replace(/^Bearer /, '') ?? ''];
+      return who && first.invited(base).has(who.email) ? who : null;
+    },
+    invitations: first,
+    baseInvitations: () => base,
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const call = (person: string, path: string, init: RequestInit = {}) =>
+    fetch(url + path, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${person}`,
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+      },
+    });
+  try {
+    const workspace = await (await call('alice', '/api/workspaces', post({ name: 'race' }))).json();
+    const start = await call(
+      'alice',
+      `/api/workspaces/${workspace.id}/runs`,
+      post({ text: 'must not dispatch' }),
+    );
+    assert.equal(start.status, 202);
+    const run = await start.json();
+    await ready;
+    second.change('root@step.example', 'alice@step.example', false, base);
+    release();
+    const failed = await until(async () => {
+      const current = runs.get('alice', workspace.id, run.id);
+      return current.status === 'failed' ? current : undefined;
+    });
+    assert.equal(failed.code, 'UNAUTHENTICATED');
+    assert.deepEqual(await manager.messages('alice', workspace.id, run.sessionId), []);
+  } finally {
+    release();
+    server.closeAllConnections();
+    await new Promise<void>((done) => server.close(() => done()));
+    await manager.shutdown();
+    first.close();
+    second.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a revoke in another process waits until the synchronous runtime send completes', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'step-dispatch-lock-'));
+  const db = join(dir, 'invites.sqlite');
+  const store = new InvitationStore(db, ['step.example'], new Set(['root@step.example']));
+  const marker = (name: string) => join(dir, name);
+  const moduleUrl = new URL('../src/gateway/invitation-store.ts', import.meta.url).href;
+  const script = `
+    import { InvitationStore } from ${JSON.stringify(moduleUrl)};
+    import { existsSync, writeFileSync } from 'node:fs';
+    const [db, ready, go, attempted, done] = process.argv.slice(1);
+    const store = new InvitationStore(db, ['step.example'], new Set(['root@step.example']));
+    writeFileSync(ready, '');
+    while (!existsSync(go)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    writeFileSync(attempted, '');
+    store.change('root@step.example', 'alice@step.example', false, new Set(['root@step.example', 'alice@step.example']));
+    writeFileSync(done, ''); store.close();
+  `;
+  const child = spawn(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      '--input-type=module',
+      '-e',
+      script,
+      db,
+      marker('ready'),
+      marker('go'),
+      marker('attempted'),
+      marker('done'),
+    ],
+    { stdio: 'ignore' },
+  );
+  const exit = once(child, 'exit');
+  try {
+    await until(async () => (existsSync(marker('ready')) ? true : undefined));
+    store.dispatch('alice@step.example', () => {
+      writeFileSync(marker('go'), '');
+      const deadline = Date.now() + 3000;
+      while (!existsSync(marker('attempted')) && Date.now() < deadline)
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+      assert.ok(existsSync(marker('attempted')));
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+      assert.equal(existsSync(marker('done')), false, 'revoke cannot commit before the send returns');
+    });
+    const [code] = await exit;
+    assert.equal(code, 0);
+    assert.ok(existsSync(marker('done')));
+    assert.throws(
+      () => store.dispatch('alice@step.example', () => assert.fail('sent after revoke')),
+      /UNAUTHENTICATED/,
+    );
+  } finally {
+    child.kill();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
   }
 });

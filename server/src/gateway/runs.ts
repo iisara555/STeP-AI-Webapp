@@ -107,6 +107,7 @@ export class RunService {
     workspaceId: string,
     input: { text: string; sessionId?: string },
     authorize: () => Promise<void> = async () => {},
+    dispatch: (send: () => Promise<AskResult>) => Promise<AskResult> = (send) => send(),
   ): Promise<Run> {
     await this.manager.get(actor, workspaceId);
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
@@ -153,7 +154,7 @@ export class RunService {
     this.audit({ actor, action: 'run.start', workspaceId, runId: run.id, outcome: 'accepted' });
 
     // Deliberately not awaited: the run outlives the request that started it.
-    void this.manager.ask(actor, workspaceId, { text: input.text, sessionId }, dispatched).then(
+    void this.manager.ask(actor, workspaceId, { text: input.text, sessionId }, dispatched, dispatch).then(
       (result) => this.finish(run, feed, result),
       (error) => {
         dispatched();
