@@ -95,6 +95,61 @@ test('concurrent HTTP requests cannot exceed the durable daily run quota', async
   );
 });
 
+test('gateway restart retains daily admissions under concurrent HTTP requests', async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), 'step-gateway-restart-'));
+  const quotas = { workspacesPerUser: 2, activeRunsPerUser: 20, runsPerUserPerDay: 3 };
+  let server: ReturnType<typeof createGateway> | undefined;
+  let manager: RuntimeManager | undefined;
+  let store: QuotaStore | undefined;
+  async function start() {
+    manager = new RuntimeManager({ dataRoot, driver: heldDriver().driver });
+    store = new QuotaStore(join(dataRoot, 'quota.sqlite'));
+    const audit = () => {};
+    server = createGateway({
+      manager,
+      runs: new RunService(manager, audit, quotas, Date.now, store),
+      authenticate,
+      audit,
+      quotas,
+    });
+    await new Promise<void>((done) => server!.listen(0, '127.0.0.1', done));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    return (path: string, init: RequestInit = {}) =>
+      fetch(url + path, {
+        ...init,
+        headers: {
+          authorization: 'Bearer alice',
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+        },
+      });
+  }
+  async function stop() {
+    server!.closeAllConnections();
+    await new Promise<void>((done) => server!.close(() => done()));
+    await manager!.shutdown();
+    store!.close();
+  }
+  try {
+    let call = await start();
+    const workspace = await (await call('/api/workspaces', post({ name: 'restart' }))).json();
+    const path = `/api/workspaces/${workspace.id}/runs`;
+    assert.equal((await call(path, post({ text: 'before restart' }))).status, 202);
+    await stop();
+    call = await start();
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => call(path, post({ text: 'after restart' }))),
+    );
+    assert.equal(results.filter((response) => response.status === 202).length, 2);
+    for (const response of results.filter((response) => response.status !== 202)) {
+      assert.equal(response.status, 429);
+      assert.deepEqual(await response.json(), { code: 'QUOTA_DAILY_RUNS' });
+    }
+  } finally {
+    await stop();
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
 /** Reads server-sent events until `enough` says so, then closes the connection like a closed browser tab. */
 async function readEvents(
   response: Response,
