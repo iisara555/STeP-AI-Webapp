@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import type { AuditEntry } from '../src/gateway/audit.ts';
 import type { Authenticator, Identity } from '../src/gateway/auth.ts';
 import { createGateway } from '../src/gateway/http.ts';
+import { QuotaStore } from '../src/gateway/quota-store.ts';
 import { DEFAULT_QUOTAS, RunService, type Quotas } from '../src/gateway/runs.ts';
 import type {
   AskResult,
@@ -33,15 +34,17 @@ async function withGateway(
     audit: AuditEntry[];
   }) => Promise<void>,
   quotas: Quotas = DEFAULT_QUOTAS,
+  durableQuota = false,
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-gateway-'));
   const runtime = heldDriver();
   const manager = new RuntimeManager({ dataRoot, driver: runtime.driver });
   const audit: AuditEntry[] = [];
   const record = (entry: AuditEntry) => void audit.push(entry);
+  const store = durableQuota ? new QuotaStore(join(dataRoot, 'quota.sqlite')) : undefined;
   const server = createGateway({
     manager,
-    runs: new RunService(manager, record, quotas),
+    runs: new RunService(manager, record, quotas, Date.now, store),
     authenticate,
     audit: record,
     origin: ORIGIN,
@@ -65,11 +68,32 @@ async function withGateway(
     server.closeAllConnections();
     await new Promise((done) => server.close(done));
     await manager.shutdown();
+    store?.close();
     await rm(dataRoot, { recursive: true, force: true });
   }
 }
 
 const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
+
+test('concurrent HTTP requests cannot exceed the durable daily run quota', async () => {
+  await withGateway(
+    async ({ call }) => {
+      const workspace = await (await call('alice', '/api/workspaces', post({ name: 'quota' }))).json();
+      const responses = await Promise.all(
+        Array.from({ length: 12 }, () =>
+          call('alice', `/api/workspaces/${workspace.id}/runs`, post({ text: 'synthetic' })),
+        ),
+      );
+      assert.equal(responses.filter((response) => response.status === 202).length, 2);
+      for (const response of responses.filter((response) => response.status !== 202)) {
+        assert.equal(response.status, 429);
+        assert.deepEqual(await response.json(), { code: 'QUOTA_DAILY_RUNS' });
+      }
+    },
+    { workspacesPerUser: 2, activeRunsPerUser: 20, runsPerUserPerDay: 2 },
+    true,
+  );
+});
 
 /** Reads server-sent events until `enough` says so, then closes the connection like a closed browser tab. */
 async function readEvents(
