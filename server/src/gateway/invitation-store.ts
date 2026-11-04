@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { GatewayError } from './runs.ts';
 
-/** Durable overrides to the operator-managed invite file. Administrators remain operator-managed. */
+/** Durable administrator denials; the operator file is the maximum permitted set. */
 export class InvitationStore {
   private readonly db: DatabaseSync;
   private readonly domains: Set<string>;
@@ -21,8 +21,7 @@ export class InvitationStore {
   invited(base: Set<string>): Set<string> {
     const result = new Set(base);
     for (const row of this.db.prepare('SELECT email, active FROM invitations').all()) {
-      if (row.active === 1) result.add(String(row.email));
-      else result.delete(String(row.email));
+      if (row.active === 0) result.delete(String(row.email));
     }
     return result;
   }
@@ -34,7 +33,7 @@ export class InvitationStore {
       !this.domains.has(normalized.split('@')[1])
     )
       throw new GatewayError('INVALID_INPUT');
-    if (this.admins.has(normalized)) throw new GatewayError('FORBIDDEN');
+    if (this.admins.has(normalized) || (active && !base.has(normalized))) throw new GatewayError('FORBIDDEN');
     this.db.exec('BEGIN IMMEDIATE');
     try {
       if (!this.admins.has(actor) || !this.invited(base).has(actor)) throw new GatewayError('FORBIDDEN');

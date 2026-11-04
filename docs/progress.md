@@ -2,14 +2,17 @@
 
 ## #58 · Gateway invitation management (partial)
 
-- Added admin-only list, invite and revoke HTTP operations backed by durable SQLite overrides to the
-  operator invite file. Domain validation, fixed operator-managed admin roles and owner-only Workspaces
+- Added admin-only list, invite and revoke HTTP operations backed by durable SQLite denials under the
+  operator invite file allowlist. Domain validation, fixed operator-managed admin roles and owner-only Workspaces
   prevent privilege escalation; revocation denies subsequent authentication. See `server/README.md`
   for override precedence, failure behavior and operational constraints.
 - Synthetic HTTP and signed-token tests cover ordinary-user denial, domain/role validation, private
   Workspace isolation, revocation of file-based invitations, reinvitation and reopening the store.
 - Still open: admin UI, email delivery, expiry, target-identifying audit, cancellation of existing runs
-  and SSE streams on revocation, real Google accounts, gateway process restart, and production acceptance.
+  on revocation, real Google accounts, gateway process restart, and production acceptance.
+- The operator file is authoritative even for previously managed grants; private SSE events and ordinary
+  responses reauthenticate before delivery. Idle streams are not proactively closed, and in-flight
+  side effects are not cancelled; authorization and writes cannot be atomic with external file edits.
   Playwright cloud checks could not launch Chromium: host lacks `libatk-1.0.so.0`.
 
 ## #57 · ตรวจขอบเขต process เพิ่มเติม (ยังไม่เสร็จ)

@@ -459,11 +459,11 @@ test('admin invitations grant and revoke access, persist across store reopen, an
   const runtime = heldDriver();
   const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
   const record = () => {};
+  const base = new Set(['root@step.example', 'bob@step.example', 'alice@step.example']);
+  store.change('root@step.example', 'alice@step.example', false, base);
   const auth: Authenticator = async (header) => {
     const who = PEOPLE[header?.replace(/^Bearer /, '') ?? ''];
-    return who && store.invited(new Set(['root@step.example', 'bob@step.example'])).has(who.email)
-      ? who
-      : null;
+    return who && store.invited(base).has(who.email) ? who : null;
   };
   const server = createGateway({
     manager,
@@ -476,7 +476,7 @@ test('admin invitations grant and revoke access, persist across store reopen, an
         return typeof value === 'function' ? value.bind(store) : value;
       },
     }),
-    baseInvitations: () => new Set(['root@step.example', 'bob@step.example']),
+    baseInvitations: () => base,
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -543,5 +543,96 @@ test('admin invitations grant and revoke access, persist across store reopen, an
     await manager.shutdown();
     store.close();
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('removing an operator invitation cannot be overridden by a managed grant', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const store = new InvitationStore(':memory:', ['step.example'], new Set(['root@step.example']));
+  try {
+    const base = new Set(['root@step.example', 'bob@step.example']);
+    store.change('root@step.example', 'bob@step.example', true, base);
+    base.delete('bob@step.example');
+    assert.equal(store.invited(base).has('bob@step.example'), false);
+    assert.throws(() => store.change('root@step.example', 'bob@step.example', true, base), /FORBIDDEN/);
+    base.add('bob@step.example');
+    assert.equal(store.invited(base).has('bob@step.example'), true);
+  } finally {
+    store.close();
+  }
+});
+
+test('an open event stream stops before delivering an event after revocation', async () => {
+  let allowed = true;
+  let emit!: (event: { id: number; type: string; data: unknown }) => void;
+  let stopped = false;
+  const server = createGateway({
+    manager: {} as RuntimeManager,
+    runs: {
+      follow: async (_u: string, _w: string, _a: number, cb: typeof emit) => {
+        emit = cb;
+        return () => {
+          stopped = true;
+        };
+      },
+    } as unknown as RunService,
+    authenticate: async () => (allowed ? PEOPLE.alice : null),
+    audit: () => {},
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/workspaces/ws_${'a'.repeat(32)}/events`,
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+    allowed = false;
+    emit({ id: 1, type: 'message', data: 'private-after-revocation' });
+    const result = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('stream did not close')), 1000)),
+    ]);
+    assert.equal(result.done, true, `received ${new TextDecoder().decode(result.value)}`);
+    assert.equal(stopped, true);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((done) => server.close(() => done()));
+  }
+});
+
+test('an in-flight private response is withheld after revocation', async () => {
+  let allowed = true;
+  let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const server = createGateway({
+    manager: {
+      list: async () => {
+        entered();
+        await gate;
+        return [{ name: 'private' }];
+      },
+    } as unknown as RuntimeManager,
+    runs: {} as RunService,
+    authenticate: async () => (allowed ? PEOPLE.alice : null),
+    audit: () => {},
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  try {
+    const response = fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/workspaces`);
+    await started;
+    allowed = false;
+    release();
+    const result = await response;
+    assert.equal(result.status, 401);
+    assert.doesNotMatch(await result.text(), /private/);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((done) => server.close(() => done()));
   }
 });

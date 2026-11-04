@@ -38,7 +38,7 @@ Docker socket หรือ SQLite
 
 - `auth.ts` ตรวจ Google ID token (`Authorization: Bearer …`) จาก signing key ของ Google: audience ต้องเป็น client id ของเว็บ,
   อีเมลยืนยันแล้ว, `hd` และโดเมนอีเมลอยู่ในรายชื่อองค์กร และอีเมลอยู่ในรายชื่อที่ได้รับเชิญ ซึ่งอ่านใหม่ทุกคำขอ
-  รายชื่อรวมไฟล์และ SQLite override ตามรายละเอียดด้านล่าง ผู้ใช้ได้ id `g<sub>` ซึ่งเป็นชื่อโฟลเดอร์ใต้ `users/`
+  รายชื่อต้องอยู่ในไฟล์และไม่ถูก SQLite ปฏิเสธตามรายละเอียดด้านล่าง ผู้ใช้ได้ id `g<sub>` ซึ่งเป็นชื่อโฟลเดอร์ใต้ `users/`
 - `runs.ts` งาน (run) เป็นของ Gateway ไม่ได้ผูกกับ HTTP request: ปิด Browser แล้ว runtime ยังทำต่อ ผลลัพธ์อยู่ในบทสนทนาของ
   Workspace และ event feed ต่อ Workspace เก็บ event ล่าสุด 2,000 รายการ ให้ client ที่กลับมาส่ง `Last-Event-ID`
   แล้วได้เฉพาะส่วนที่พลาด ถ้าเก่าเกินที่เก็บไว้จะได้ event `reset` ให้โหลดผลจาก API แทน
@@ -76,12 +76,19 @@ confer Workspace access. Changes are stored in `gateway-invitations.sqlite` unde
 back up this private database along with the invite file. Audit records the actor and operation, not
 recipient email.
 
-The invite file remains the base list, read for each request. A managed grant or revocation overrides
-that email's file entry persistently, including after restart; removing a managed grant from the file
-**does not revoke it**: use the revoke endpoint. Removing an unmanaged file entry still revokes it.
-If the base file is unavailable authentication fails closed. Existing active runs and open event streams
-are not terminated when an invitation is revoked; subsequent HTTP requests are denied. No invitation
-email is sent. UI, expiry, per-target audit, live Google acceptance and production rollout remain open.
+The operator invite file is the maximum allowed set, read for every authentication. Administrators may
+revoke an address in SQLite, or clear that revocation with the invite endpoint, but cannot invite an
+address absent from the file (403). Removing any file entry revokes it even if a managed grant exists.
+Re-adding an entry restores access unless an administrator denial remains; to keep it revoked after
+re-adding, revoke it through the administrator endpoint too. Existing active SQLite grants no longer
+extend the file allowlist. Back up both the file and database, and edit the file atomically.
+
+Authentication is checked again before an HTTP response and each private SSE event; an unauthorized
+stream closes on its next event. Idle streams may remain open until an event arrives. Revocation does not
+cancel already-started runs or other in-flight side effects, retract bytes already sent, or eliminate the
+race between the last authorization check and a write. Authentication/file errors fail closed. No
+invitation email is sent. UI, expiry, per-target audit, live Google acceptance and production rollout
+remain open.
 
 ```bash
 STEP_DATA_ROOT=/srv/step/data \

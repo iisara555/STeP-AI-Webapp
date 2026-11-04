@@ -242,6 +242,9 @@ export function createGateway(options: GatewayOptions) {
         const match = req.method === method ? pattern.exec(url.pathname) : null;
         if (!match) continue;
         const result = await handler({ req, res, who, params: match.slice(1) });
+        const current = await authenticate(req.headers.authorization);
+        if (!current || current.userId !== who.userId || current.email !== who.email)
+          throw new GatewayError('UNAUTHENTICATED');
         return send(res, res.statusCode, result);
       }
       throw new GatewayError('NOT_FOUND');
@@ -266,20 +269,51 @@ export function createGateway(options: GatewayOptions) {
   ) {
     const after = Number(req.headers['last-event-id'] ?? url.searchParams.get('after') ?? 0);
     if (!Number.isSafeInteger(after) || after < 0) throw new WorkspaceError('INVALID_INPUT');
-    const buffered: string[] = [];
-    let open = false;
-    const write = (chunk: string) => (open ? res.write(chunk) : buffered.push(chunk));
-    const stop = await runs.follow(who.userId, workspaceId, after, (event) =>
-      write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`),
-    );
-    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive' });
-    open = true;
-    res.write(': connected\n\n' + buffered.join(''));
-    const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), heartbeatMs);
-    req.on('close', () => {
-      clearInterval(heartbeat);
-      stop();
+    let closed = false;
+    let stop: (() => void) | undefined;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      if (heartbeat) clearInterval(heartbeat);
+      stop?.();
+      res.end();
+    };
+    req.on('close', close);
+    let ready!: () => void;
+    const opened = new Promise<void>((resolve) => {
+      ready = resolve;
     });
+    let pending = Promise.resolve();
+    try {
+      stop = await runs.follow(who.userId, workspaceId, after, (event) => {
+        pending = pending
+          .then(async () => {
+            await opened;
+            if (closed) return;
+            const current = await authenticate(req.headers.authorization);
+            if (closed) return;
+            if (!current || current.userId !== who.userId || current.email !== who.email) return close();
+            res.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
+          })
+          .catch(close);
+      });
+      if (closed) {
+        stop();
+        return;
+      }
+      const current = await authenticate(req.headers.authorization);
+      if (closed) return;
+      if (!current || current.userId !== who.userId || current.email !== who.email) {
+        close();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive' });
+      res.write(': connected\n\n');
+      heartbeat = setInterval(() => res.write(': heartbeat\n\n'), heartbeatMs);
+    } finally {
+      ready();
+    }
   }
 }
 
