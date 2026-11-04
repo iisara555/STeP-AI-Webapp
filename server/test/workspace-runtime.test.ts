@@ -273,6 +273,33 @@ test('isolated runtime cannot read another workspace or connect to the host loop
   });
 });
 
+test('an isolated runtime cannot inspect or signal another host process', async () => {
+  await withManager(async (manager, root) => {
+    const w = await manager.create('alice', { name: 'A' });
+    const paths = workspacePaths(root, 'alice', w.id);
+    const victim = spawn('/bin/sleep', ['60']);
+    try {
+      assert.ok(victim.pid);
+      const script = `const fs=require('node:fs');let visible=fs.existsSync('/proc/${victim.pid}');let signaled=false;try{process.kill(${victim.pid},0);signaled=true}catch{};console.log(JSON.stringify({visible,signaled}))`;
+      const child = spawn('/usr/bin/bwrap', [...isolatedRuntimeArgs(paths), '-e', script], {
+        cwd: paths.filesDir,
+        env: runtimeEnv(paths),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let output = '',
+        error = '';
+      child.stdout.on('data', (chunk) => (output += chunk));
+      child.stderr.on('data', (chunk) => (error += chunk));
+      const status = await new Promise<number | null>((resolve) => child.on('exit', resolve));
+      assert.equal(status, 0, error);
+      assert.deepEqual(JSON.parse(output), { visible: false, signaled: false });
+      assert.equal(victim.exitCode, null);
+    } finally {
+      victim.kill();
+    }
+  });
+});
+
 test('an isolated runtime crash is reported and the next request resumes its conversation', async () => {
   let pid = 0;
   const sandbox = processDriver({ isolated: true });
@@ -299,6 +326,26 @@ test('an isolated runtime crash is reported and the next request resumes its con
       assert.notEqual(pid, oldPid);
     },
     { driver, grant: () => ({ baseUrl: 'http://127.0.0.1:1/v1', model: 'synthetic' }) },
+  );
+});
+
+test('an unavailable sandbox fails closed and a later isolated start can recover', async () => {
+  const sandbox = processDriver({ isolated: true });
+  let unavailable = true;
+  const driver: RuntimeDriver = {
+    start: (spec) =>
+      sandbox.start(unavailable ? { ...spec, dir: join(spec.dir, 'missing-sandbox-mount') } : spec),
+  };
+  await withManager(
+    async (manager) => {
+      const w = await manager.create('alice', { name: 'A' });
+      await assert.rejects(() => manager.start('alice', w.id), code('RUNTIME_START_FAILED'));
+      assert.equal((await manager.health('alice', w.id)).ok, false);
+      unavailable = false;
+      assert.equal((await manager.start('alice', w.id)).state, 'running');
+      assert.equal((await manager.health('alice', w.id)).ok, true);
+    },
+    { driver },
   );
 });
 test('overlapping updates of one Workspace record do not fail each other', async () => {
