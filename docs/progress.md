@@ -2,6 +2,21 @@
 
 ## #57 · ตรวจขอบเขต process เพิ่มเติม (ยังไม่เสร็จ)
 
+### การสำรวจ systemd scope เพิ่มเติม (ยังไม่ได้เชื่อมกับ Workspace)
+
+- บนเครื่องพัฒนา `systemd-run --user --scope -p CPUQuota=50% -p MemoryMax=128M` แสดง
+  `cpu.max=50000 100000` และ `memory.max=134217728` จากภายใน scope; ค่านี้ไม่ยืนยัน host เป้าหมาย
+- ทดลอง `fork` ผ่าน systemd-run → Bubblewrap → Node ด้วย IPC fd เดิม: Node ส่งข้อความกลับได้;
+  เมื่อ kill process ที่ fork หลัง ready ไม่พบ process Node ของ probe อีกหลัง 700 ms การทดลองนี้ไม่ครอบคลุม
+  failure ระหว่างเริ่ม, ลูกหลานทุกแบบ, หรือการเก็บกวาด scope หลัง manager ล้ม
+- ตัวขัดขวางการเชื่อมจริง: `runtimeEnv` จงใจไม่ส่ง `XDG_RUNTIME_DIR` หรือ `DBUS_SESSION_BUS_ADDRESS`;
+  เมื่อใช้ environment แบบจำกัดนี้ systemd-run ล้มเหลว `Failed to connect to user scope bus` ก่อนเริ่ม Node
+  การเพิ่มสองตัวแปรอย่างเดียวไม่พิสูจน์ความปลอดภัย: ต้องจัดการการเข้าถึง bus เฉพาะ launcher ไม่เปิดให้
+  sandbox ควบคุม scope, ตรวจค่าที่บังคับใช้ก่อนให้ runtime ทำงาน, และพิสูจน์ cleanup เมื่อเริ่มไม่สำเร็จ
+  รวมถึง OOM/restart ผ่าน `processDriver.start` จริง ยังไม่ได้พิสูจน์เงื่อนไขเหล่านี้จึงไม่ได้เพิ่ม enforcement
+- IPC probe ใช้ Bubblewrap mount ทั้ง `/` แบบ read-only เพื่อสำรวจเท่านั้น ไม่ใช่ sandbox ของ Workspace
+  และไม่ใช่หลักฐานการแยกไฟล์หรือ network ของ host เป้าหมาย
+
 - ทดสอบ runtime จริง: เมื่อ mount ของ Bubblewrap ไม่มีอยู่ การเริ่มล้มเหลวและไม่มี runtime ทำงาน;
   เมื่อแก้ mount แล้วเริ่ม sandbox เดิมได้อีกครั้ง เป็นการตรวจ isolation ไม่ใช่ quota
 - เครื่องพัฒนารัน transient user systemd scope โดยไม่ใช้สิทธิ์ root ได้: `CPUQuota=20%` ได้
