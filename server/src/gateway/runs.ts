@@ -45,6 +45,8 @@ export class GatewayError extends Error {
 
 /** Events kept per Workspace for a returning client; older ones are replaced by a `reset` telling it to reload. */
 const FEED_LIMIT = 2_000;
+/** Maximum replay that fits the HTTP stream's pending-event budget. */
+export const STREAM_PENDING_LIMIT = 128;
 /** Finished runs kept for status reads; the answers themselves stay in the Workspace's conversations. */
 const FINISHED_LIMIT = 500;
 
@@ -65,7 +67,8 @@ class Feed {
   since(after: number): FeedEvent[] {
     if (after >= this.seq) return [];
     const first = this.events[0]?.id ?? this.seq + 1;
-    if (after < first - 1) return [{ id: this.seq, type: 'reset', data: {} }];
+    if (after < first - 1 || this.seq - after > STREAM_PENDING_LIMIT)
+      return [{ id: this.seq, type: 'reset', data: {} }];
     return this.events.filter((event) => event.id > after);
   }
 }
@@ -99,7 +102,13 @@ export class RunService {
     private readonly quotaStore?: QuotaStore,
   ) {}
 
-  async start(actor: string, workspaceId: string, input: { text: string; sessionId?: string }): Promise<Run> {
+  async start(
+    actor: string,
+    workspaceId: string,
+    input: { text: string; sessionId?: string },
+    authorize: () => Promise<void> = async () => {},
+    dispatch: (send: () => Promise<AskResult>) => Promise<AskResult> = (send) => send(),
+  ): Promise<Run> {
     await this.manager.get(actor, workspaceId);
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
     const dayKey = `${actor}:${this.day()}`;
@@ -111,6 +120,7 @@ export class RunService {
     // Listen before asking, so the first streamed words are in the feed.
     const feed = await this.feed(actor, workspaceId);
     const sessionId = input.sessionId ?? (await this.manager.newConversation(actor, workspaceId)).sessionId;
+    await authorize();
     const key = this.sessionKey(actor, workspaceId, sessionId);
     if (this.active.has(key)) throw new GatewayError('RUN_ALREADY_ACTIVE');
     // Checked again after the awaits above, so two requests at once cannot both pass the limit.
@@ -144,7 +154,7 @@ export class RunService {
     this.audit({ actor, action: 'run.start', workspaceId, runId: run.id, outcome: 'accepted' });
 
     // Deliberately not awaited: the run outlives the request that started it.
-    void this.manager.ask(actor, workspaceId, { text: input.text, sessionId }, dispatched).then(
+    void this.manager.ask(actor, workspaceId, { text: input.text, sessionId }, dispatched, dispatch).then(
       (result) => this.finish(run, feed, result),
       (error) => {
         dispatched();

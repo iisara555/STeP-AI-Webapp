@@ -37,8 +37,8 @@
 Docker socket หรือ SQLite
 
 - `auth.ts` ตรวจ Google ID token (`Authorization: Bearer …`) จาก signing key ของ Google: audience ต้องเป็น client id ของเว็บ,
-  อีเมลยืนยันแล้ว, `hd` และโดเมนอีเมลอยู่ในรายชื่อองค์กร และอีเมลอยู่ในไฟล์รายชื่อคนที่ได้รับเชิญ ซึ่งอ่านใหม่ทุกคำขอ
-  ลบชื่อออกจากไฟล์แล้วเข้าไม่ได้ตั้งแต่คำขอถัดไป ผู้ใช้ได้ id `g<sub>` ซึ่งเป็นชื่อโฟลเดอร์ใต้ `users/`
+  อีเมลยืนยันแล้ว, `hd` และโดเมนอีเมลอยู่ในรายชื่อองค์กร และอีเมลอยู่ในรายชื่อที่ได้รับเชิญ ซึ่งอ่านใหม่ทุกคำขอ
+  รายชื่อต้องอยู่ในไฟล์และไม่ถูก SQLite ปฏิเสธตามรายละเอียดด้านล่าง ผู้ใช้ได้ id `g<sub>` ซึ่งเป็นชื่อโฟลเดอร์ใต้ `users/`
 - `runs.ts` งาน (run) เป็นของ Gateway ไม่ได้ผูกกับ HTTP request: ปิด Browser แล้ว runtime ยังทำต่อ ผลลัพธ์อยู่ในบทสนทนาของ
   Workspace และ event feed ต่อ Workspace เก็บ event ล่าสุด 2,000 รายการ ให้ client ที่กลับมาส่ง `Last-Event-ID`
   แล้วได้เฉพาะส่วนที่พลาด ถ้าเก่าเกินที่เก็บไว้จะได้ event `reset` ให้โหลดผลจาก API แทน
@@ -66,6 +66,51 @@ Docker socket หรือ SQLite
 | GET    | `/api/workspaces/:ws/events`                          | SSE: `run`, `delta`, `discard`, `activity`                  |
 | GET    | `/api/admin/health`                                   | ตัวเลขสำหรับผู้ดูแล                                         |
 
+### Invitation management (#58, partial)
+
+`GET /api/admin/invitations` lists active emails; `POST /api/admin/invitations` and
+`POST /api/admin/invitations/revoke` accept only `{ "email": "..." }`. Only currently invited
+`STEP_ADMINS` can use them; targets must be valid addresses in `STEP_ALLOWED_DOMAINS`. These APIs
+cannot grant admin privileges or change an operator-configured administrator. Admin access does not
+confer Workspace access. Changes are stored in `gateway-invitations.sqlite` under `STEP_DATA_ROOT`;
+back up this private database along with the invite file. Audit records the actor and operation, not
+recipient email.
+
+The operator invite file is the maximum allowed set, read for every authentication. Administrators may
+revoke an address in SQLite, or clear that revocation with the invite endpoint, but cannot invite an
+address absent from the file (403). Removing any file entry revokes it even if a managed grant exists.
+Re-adding an entry restores access unless an administrator denial remains; to keep it revoked after
+re-adding, revoke it through the administrator endpoint too. Existing active SQLite grants no longer
+extend the file allowlist. Back up both the file and database, and edit the file atomically.
+
+Authentication is checked again immediately before run admission, before an HTTP response and for each
+private SSE event. An unauthorized stream closes on its next event; idle streams may remain open. Streams
+also close on socket backpressure or more than 128 pending events; clients must reconnect from the last
+received event ID. A replay exceeding that pending limit emits a `reset` instead of replaying the gap;
+the client must reload conversation state. Run preparation can create an empty conversation or start a runtime
+before admission. For administrator revocations, the gateway serializes the SQLite denial and the synchronous
+`ask` IPC enqueue in the same invitation database: if the denial commits first, that ask is not enqueued;
+if enqueue happens first, revocation can succeed afterwards and does not cancel the run. The same SQLite
+ordering fences each private HTTP response enqueue and each private SSE event write: a denial committed first
+prevents that enqueue; a write first may still reach the client after the denial. Serialization is done before
+acquiring the lock, and the lock is held only for the synchronous Node write/enqueue, never for socket drain.
+SSE backpressure closes the stream after releasing the lock. Lock acquisition has SQLite's five-second busy
+timeout; failure to acquire or validate the fence sends no private response/event. A failure after Node has
+already accepted bytes cannot retract them. A 202 response means
+admitted, not necessarily dispatched; a later denial can make the run fail with `UNAUTHENTICATED`, and the
+admission still consumes quota. An administrator can explicitly re-invite the address, allowing dispatch again.
+This guarantee requires every gateway and admin writer to use this code and the same SQLite database on a
+filesystem with working SQLite locks; separate database copies, older processes, or direct database edits that
+ignore the protocol are not coordinated. It covers IPC enqueue, not when the child receives the message or
+makes provider requests, and does not stop existing runs or other in-flight side effects.
+
+An operator file edit is **not** serialized with dispatch or delivery: it takes effect on subsequent file
+reads, but previously authorized work or private output can still be enqueued after the file is changed.
+Use the admin revocation API for the ordering guarantee. File edits, token expiry, and other external identity changes cannot be made
+atomic by the SQLite lock. Already-buffered bytes cannot be retracted. Authentication/file errors fail closed. No
+invitation email is sent. UI, expiry, per-target audit, live Google acceptance and production rollout
+remain open.
+
 ```bash
 STEP_DATA_ROOT=/srv/step/data \
 STEP_INVITES_FILE=/srv/step/invites.txt \
@@ -76,7 +121,7 @@ npm run gateway        # ฟังที่ 127.0.0.1:8787 ให้ reverse pro
 
 ข้อจำกัดของ 3a:
 
-- สถานะงานและ event feed อยู่ใน memory ของ Gateway: restart แล้วงานที่ค้างหายและ quota รายวันนับใหม่ ส่วนบทสนทนาในแต่ละ
+- สถานะงานและ event feed อยู่ใน memory ของ Gateway: restart แล้วงานที่ค้างหาย (quota รายวันเก็บใน SQLite) ส่วนบทสนทนาในแต่ละ
   Workspace ยังอยู่ครบ
 - ยังไม่ได้ทดสอบกับบัญชี Google จริง และ event stream ใช้ header `Authorization` จึงต้องอ่านด้วย `fetch` ไม่ใช่ `EventSource`
 - ยังไม่มีช่องอนุมัติ เพราะ server ยังไม่มีเครื่องมือเขียนข้อมูลภายนอก (tool loop ปิด) จะทำพร้อมเครื่องมือในระยะ 4 ตาม ADR 0002

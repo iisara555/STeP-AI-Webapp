@@ -7,6 +7,7 @@ import { processDriver } from '../workspace/process-driver.ts';
 import { fileAudit } from './audit.ts';
 import { googleIdTokenAuth } from './auth.ts';
 import { createGateway } from './http.ts';
+import { InvitationStore } from './invitation-store.ts';
 import { QuotaStore } from './quota-store.ts';
 import { DEFAULT_QUOTAS, RunService } from './runs.ts';
 
@@ -39,6 +40,10 @@ await mkdir(dataRoot, { recursive: true, mode: 0o700 });
 const quotaStore = new QuotaStore(join(dataRoot, 'gateway-quotas.sqlite'));
 const invitesFile = resolve(env('STEP_INVITES_FILE'));
 const aiKey = process.env.STEP_AI_KEY;
+const domains = [...list(env('STEP_ALLOWED_DOMAINS'))];
+const admins = list(process.env.STEP_ADMINS ?? '');
+const invitations = new InvitationStore(join(dataRoot, 'gateway-invitations.sqlite'), domains, admins);
+const baseInvitations = async () => list(await readFile(invitesFile, 'utf8'));
 
 const manager = new RuntimeManager({
   dataRoot,
@@ -63,12 +68,14 @@ const server = createGateway({
   audit,
   quotas,
   origin: env('STEP_APP_ORIGIN'),
+  invitations,
+  baseInvitations,
   authenticate: googleIdTokenAuth({
     clientId: env('STEP_GOOGLE_CLIENT_ID'),
-    domains: [...list(env('STEP_ALLOWED_DOMAINS'))],
+    domains,
     // One email per line; read on every request so removing a line revokes access without a restart.
-    invited: async () => list(await readFile(invitesFile, 'utf8').catch(() => '')),
-    admins: list(process.env.STEP_ADMINS ?? ''),
+    invited: async () => invitations.invited(await baseInvitations()),
+    admins,
   }),
 });
 
@@ -82,6 +89,7 @@ const shutdown = () => {
   server.close();
   void manager.shutdown().finally(() => {
     quotaStore.close();
+    invitations.close();
     process.exit(0);
   });
 };

@@ -7,7 +7,15 @@ import { AskInput, WorkspaceError, WorkspaceName } from '../workspace/contract.t
 import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
 import type { Authenticator, Identity } from './auth.ts';
-import { codeOf, DEFAULT_QUOTAS, GatewayError, type Quotas, type RunService } from './runs.ts';
+import type { InvitationStore } from './invitation-store.ts';
+import {
+  codeOf,
+  DEFAULT_QUOTAS,
+  GatewayError,
+  STREAM_PENDING_LIMIT,
+  type Quotas,
+  type RunService,
+} from './runs.ts';
 
 export type GatewayOptions = {
   manager: RuntimeManager;
@@ -17,6 +25,8 @@ export type GatewayOptions = {
   /** The web app's origin; requests from any other browser origin are refused. */
   origin?: string;
   quotas?: Quotas;
+  invitations?: InvitationStore;
+  baseInvitations?: () => Set<string> | Promise<Set<string>>;
   heartbeatMs?: number;
   now?: () => number;
 };
@@ -149,7 +159,17 @@ export function createGateway(options: GatewayOptions) {
       async ({ req, res, who, params }) => {
         const input = parseBody(AskInput, await readJson(req));
         res.statusCode = 202;
-        return runs.start(who.userId, params[0], input);
+        return runs.start(
+          who.userId,
+          params[0],
+          input,
+          async () => {
+            const current = await authenticate(req.headers.authorization);
+            if (!current || current.userId !== who.userId || current.email !== who.email)
+              throw new GatewayError('UNAUTHENTICATED');
+          },
+          (send) => (options.invitations ? options.invitations.dispatch(who.email, send) : send()),
+        );
       },
     ],
     [
@@ -162,6 +182,38 @@ export function createGateway(options: GatewayOptions) {
       new RegExp(`^/api/workspaces/${WS}/runs/${RUN}/cancel$`),
       async ({ who, params }) => runs.cancel(who.userId, params[0], params[1]),
     ],
+    [
+      'GET',
+      /^\/api\/admin\/invitations$/,
+      async ({ who }) => {
+        if (!who.admin) throw new GatewayError('FORBIDDEN');
+        if (!options.invitations || !options.baseInvitations) throw new GatewayError('NOT_FOUND');
+        const emails = options.invitations.invited(await options.baseInvitations());
+        if (!emails.has(who.email)) throw new GatewayError('FORBIDDEN');
+        return { emails: [...emails].sort() };
+      },
+    ],
+    ...(
+      [
+        ['/api/admin/invitations', true],
+        ['/api/admin/invitations/revoke', false],
+      ] as const
+    ).map(([path, active]): Route => [
+      'POST',
+      new RegExp(`^${path}$`),
+      async ({ req, who }) => {
+        if (!who.admin) throw new GatewayError('FORBIDDEN');
+        if (!options.invitations || !options.baseInvitations) throw new GatewayError('NOT_FOUND');
+        const { email } = parseBody(z.object({ email: z.string() }).strict(), await readJson(req));
+        options.invitations.change(who.email, email, active, await options.baseInvitations());
+        audit({
+          actor: who.userId,
+          action: active ? 'invitation.create' : 'invitation.revoke',
+          outcome: 'updated',
+        });
+        return { ok: true };
+      },
+    ]),
     [
       'GET',
       /^\/api\/admin\/health$/,
@@ -207,7 +259,12 @@ export function createGateway(options: GatewayOptions) {
         const match = req.method === method ? pattern.exec(url.pathname) : null;
         if (!match) continue;
         const result = await handler({ req, res, who, params: match.slice(1) });
-        return send(res, res.statusCode, result);
+        const current = await authenticate(req.headers.authorization);
+        if (!current || current.userId !== who.userId || current.email !== who.email)
+          throw new GatewayError('UNAUTHENTICATED');
+        const body = result === undefined ? undefined : JSON.stringify(result);
+        const deliver = () => sendEncoded(res, res.statusCode, body);
+        return options.invitations ? options.invitations.dispatch(who.email, deliver) : deliver();
       }
       throw new GatewayError('NOT_FOUND');
     } catch (error) {
@@ -231,29 +288,75 @@ export function createGateway(options: GatewayOptions) {
   ) {
     const after = Number(req.headers['last-event-id'] ?? url.searchParams.get('after') ?? 0);
     if (!Number.isSafeInteger(after) || after < 0) throw new WorkspaceError('INVALID_INPUT');
-    const buffered: string[] = [];
-    let open = false;
-    const write = (chunk: string) => (open ? res.write(chunk) : buffered.push(chunk));
-    const stop = await runs.follow(who.userId, workspaceId, after, (event) =>
-      write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`),
-    );
-    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive' });
-    open = true;
-    res.write(': connected\n\n' + buffered.join(''));
-    const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), heartbeatMs);
-    req.on('close', () => {
-      clearInterval(heartbeat);
-      stop();
+    let closed = false;
+    let stop: (() => void) | undefined;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      if (heartbeat) clearInterval(heartbeat);
+      stop?.();
+      res.end();
+    };
+    req.on('close', close);
+    let ready!: () => void;
+    const opened = new Promise<void>((resolve) => {
+      ready = resolve;
     });
+    let pending = Promise.resolve();
+    let queued = 0;
+    try {
+      stop = await runs.follow(who.userId, workspaceId, after, (event) => {
+        if (closed) return;
+        if (++queued > STREAM_PENDING_LIMIT) return close();
+        pending = pending
+          .then(async () => {
+            await opened;
+            if (closed) return;
+            const current = await authenticate(req.headers.authorization);
+            if (closed) return;
+            if (!current || current.userId !== who.userId || current.email !== who.email) return close();
+            const frame = `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
+            const write = () => res.write(frame);
+            const accepted = options.invitations ? options.invitations.dispatch(who.email, write) : write();
+            if (!accepted) close();
+          })
+          .catch(close)
+          .finally(() => {
+            queued--;
+          });
+      });
+      if (closed) {
+        stop();
+        return;
+      }
+      const current = await authenticate(req.headers.authorization);
+      if (closed) return;
+      if (!current || current.userId !== who.userId || current.email !== who.email) {
+        close();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive' });
+      if (!res.write(': connected\n\n')) return close();
+      heartbeat = setInterval(() => {
+        if (!res.write(': heartbeat\n\n')) close();
+      }, heartbeatMs);
+    } finally {
+      ready();
+    }
   }
 }
 
 function send(res: ServerResponse, status: number, body?: unknown) {
+  return sendEncoded(res, status, body === undefined ? undefined : JSON.stringify(body));
+}
+
+function sendEncoded(res: ServerResponse, status: number, body?: string) {
   if (body === undefined) {
     res.writeHead(status).end();
     return;
   }
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }).end(body);
 }
 
 async function readJson(req: IncomingMessage) {
