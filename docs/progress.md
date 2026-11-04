@@ -1,5 +1,17 @@
 # Progress
 
+## #58 · Gateway invitation management (partial)
+
+- Added admin-only list, invite and revoke HTTP operations backed by durable SQLite overrides to the
+  operator invite file. Domain validation, fixed operator-managed admin roles and owner-only Workspaces
+  prevent privilege escalation; revocation denies subsequent authentication. See `server/README.md`
+  for override precedence, failure behavior and operational constraints.
+- Synthetic HTTP and signed-token tests cover ordinary-user denial, domain/role validation, private
+  Workspace isolation, revocation of file-based invitations, reinvitation and reopening the store.
+- Still open: admin UI, email delivery, expiry, target-identifying audit, cancellation of existing runs
+  and SSE streams on revocation, real Google accounts, gateway process restart, and production acceptance.
+  Playwright cloud checks could not launch Chromium: host lacks `libatk-1.0.so.0`.
+
 ## #57 · ตรวจขอบเขต process เพิ่มเติม (ยังไม่เสร็จ)
 
 - ทดสอบ runtime จริง: เมื่อ mount ของ Bubblewrap ไม่มีอยู่ การเริ่มล้มเหลวและไม่มี runtime ทำงาน;
@@ -25,7 +37,7 @@
   gateway restarts. Accepted runs count even if they fail or the gateway crashes; counters use UTC days.
 - Synthetic tests exercise concurrent HTTP admission across a gateway object restart and independent OS
   processes contending for the same counter. This is not yet the per-user monthly AI quota: administrator-
-  configurable limits, usage reporting, invitation management, process-level gateway restart and production
+  configurable limits, usage reporting, invitation UI, process-level gateway restart and production
   acceptance remain outstanding. Existing invite-file revocation and owner-only Workspace access remain in place.
 
 ## 2026-10-29 · ทดลอง runtime หลายผู้ใช้ (#48)

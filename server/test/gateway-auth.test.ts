@@ -88,3 +88,25 @@ test('removing someone from the invite list takes effect on their next request',
   invited.delete('staff@step.example');
   assert.equal(await check(token(valid)), null);
 });
+
+test('persistent administrator changes control verified Google identities on the next request', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const store = new InvitationStore(':memory:', ['step.example'], new Set(['root@step.example']));
+  const base = new Set(['root@step.example', 'staff@step.example']);
+  const check = googleIdTokenAuth({
+    clientId: CLIENT,
+    domains: ['step.example'],
+    invited: () => store.invited(base),
+    keys: async () => [{ ...publicKey.export({ format: 'jwk' }), kid: KID }],
+    now: () => NOW,
+  });
+  try {
+    assert.ok(await check(token(valid)));
+    store.change('root@step.example', 'staff@step.example', false, base);
+    assert.equal(await check(token(valid)), null);
+    store.change('root@step.example', 'staff@step.example', true, base);
+    assert.ok(await check(token(valid)));
+  } finally {
+    store.close();
+  }
+});

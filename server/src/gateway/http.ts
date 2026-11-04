@@ -7,6 +7,7 @@ import { AskInput, WorkspaceError, WorkspaceName } from '../workspace/contract.t
 import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
 import type { Authenticator, Identity } from './auth.ts';
+import type { InvitationStore } from './invitation-store.ts';
 import { codeOf, DEFAULT_QUOTAS, GatewayError, type Quotas, type RunService } from './runs.ts';
 
 export type GatewayOptions = {
@@ -17,6 +18,8 @@ export type GatewayOptions = {
   /** The web app's origin; requests from any other browser origin are refused. */
   origin?: string;
   quotas?: Quotas;
+  invitations?: InvitationStore;
+  baseInvitations?: () => Set<string> | Promise<Set<string>>;
   heartbeatMs?: number;
   now?: () => number;
 };
@@ -162,6 +165,38 @@ export function createGateway(options: GatewayOptions) {
       new RegExp(`^/api/workspaces/${WS}/runs/${RUN}/cancel$`),
       async ({ who, params }) => runs.cancel(who.userId, params[0], params[1]),
     ],
+    [
+      'GET',
+      /^\/api\/admin\/invitations$/,
+      async ({ who }) => {
+        if (!who.admin) throw new GatewayError('FORBIDDEN');
+        if (!options.invitations || !options.baseInvitations) throw new GatewayError('NOT_FOUND');
+        const emails = options.invitations.invited(await options.baseInvitations());
+        if (!emails.has(who.email)) throw new GatewayError('FORBIDDEN');
+        return { emails: [...emails].sort() };
+      },
+    ],
+    ...(
+      [
+        ['/api/admin/invitations', true],
+        ['/api/admin/invitations/revoke', false],
+      ] as const
+    ).map(([path, active]): Route => [
+      'POST',
+      new RegExp(`^${path}$`),
+      async ({ req, who }) => {
+        if (!who.admin) throw new GatewayError('FORBIDDEN');
+        if (!options.invitations || !options.baseInvitations) throw new GatewayError('NOT_FOUND');
+        const { email } = parseBody(z.object({ email: z.string() }).strict(), await readJson(req));
+        options.invitations.change(who.email, email, active, await options.baseInvitations());
+        audit({
+          actor: who.userId,
+          action: active ? 'invitation.create' : 'invitation.revoke',
+          outcome: 'updated',
+        });
+        return { ok: true };
+      },
+    ]),
     [
       'GET',
       /^\/api\/admin\/health$/,

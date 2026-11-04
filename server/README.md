@@ -37,8 +37,8 @@
 Docker socket หรือ SQLite
 
 - `auth.ts` ตรวจ Google ID token (`Authorization: Bearer …`) จาก signing key ของ Google: audience ต้องเป็น client id ของเว็บ,
-  อีเมลยืนยันแล้ว, `hd` และโดเมนอีเมลอยู่ในรายชื่อองค์กร และอีเมลอยู่ในไฟล์รายชื่อคนที่ได้รับเชิญ ซึ่งอ่านใหม่ทุกคำขอ
-  ลบชื่อออกจากไฟล์แล้วเข้าไม่ได้ตั้งแต่คำขอถัดไป ผู้ใช้ได้ id `g<sub>` ซึ่งเป็นชื่อโฟลเดอร์ใต้ `users/`
+  อีเมลยืนยันแล้ว, `hd` และโดเมนอีเมลอยู่ในรายชื่อองค์กร และอีเมลอยู่ในรายชื่อที่ได้รับเชิญ ซึ่งอ่านใหม่ทุกคำขอ
+  รายชื่อรวมไฟล์และ SQLite override ตามรายละเอียดด้านล่าง ผู้ใช้ได้ id `g<sub>` ซึ่งเป็นชื่อโฟลเดอร์ใต้ `users/`
 - `runs.ts` งาน (run) เป็นของ Gateway ไม่ได้ผูกกับ HTTP request: ปิด Browser แล้ว runtime ยังทำต่อ ผลลัพธ์อยู่ในบทสนทนาของ
   Workspace และ event feed ต่อ Workspace เก็บ event ล่าสุด 2,000 รายการ ให้ client ที่กลับมาส่ง `Last-Event-ID`
   แล้วได้เฉพาะส่วนที่พลาด ถ้าเก่าเกินที่เก็บไว้จะได้ event `reset` ให้โหลดผลจาก API แทน
@@ -66,6 +66,23 @@ Docker socket หรือ SQLite
 | GET    | `/api/workspaces/:ws/events`                          | SSE: `run`, `delta`, `discard`, `activity`                  |
 | GET    | `/api/admin/health`                                   | ตัวเลขสำหรับผู้ดูแล                                         |
 
+### Invitation management (#58, partial)
+
+`GET /api/admin/invitations` lists active emails; `POST /api/admin/invitations` and
+`POST /api/admin/invitations/revoke` accept only `{ "email": "..." }`. Only currently invited
+`STEP_ADMINS` can use them; targets must be valid addresses in `STEP_ALLOWED_DOMAINS`. These APIs
+cannot grant admin privileges or change an operator-configured administrator. Admin access does not
+confer Workspace access. Changes are stored in `gateway-invitations.sqlite` under `STEP_DATA_ROOT`;
+back up this private database along with the invite file. Audit records the actor and operation, not
+recipient email.
+
+The invite file remains the base list, read for each request. A managed grant or revocation overrides
+that email's file entry persistently, including after restart; removing a managed grant from the file
+**does not revoke it**: use the revoke endpoint. Removing an unmanaged file entry still revokes it.
+If the base file is unavailable authentication fails closed. Existing active runs and open event streams
+are not terminated when an invitation is revoked; subsequent HTTP requests are denied. No invitation
+email is sent. UI, expiry, per-target audit, live Google acceptance and production rollout remain open.
+
 ```bash
 STEP_DATA_ROOT=/srv/step/data \
 STEP_INVITES_FILE=/srv/step/invites.txt \
@@ -76,7 +93,7 @@ npm run gateway        # ฟังที่ 127.0.0.1:8787 ให้ reverse pro
 
 ข้อจำกัดของ 3a:
 
-- สถานะงานและ event feed อยู่ใน memory ของ Gateway: restart แล้วงานที่ค้างหายและ quota รายวันนับใหม่ ส่วนบทสนทนาในแต่ละ
+- สถานะงานและ event feed อยู่ใน memory ของ Gateway: restart แล้วงานที่ค้างหาย (quota รายวันเก็บใน SQLite) ส่วนบทสนทนาในแต่ละ
   Workspace ยังอยู่ครบ
 - ยังไม่ได้ทดสอบกับบัญชี Google จริง และ event stream ใช้ header `Authorization` จึงต้องอ่านด้วย `fetch` ไม่ใช่ `EventSource`
 - ยังไม่มีช่องอนุมัติ เพราะ server ยังไม่มีเครื่องมือเขียนข้อมูลภายนอก (tool loop ปิด) จะทำพร้อมเครื่องมือในระยะ 4 ตาม ADR 0002

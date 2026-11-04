@@ -450,3 +450,98 @@ test('requests are validated before they reach a runtime', async () => {
     assert.equal((await fetch(url + '/healthz', { method: 'POST' })).status, 401);
   });
 });
+
+test('admin invitations grant and revoke access, persist across store reopen, and never grant workspace ownership', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'step-invites-'));
+  const path = join(dir, 'invites.sqlite');
+  let store = new InvitationStore(path, ['step.example'], new Set(['root@step.example']));
+  const runtime = heldDriver();
+  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const record = () => {};
+  const auth: Authenticator = async (header) => {
+    const who = PEOPLE[header?.replace(/^Bearer /, '') ?? ''];
+    return who && store.invited(new Set(['root@step.example', 'bob@step.example'])).has(who.email)
+      ? who
+      : null;
+  };
+  const server = createGateway({
+    manager,
+    runs: new RunService(manager, record),
+    audit: record,
+    authenticate: auth,
+    invitations: new Proxy(store, {
+      get: (_target, key) => {
+        const value = Reflect.get(store, key);
+        return typeof value === 'function' ? value.bind(store) : value;
+      },
+    }),
+    baseInvitations: () => new Set(['root@step.example', 'bob@step.example']),
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const call = (person: string, path: string, init: RequestInit = {}) =>
+    fetch(url + path, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${person}`,
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+      },
+    });
+  try {
+    assert.equal((await call('alice', '/api/me')).status, 401);
+    assert.equal(
+      (await call('root', '/api/admin/invitations', post({ email: 'x@evil.example' }))).status,
+      400,
+    );
+    assert.equal(
+      (await call('root', '/api/admin/invitations', post({ email: 'x@step.example', admin: true }))).status,
+      400,
+    );
+    assert.equal(
+      (await call('root', '/api/admin/invitations/revoke', post({ email: 'root@step.example' }))).status,
+      403,
+    );
+    assert.equal(
+      (await call('root', '/api/admin/invitations/revoke', post({ email: 'bob@step.example' }))).status,
+      200,
+    );
+    assert.equal((await call('bob', '/api/me')).status, 401);
+    assert.equal(
+      (await call('root', '/api/admin/invitations', post({ email: 'bob@step.example' }))).status,
+      200,
+    );
+    assert.equal(
+      (await call('bob', '/api/admin/invitations', post({ email: 'alice@step.example' }))).status,
+      403,
+    );
+    assert.equal(
+      (await call('root', '/api/admin/invitations', post({ email: 'Alice@step.example' }))).status,
+      200,
+    );
+    assert.equal((await call('alice', '/api/me')).status, 200);
+    assert.equal((await call('bob', '/api/admin/invitations')).status, 403);
+    assert.deepEqual(await (await call('root', '/api/admin/invitations')).json(), {
+      emails: ['alice@step.example', 'bob@step.example', 'root@step.example'],
+    });
+    const workspace = await (await call('alice', '/api/workspaces', post({ name: 'private' }))).json();
+    assert.equal((await call('root', `/api/workspaces/${workspace.id}`)).status, 404);
+    store.close();
+    store = new InvitationStore(path, ['step.example'], new Set(['root@step.example']));
+    assert.equal((await call('alice', '/api/me')).status, 200);
+    assert.equal(
+      (await call('root', '/api/admin/invitations/revoke', post({ email: 'alice@step.example' }))).status,
+      200,
+    );
+    assert.equal((await call('alice', '/api/me')).status, 401);
+    store.close();
+    store = new InvitationStore(path, ['step.example'], new Set(['root@step.example']));
+    assert.equal((await call('alice', '/api/me')).status, 401);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((done) => server.close(() => done()));
+    await manager.shutdown();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
