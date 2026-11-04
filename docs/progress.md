@@ -57,6 +57,9 @@
   processes contending for the same counter. This is not yet the per-user monthly AI quota: administrator-
   configurable limits, usage reporting, invitation UI, process-level gateway restart and production
   acceptance remain outstanding. Existing invite-file revocation and owner-only Workspace access remain in place.
+- The active-run quota is not coordinated across gateway processes. Together with the invitation and
+  revocation limitations above and missing per-Workspace CPU, memory and disk enforcement, this remains
+  an incomplete non-production draft; the durable daily counter does not close these gaps.
 
 ## 2026-10-29 · ทดลอง runtime หลายผู้ใช้ (#48)
 
