@@ -273,6 +273,33 @@ test('isolated runtime cannot read another workspace or connect to the host loop
   });
 });
 
+test('an isolated runtime cannot inspect or signal another host process', async () => {
+  await withManager(async (manager, root) => {
+    const w = await manager.create('alice', { name: 'A' });
+    const paths = workspacePaths(root, 'alice', w.id);
+    const victim = spawn('/bin/sleep', ['60']);
+    try {
+      assert.ok(victim.pid);
+      const script = `const fs=require('node:fs');let visible=fs.existsSync('/proc/${victim.pid}');let signaled=false;try{process.kill(${victim.pid},0);signaled=true}catch{};console.log(JSON.stringify({visible,signaled}))`;
+      const child = spawn('/usr/bin/bwrap', [...isolatedRuntimeArgs(paths), '-e', script], {
+        cwd: paths.filesDir,
+        env: runtimeEnv(paths),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let output = '',
+        error = '';
+      child.stdout.on('data', (chunk) => (output += chunk));
+      child.stderr.on('data', (chunk) => (error += chunk));
+      const status = await new Promise<number | null>((resolve) => child.on('exit', resolve));
+      assert.equal(status, 0, error);
+      assert.deepEqual(JSON.parse(output), { visible: false, signaled: false });
+      assert.equal(victim.exitCode, null);
+    } finally {
+      victim.kill();
+    }
+  });
+});
+
 test('an isolated runtime crash is reported and the next request resumes its conversation', async () => {
   let pid = 0;
   const sandbox = processDriver({ isolated: true });
