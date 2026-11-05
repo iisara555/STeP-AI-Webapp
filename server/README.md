@@ -305,3 +305,25 @@ localhost ของ host รวมทั้ง browser สองบัญชี�
 Sandbox นี้ยังไม่มี cgroup CPU/RAM quota, การทดสอบบน host องค์กร หรือ real-account acceptance และข้อมูล
 บนดิสก์ไม่ได้เข้ารหัสโดยตัวทดลอง ต้องตรวจสิ่งเหล่านี้ก่อนเปิดให้พนักงานใช้ ห้ามใส่ข้อมูลจริงใน trial
 process driver แบบไม่ sandbox ยังใช้สำหรับ CLI/test เดิมเท่านั้น
+
+### #57: opt-in ขนาด `/tmp` ของ runtime สังเคราะห์
+
+เรียก `processDriver({ isolated: true, tmpfsBytes: 16 * 1024 * 1024 })` จากโค้ด
+operator ที่เชื่อถือได้เพื่อกำหนด byte limit ของ private `/tmp` ด้วย Bubblewrap
+`--size … --tmpfs /tmp` ก่อนเริ่ม Node และ drop capabilities ทั้งหมดในโหมดนี้
+ขนาดต้องเป็น safe integer บวกและหาร 65536 ลงตัว (รองรับ Linux page size ไม่เกิน 64 KiB)
+ไม่รับค่าจากผู้ใช้ runtime; ค่าผิดหรือใช้โดยไม่เปิด isolation จะ throw ก่อน spawn
+Bubblewrap ที่ไม่รองรับ option หรือ mount ไม่สำเร็จต้องเริ่มไม่ได้ ไม่มี fallback
+ค่าเดิมไม่เปลี่ยนและยังไม่มีการเปิดจาก environment หรือ Gateway production
+
+ทดสอบด้วย Node >=24: `node --import tsx --import ./server/src/register.mjs server/test/runtime-tmpfs.test.ts`
+ใช้ workspace ชั่วคราวและเขียนไม่เกิน 2 MiB เพื่อพิสูจน์ ENOSPC / ลบแล้วเขียนใหม่
+และเริ่ม runtime จริงผ่าน IPC; ต้องมีสิทธิ์สร้าง unprivileged user namespaces
+นี่จำกัดเฉพาะ byte allocation ใน `/tmp` ไม่ใช่ inode limit, memory/cgroup limit,
+`/dev/shm`, writable namespace root หรือ disk quota ของ Workspace ไม่แก้ same UID/user bus,
+mount loss หรือ cleanup หลัง manager crash; #57 ยังไม่เสร็จและยังไม่เหมาะกับ production
+
+ผลทดสอบบน host นอก sandbox ที่รายงานไว้ยืนยัน ENOSPC จริงและเขียนใหม่ได้หลังลบ
+แต่ใน integration worktree นี้ Bubblewrap สร้าง user namespace ไม่ได้ จึงยังไม่ยืนยัน
+runtime isolation ที่นี่ และไม่ถือว่า isolation test ผ่าน ผลบน host ไม่ได้พิสูจน์
+Workspace disk quota หรือ production isolation

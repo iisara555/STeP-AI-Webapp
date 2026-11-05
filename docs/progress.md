@@ -1,5 +1,21 @@
 # Progress
 
+## #57 · opt-in bounded private tmpfs (integration port)
+
+- Port เฉพาะ `tmpfsBytes` validation, Bubblewrap `--size … --tmpfs /tmp`, opt-in
+  capability drop และ targeted tests จาก followup ที่อ่านอย่างเดียว คง lifecycle,
+  start/stop admission, stop timeout และ confirmed cleanup ของ integration เดิม
+  ไม่เปิดจาก environment หรือ production Gateway และไม่ใช่ Workspace disk quota
+- Red-green: validation/arguments ล้มเหลวก่อนแก้และผ่านหลังแก้; targeted tmpfs ผ่าน 3/4
+  อีก 1 isolation test ล้มเหลวเพราะ sandbox ไม่อนุญาต user namespace ไม่ skip หรือถือว่าผ่าน
+  ผล ENOSPC จริง/ลบแล้วเขียนใหม่บน host นอก sandbox เป็นผลที่ผู้ใช้รายงาน ไม่ใช่ผลรันซ้ำที่นี่
+  และไม่ได้พิสูจน์ Workspace quota หรือ production isolation
+- Nearby startup timeout/cleanup/stop admission ผ่าน 19 tests; `npm run check` ผ่าน frontend
+  tsc แต่ server checker ติด spawnSync EPERM (Node 22.22.1; repo ต้องการ >=24)
+  ไม่รันซ้ำหรือ bypass combined prettier+check ที่เคยถูก lifecycle scan guard ปฏิเสธ
+  ไม่รับรอง readiness; full required checks และ real-account/deployment acceptance ยังไม่ครบ
+  ไม่มี production, secrets, GitHub, การเขียน worktree อื่น, commit หรือ push
+
 ## #58 · Gateway invitation management (partial)
 
 - Admin invitation expiry review: เพิ่ม synchronous credential validity check ภายใน transaction

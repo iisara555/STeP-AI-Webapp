@@ -41,8 +41,16 @@ export type RuntimeReply =
   | { type: 'result'; nonce: number; ok: true; result: unknown }
   | { type: 'result'; nonce: number; ok: false; code: string };
 
+// Limit only the private /tmp mount, not workspace disk, inode usage or total runtime memory.
+// Page-aligned sizes avoid kernel rounding above the requested bound (Linux pages <= 64 KiB).
+function validateTmpfsBytes(bytes: number | undefined) {
+  if (bytes !== undefined && (!Number.isSafeInteger(bytes) || bytes < 65536 || bytes % 65536 !== 0))
+    throw new Error('INVALID_TMPFS_LIMIT');
+}
+
 /** Namespace mounts for the synthetic-only sandbox. Missing prerequisites fail closed. */
-export function isolatedRuntimeArgs(spec: RuntimeSpec): string[] {
+export function isolatedRuntimeArgs(spec: RuntimeSpec, tmpfsBytes?: number): string[] {
+  validateTmpfsBytes(tmpfsBytes);
   const appRoot = resolve(import.meta.dirname, '../../..');
   const nodeDir = dirname(process.execPath);
   const binds = [
@@ -63,10 +71,12 @@ export function isolatedRuntimeArgs(spec: RuntimeSpec): string[] {
     '--disable-userns',
     '--die-with-parent',
     '--new-session',
+    ...(tmpfsBytes === undefined ? [] : ['--cap-drop', 'ALL']),
     '--proc',
     '/proc',
     '--dev',
     '/dev',
+    ...(tmpfsBytes === undefined ? [] : ['--size', String(tmpfsBytes)]),
     '--tmpfs',
     '/tmp',
     ...binds.flatMap((path) => ['--ro-bind', path, path]),
@@ -84,7 +94,15 @@ export function processDriver({
   startTimeoutMs = 30_000,
   isolated = false,
   stopTimeoutMs = 5_000,
+  tmpfsBytes,
+}: {
+  startTimeoutMs?: number;
+  isolated?: boolean;
+  stopTimeoutMs?: number;
+  tmpfsBytes?: number;
 } = {}): RuntimeDriver {
+  validateTmpfsBytes(tmpfsBytes);
+  if (tmpfsBytes !== undefined && !isolated) throw new Error('TMPFS_REQUIRES_ISOLATION');
   const start: NonNullable<RuntimeDriver['startWithAdmission']> = async (spec, admit) => {
     let child!: ChildProcess;
     let admissionError: unknown;
@@ -97,7 +115,13 @@ export function processDriver({
           cwd: spec.filesDir,
           env: { ...runtimeEnv(spec), ...(isolated ? { STEP_SYNTHETIC_PROVIDER: '1' } : {}) },
           ...(isolated ? { execPath: '/usr/bin/bwrap' } : {}),
-          execArgv: [...(isolated ? isolatedRuntimeArgs(spec) : []), '--import', TSX, '--import', REGISTER],
+          execArgv: [
+            ...(isolated ? isolatedRuntimeArgs(spec, tmpfsBytes) : []),
+            '--import',
+            TSX,
+            '--import',
+            REGISTER,
+          ],
           stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
           serialization: 'json',
         });
