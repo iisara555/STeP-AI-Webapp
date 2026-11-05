@@ -211,12 +211,17 @@ export class RuntimeManager {
   }
 
   /** Cancels a running answer. A stopped runtime has nothing running, so there is nothing to cancel. */
-  async cancel(actor: string, workspaceId: string, sessionId: string) {
+  async cancel(
+    actor: string,
+    workspaceId: string,
+    sessionId: string,
+    dispatch: (send: () => Promise<{ ok: true }>) => Promise<{ ok: true }> = (send) => send(),
+  ) {
     const ref = parse(SessionRef, { sessionId }, 'INVALID_INPUT');
     const record = await readRecord(this.dataRoot, actor, workspaceId);
     const entry = this.live.get(this.key(record));
     if (!entry?.handle || entry.state !== 'running') throw new WorkspaceError('RUNTIME_NOT_RUNNING');
-    await entry.handle.call('cancel', ref);
+    await dispatch(() => entry.handle!.call('cancel', ref));
   }
 
   /** Receives the progress events of the owner's Workspace, across stops and resumes. Returns an unsubscribe. */

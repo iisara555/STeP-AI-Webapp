@@ -1114,6 +1114,78 @@ test('admin revocation during run preparation prevents implicit conversation cre
   }
 });
 
+test('cross-process revoke before cancel dispatch prevents the runtime cancel', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'step-cancel-revoke-'));
+  const db = join(dir, 'invites.sqlite');
+  const base = new Set(['root@step.example', 'alice@step.example']);
+  const store = new InvitationStore(db, ['step.example'], new Set(['root@step.example']));
+  const runtime = heldDriver();
+  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const ready = new Promise<void>((resolve) => (entered = resolve));
+  const cancel = manager.cancel.bind(manager);
+  manager.cancel = async (...args) => {
+    entered();
+    await gate;
+    return cancel(...args);
+  };
+  const audit = () => {};
+  const runs = new RunService(manager, audit);
+  const server = createGateway({
+    manager,
+    runs,
+    audit,
+    invitations: store,
+    baseInvitations: () => base,
+    authenticate: async (header) => {
+      const who = PEOPLE[header?.replace(/^Bearer /, '') ?? ''];
+      return who && store.invited(base).has(who.email) ? who : null;
+    },
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const call = (path: string, init: RequestInit = {}) =>
+    fetch(url + path, {
+      ...init,
+      headers: {
+        authorization: 'Bearer alice',
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+      },
+    });
+  try {
+    const workspace = await (await call('/api/workspaces', post({ name: 'race' }))).json();
+    const start = await call(`/api/workspaces/${workspace.id}/runs`, post({ text: 'synthetic' }));
+    assert.equal(start.status, 202);
+    const run = await start.json();
+    const request = call(`/api/workspaces/${workspace.id}/runs/${run.id}/cancel`, { method: 'POST' });
+    await ready;
+    const moduleUrl = new URL('../src/gateway/invitation-store.ts', import.meta.url).href;
+    const script = `import { InvitationStore } from ${JSON.stringify(moduleUrl)};
+      const store = new InvitationStore(process.argv[1], ['step.example'], new Set(['root@step.example']));
+      store.change('root@step.example', 'alice@step.example', false, new Set(['root@step.example', 'alice@step.example']));
+      store.close();`;
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, db], {
+      stdio: 'inherit',
+    });
+    const [code] = await once(child, 'exit');
+    assert.equal(code, 0);
+    release();
+    assert.equal((await request).status, 401);
+    assert.deepEqual(runtime.cancels, [], 'cancel must not reach the runtime after revocation commits');
+    assert.equal(runs.get('alice', workspace.id, run.id).status, 'running');
+  } finally {
+    release();
+    server.closeAllConnections();
+    await new Promise<void>((done) => server.close(() => done()));
+    await manager.shutdown();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('admin revoke before runtime dispatch prevents the queued ask across invitation store connections', async () => {
   const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
   const dir = await mkdtemp(join(tmpdir(), 'step-dispatch-revoke-'));

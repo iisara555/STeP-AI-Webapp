@@ -10,11 +10,18 @@
   Workspace isolation, revocation of file-based invitations, reinvitation and reopening the store.
 - Still open: admin UI, email delivery, expiry, target-identifying audit, cancellation of existing runs
   on revocation, real Google accounts, gateway process restart, and production acceptance.
+- Run cancellation now uses the same invitation SQLite fence at synchronous runtime IPC enqueue. A synthetic
+  HTTP test first reproduced cancellation after another process committed revocation, then passed with the fence.
+  A cancel enqueued before revocation may still take effect afterwards; revocation does not cancel running work.
+  This ordering requires cooperating processes sharing the same correctly locking invitation database.
+  Node 26.12.1 checks: engine 65/65, unit 117/117, database 29/29, check, build and engine-pin passed.
+  Cloud Playwright: two desktop tests could not launch without `libatk-1.0.so.0`; two mobile tests skipped.
+  Node reported a `module.register()` deprecation; the build reported a large-chunk warning.
 - Direct and implicit run-preparation conversation creation now use the invitation SQLite fence at the
   synchronous runtime IPC enqueue. Two synthetic HTTP tests first reproduced a conversation created after
   revocation during runtime startup, then passed with the fence. This ordering requires all gateway and admin
   processes to share the same correctly locking database. An enqueue before revocation can still create a
-  conversation afterwards; runtime startup, workspace create/start/stop and cancel remain unfenced.
+  conversation afterwards; runtime startup and workspace create/start/stop remain unfenced.
   Local checks: engine 64/64, unit 117/117, database 29/29, check, build and engine-pin passed using
   Node 22.22.1 (below the project's >=24 requirement; SQLite emitted experimental warnings). Cloud Playwright
   desktop could not launch without `libatk-1.0.so.0`; both mobile cases were skipped by the suite.

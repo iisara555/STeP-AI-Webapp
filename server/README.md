@@ -89,7 +89,7 @@ also close on socket backpressure or more than 128 pending events; clients must 
 received event ID. A replay exceeding that pending limit emits a `reset` instead of replaying the gap;
 the client must reload conversation state. Run preparation can start a runtime before admission. For administrator
 revocations, the gateway serializes the SQLite denial and the synchronous `newConversation` IPC enqueue
-(both the direct endpoint and implicit run preparation) and `ask` IPC enqueue in the same invitation database:
+(both the direct endpoint and implicit run preparation), `ask` and `cancel` IPC enqueue in the same invitation database:
 if the denial commits first, the corresponding request is not enqueued;
 if enqueue happens first, revocation can succeed afterwards and does not cancel the run. The same SQLite
 ordering fences each private HTTP response enqueue and each private SSE event write: a denial committed first
@@ -104,7 +104,8 @@ This guarantee requires every gateway and admin writer to use this code and the 
 filesystem with working SQLite locks; separate database copies, older processes, or direct database edits that
 ignore the protocol are not coordinated. It covers IPC enqueue, not when the child receives the message or
 makes provider requests. An enqueue before revocation may create a conversation afterwards. It does not stop
-existing runs or fence Workspace creation/start/stop, cancellation or other in-flight side effects.
+existing runs or fence Workspace creation/start/stop or other in-flight side effects. A cancel enqueued before
+revocation can still take effect afterwards; revocation itself does not cancel a run.
 
 An operator file edit is **not** serialized with dispatch or delivery: it takes effect on subsequent file
 reads, but previously authorized work or private output can still be enqueued after the file is changed.

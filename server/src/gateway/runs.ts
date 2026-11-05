@@ -205,13 +205,18 @@ export class RunService {
   }
 
   /** Asks the runtime to stop; the run ends as `cancelled` when the engine has stopped it. */
-  async cancel(actor: string, workspaceId: string, runId: string): Promise<Run> {
+  async cancel(
+    actor: string,
+    workspaceId: string,
+    runId: string,
+    dispatch: (send: () => Promise<{ ok: true }>) => Promise<{ ok: true }> = (send) => send(),
+  ): Promise<Run> {
     const run = this.owned(actor, workspaceId, runId);
     if (run.status !== 'running') throw new GatewayError('RUN_NOT_ACTIVE');
     // A cancel right after the start must not overtake the request it cancels.
     await run.dispatched;
     if (run.status !== 'running') throw new GatewayError('RUN_NOT_ACTIVE');
-    await this.manager.cancel(actor, workspaceId, run.sessionId);
+    await this.manager.cancel(actor, workspaceId, run.sessionId, dispatch);
     this.audit({ actor, action: 'run.cancel', workspaceId, runId, outcome: 'requested' });
     return this.view(run);
   }

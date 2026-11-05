@@ -183,7 +183,10 @@ export function createGateway(options: GatewayOptions) {
     [
       'POST',
       new RegExp(`^/api/workspaces/${WS}/runs/${RUN}/cancel$`),
-      async ({ who, params }) => runs.cancel(who.userId, params[0], params[1]),
+      async ({ who, params }) =>
+        runs.cancel(who.userId, params[0], params[1], (send) =>
+          options.invitations ? options.invitations.dispatch(who.email, send) : send(),
+        ),
     ],
     [
       'GET',
