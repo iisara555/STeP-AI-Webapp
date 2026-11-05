@@ -62,7 +62,15 @@ export class InvitationStore {
     if (this.admins.has(normalized) || (active && !base.has(normalized))) throw new GatewayError('FORBIDDEN');
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      validateCredential();
+      const validation: unknown = validateCredential();
+      if (
+        validation !== undefined &&
+        validation !== null &&
+        typeof (validation as PromiseLike<unknown>).then === 'function'
+      ) {
+        void Promise.resolve(validation).catch(() => {});
+        throw new Error('CREDENTIAL_VALIDATION_NOT_SYNCHRONOUS');
+      }
       if (!this.admins.has(actor) || !this.invited(base).has(actor)) throw new GatewayError('FORBIDDEN');
       this.db
         .prepare(
