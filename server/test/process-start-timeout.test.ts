@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ChildProcess } from 'node:child_process';
@@ -20,7 +21,7 @@ test('shutdown cannot finish while the timed-out startup child is still alive', 
   };
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver: processDriver({ startTimeoutMs: 1 }),
   });
   try {
@@ -58,7 +59,7 @@ test('failed signals retain a live child and shutdown reports failure within a b
   };
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     maxRunning: 1,
     driver: processDriver({ startTimeoutMs: 1, stopTimeoutMs: 10 }),
   });
@@ -89,7 +90,7 @@ test('hung connect is timed out and shutdown confirms the actual child exit', as
   const driver = processDriver({ stopTimeoutMs: 100 });
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver: {
       async start(spec) {
         const handle = await driver.start(spec);

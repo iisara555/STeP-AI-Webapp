@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './quota.ts';
 // A Gateway for the browser checks of Cloud Workspace mode (test/e2e/cloud-workspace.spec.ts). Real HTTP routes,
 // runs and event stream; the runtime streams a scripted answer over a few seconds and no AI provider is called.
 // It accepts one synthetic credential, never a Google account.
@@ -83,7 +84,11 @@ function scriptedDriver(): RuntimeDriver {
 }
 
 const dataRoot = await mkdtemp(join(tmpdir(), 'step-e2e-gateway-'));
-const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot, driver: scriptedDriver() });
+const manager = new RuntimeManager({
+  workspacesPerUser: 10,
+  dataRoot: provisionTestQuota(dataRoot, 10),
+  driver: scriptedDriver(),
+});
 const authenticate: Authenticator = async (header) => {
   const payload = /^Bearer [^.]+\.([^.]+)\.[^.]+$/.exec(header ?? '')?.[1];
   if (!payload) return null;

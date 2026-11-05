@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -17,15 +18,16 @@ const driver = {
   },
 };
 
-test('crash during first policy transaction leaves the canonical store recoverable', async () => {
+test('crash during first policy transaction leaves ordinary startup fail closed', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'quota-init-crash-'));
   try {
     const script = `
       import { DatabaseSync } from 'node:sqlite';
       import { RuntimeManager } from './server/src/workspace/manager.ts';
+      import { initializeWorkspaceQuota } from './server/src/workspace/quota-store.ts';
       const exec = DatabaseSync.prototype.exec;
       DatabaseSync.prototype.exec = function(sql) { if (sql.startsWith('CREATE TABLE policy')) process.exit(17); return exec.call(this, sql); };
-      new RuntimeManager({dataRoot: process.argv[1], workspacesPerUser: 1, driver: {}});
+      initializeWorkspaceQuota(process.argv[1], 1);
     `;
     await assert.rejects(
       promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, dir], {
@@ -34,15 +36,17 @@ test('crash during first policy transaction leaves the canonical store recoverab
       (e: any) => e.code === 17,
     );
     await assert.rejects(stat(join(dir, 'workspace-quota.sqlite')), { code: 'ENOENT' });
-    const manager = new RuntimeManager({ dataRoot: dir, workspacesPerUser: 1, driver });
-    await manager.create('alice', { name: 'one' });
-    await assert.rejects(manager.create('alice', { name: 'two' }), /QUOTA_WORKSPACES/);
+    assert.throws(
+      () => new RuntimeManager({ dataRoot: dir, workspacesPerUser: 1, driver }),
+      /QUOTA_POLICY_REQUIRED/,
+    );
+    await assert.rejects(stat(join(dir, 'workspace-quota.sqlite')), { code: 'ENOENT' });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('simultaneous first starts atomically agree on one policy', async () => {
+test('simultaneous explicit provisioning atomically agrees on one policy', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'quota-init-race-'));
   try {
     const script = `
@@ -50,6 +54,7 @@ test('simultaneous first starts atomically agree on one policy', async () => {
       import { existsSync, writeFileSync } from 'node:fs';
       import { join } from 'node:path';
       import { RuntimeManager } from './server/src/workspace/manager.ts';
+      import { initializeWorkspaceQuota } from './server/src/workspace/quota-store.ts';
       const [dir, mine, other, limit] = process.argv.slice(1);
       const exec = DatabaseSync.prototype.exec;
       let waited = false;
@@ -64,7 +69,7 @@ test('simultaneous first starts atomically agree on one policy', async () => {
         }
         return exec.call(this, sql);
       };
-      try { new RuntimeManager({dataRoot: dir, workspacesPerUser: Number(limit), driver: {}}); console.log('OK'); }
+      try { initializeWorkspaceQuota(dir, Number(limit), {onboardExistingRoot:dir}); console.log('OK'); }
       catch (e) { console.log(e.message); }
     `;
     const execute = (root: string, mine: string, other: string, limit: number) =>
@@ -92,6 +97,8 @@ test('asynchronous admission rejection does not crash the process or publish', a
   try {
     const script = `
       import { RuntimeManager } from './server/src/workspace/manager.ts';
+      import { initializeWorkspaceQuota } from './server/src/workspace/quota-store.ts';
+      initializeWorkspaceQuota(process.argv[1], 1);
       const manager = new RuntimeManager({dataRoot: process.argv[1], workspacesPerUser: 1, driver: {start: async () => {throw Error('unused')}}});
       try { await manager.create('alice', {name:'one'}, async publish => { await Promise.resolve(); publish(); }); }
       catch (e) { console.log(e.message); }
@@ -116,6 +123,8 @@ test('swallowed rename failure cannot be mistaken for a successful publication',
       import fs from 'node:fs';
       import {syncBuiltinESMExports} from 'node:module';
       import {RuntimeManager} from './server/src/workspace/manager.ts';
+      import { initializeWorkspaceQuota } from './server/src/workspace/quota-store.ts';
+      initializeWorkspaceQuota(process.argv[1], 1);
       const manager = new RuntimeManager({dataRoot: process.argv[1], workspacesPerUser: 1, driver: {}});
       fs.renameSync = () => { throw Error('injected'); }; syncBuiltinESMExports();
       try { await manager.create('alice', {name: 'one'}, publish => { try { publish(); } catch {} }); console.log('CREATED'); }
@@ -139,6 +148,8 @@ test('quota commit failure reports the published workspace for recovery', async 
     const script = `
       import { DatabaseSync } from 'node:sqlite';
       import { RuntimeManager } from './server/src/workspace/manager.ts';
+      import { initializeWorkspaceQuota } from './server/src/workspace/quota-store.ts';
+      initializeWorkspaceQuota(process.argv[1], 1);
       const manager = new RuntimeManager({dataRoot: process.argv[1], workspacesPerUser: 1, driver: {}});
       const exec = DatabaseSync.prototype.exec;
       let fail = true;
@@ -165,7 +176,11 @@ test('quota commit failure reports the published workspace for recovery', async 
 test('post-publication admission failure identifies the recoverable workspace', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'quota-outcome-'));
   try {
-    const manager = new RuntimeManager({ dataRoot: dir, workspacesPerUser: 1, driver });
+    const manager = new RuntimeManager({
+      dataRoot: provisionTestQuota(dir, 1),
+      workspacesPerUser: 1,
+      driver,
+    });
     let error: any;
     try {
       await manager.create('alice', { name: 'one' }, (publish) => {
@@ -187,7 +202,7 @@ test('post-publication admission failure identifies the recoverable workspace', 
 
 test('gateway reports uncertain publication without leaking the workspace id', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'quota-http-'));
-  const manager = new RuntimeManager({ dataRoot: dir, workspacesPerUser: 1, driver });
+  const manager = new RuntimeManager({ dataRoot: provisionTestQuota(dir, 1), workspacesPerUser: 1, driver });
   const audit = () => {};
   const server = createGateway({
     manager,

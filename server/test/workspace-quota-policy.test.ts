@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, rename, symlink } from 'node:fs/promises';
@@ -17,7 +18,7 @@ const driver = {
 test('managers sharing a root reject missing or conflicting workspace quota policies', async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-quota-policy-'));
   try {
-    new RuntimeManager({ dataRoot, driver, workspacesPerUser: 1 });
+    new RuntimeManager({ dataRoot: provisionTestQuota(dataRoot, 1), driver, workspacesPerUser: 1 });
     assert.throws(
       () => new RuntimeManager({ dataRoot, driver, workspacesPerUser: 2 }),
       /QUOTA_POLICY_MISMATCH/,
@@ -31,7 +32,11 @@ test('managers sharing a root reject missing or conflicting workspace quota poli
 test('gateway refuses a quota different from its manager policy', async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-quota-gateway-mismatch-'));
   try {
-    const manager = new RuntimeManager({ dataRoot, driver, workspacesPerUser: 1 });
+    const manager = new RuntimeManager({
+      dataRoot: provisionTestQuota(dataRoot, 1),
+      driver,
+      workspacesPerUser: 1,
+    });
     const audit = () => {};
     assert.throws(
       () =>
@@ -52,7 +57,7 @@ test('gateway refuses a quota different from its manager policy', async () => {
 test('missing policy in an existing store fails closed', async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-quota-missing-'));
   try {
-    new RuntimeManager({ dataRoot, driver, workspacesPerUser: 1 });
+    new RuntimeManager({ dataRoot: provisionTestQuota(dataRoot, 1), driver, workspacesPerUser: 1 });
     const db = new DatabaseSync(join(dataRoot, 'workspace-quota.sqlite'));
     db.exec('DELETE FROM policy');
     db.close();
@@ -68,7 +73,11 @@ test('missing policy in an existing store fails closed', async () => {
 test('workspace symlinks cannot bypass the quota', async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-quota-symlink-'));
   try {
-    const manager = new RuntimeManager({ dataRoot, driver, workspacesPerUser: 1 });
+    const manager = new RuntimeManager({
+      dataRoot: provisionTestQuota(dataRoot, 1),
+      driver,
+      workspacesPerUser: 1,
+    });
     const first = await manager.create('alice', { name: 'first' });
     const path = join(dataRoot, 'users', 'alice', 'workspaces', first.id);
     const moved = join(dataRoot, 'moved');
@@ -84,7 +93,11 @@ test('workspace symlinks cannot bypass the quota', async () => {
 test('publication cannot be deferred until after the quota lock is released', async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-quota-deferred-'));
   try {
-    const manager = new RuntimeManager({ dataRoot, driver, workspacesPerUser: 1 });
+    const manager = new RuntimeManager({
+      dataRoot: provisionTestQuota(dataRoot, 1),
+      driver,
+      workspacesPerUser: 1,
+    });
     let deferred!: () => void;
     await assert.rejects(
       manager.create('alice', { name: 'first' }, (publish) => {

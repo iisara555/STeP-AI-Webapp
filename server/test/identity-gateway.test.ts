@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm, stat } from 'node:fs/promises';
@@ -35,7 +36,7 @@ async function fixture(driver?: RuntimeDriver, timing: { idleMs?: number; sweepM
   });
   const gateway = await createIdentityGateway({
     identities,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     clientId: 'synthetic',
     origin,
     driver,

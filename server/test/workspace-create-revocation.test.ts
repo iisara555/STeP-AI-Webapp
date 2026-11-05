@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { googleIdTokenAuth } from '../src/gateway/auth.ts';
@@ -26,7 +27,7 @@ test('revocation while workspace creation is pending prevents publication', asyn
   );
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver: {
       start: async () => {
         throw new Error('unused');
@@ -101,7 +102,7 @@ test('token expiring after authentication but before publication leaves no works
   });
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver: {
       start: async () => {
         throw new Error('unused');
@@ -158,7 +159,7 @@ test('publication is fenced after preparation and denied staging is removed', as
   );
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver: {
       start: async () => {
         throw new Error('unused');
@@ -186,7 +187,7 @@ test('concurrent creates remain independent and errors after publication do not 
   const dir = await mkdtemp(join(tmpdir(), 'step-create-concurrent-'));
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver: {
       start: async () => {
         throw new Error('unused');

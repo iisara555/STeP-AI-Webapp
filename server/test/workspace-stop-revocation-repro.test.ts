@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -51,7 +52,11 @@ test('revocation before a pending workspace stop reaches the runtime prevents th
       };
     },
   };
-  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver });
+  const manager = new RuntimeManager({
+    workspacesPerUser: 10,
+    dataRoot: provisionTestQuota(dir, 10),
+    driver,
+  });
   // Observe entry to the real stopKey without delaying or replacing its implementation.
   const internal = manager as unknown as {
     stopKey: (

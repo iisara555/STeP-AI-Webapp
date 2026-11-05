@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -12,7 +13,7 @@ test('concurrent workspace requests cannot exceed the per-user limit', async () 
   const dir = await mkdtemp(join(tmpdir(), 'step-workspace-quota-'));
   const manager = new RuntimeManager({
     workspacesPerUser: 1,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 1),
     driver: {
       start: async () => {
         throw new Error('unused');

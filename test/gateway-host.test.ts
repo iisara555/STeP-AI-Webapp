@@ -1,3 +1,4 @@
+import { provisionTestQuota } from '../server/test/support/quota.ts';
 // The web app's Cloud Workspace host against a real Gateway (ADR 0001 phase 3b): the screens' own calls —
 // snapshot, session.create, run.start, run.read, session.read, run.cancel — with a held synthetic runtime.
 import { test } from 'node:test';
@@ -23,7 +24,11 @@ async function withGateway(
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-web-gateway-'));
   const runtime = heldDriver();
-  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    workspacesPerUser: 10,
+    dataRoot: provisionTestQuota(dataRoot, 10),
+    driver: runtime.driver,
+  });
   const authenticate: Authenticator = async (header) =>
     header === 'Bearer alice' ? { userId: 'alice', email: 'alice@step.example', admin: false } : null;
   const audit = () => {};

@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -31,7 +32,7 @@ test('failed startup cleanup retains capacity until shutdown retries successfull
   };
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver,
     maxRunning: 1,
     grant: () => {
@@ -93,7 +94,7 @@ test('shutdown waits for pending failed startup cleanup and retries the retained
   };
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver,
     maxRunning: 1,
     grant: () => ({ baseUrl: 'https://example.com', token: 'secret', model: 'model' }),
@@ -139,7 +140,7 @@ test('an orphan exit releases capacity without a cleanup retry', async () => {
   };
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver,
     maxRunning: 1,
     grant: () => {
@@ -175,7 +176,7 @@ test('a successful retry of unconfirmed driver startup cleanup clears the diagno
   };
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver: {
       start: async () => {
         throw new RuntimeStartCleanupError(handle);
@@ -218,7 +219,7 @@ test('shutdown during a hung connect waits for timeout and confirmed cleanup, re
   };
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
     driver,
     maxRunning: 1,
     connectTimeoutMs: 20,

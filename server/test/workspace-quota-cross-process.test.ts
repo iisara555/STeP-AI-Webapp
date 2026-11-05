@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -16,7 +17,7 @@ test('another process cannot bypass a gateway workspace quota via RuntimeManager
   const dir = await mkdtemp(join(tmpdir(), 'step-workspace-cross-process-'));
   const manager = new RuntimeManager({
     workspacesPerUser: 1,
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 1),
     driver: {
       start: async () => {
         throw new Error('unused');

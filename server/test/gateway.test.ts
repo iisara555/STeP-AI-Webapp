@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -41,6 +42,7 @@ async function withGateway(
   durableQuota = false,
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-gateway-'));
+  provisionTestQuota(dataRoot, quotas.workspacesPerUser);
   const runtime = heldDriver();
   const manager = new RuntimeManager({
     workspacesPerUser: quotas.workspacesPerUser,
@@ -140,12 +142,19 @@ test('gateway restart retains daily admissions under concurrent HTTP requests', 
       });
   }
   async function stop() {
-    server!.closeAllConnections();
-    await new Promise<void>((done) => server!.close(() => done()));
-    await manager!.shutdown();
-    store!.close();
+    if (server) {
+      server.closeAllConnections();
+      await new Promise<void>((done) => server!.close(() => done()));
+      server = undefined;
+    }
+    await manager?.shutdown();
+    manager = undefined;
+    store?.close();
+    store = undefined;
   }
   try {
+    // Provision once: restarting the gateway must only reopen the existing policy.
+    provisionTestQuota(dataRoot, quotas.workspacesPerUser);
     let call = await start();
     const workspace = await (await call('/api/workspaces', post({ name: 'restart' }))).json();
     const path = `/api/workspaces/${workspace.id}/runs`;
@@ -473,7 +482,11 @@ test('admin invitations grant and revoke access, persist across store reopen, an
   const path = join(dir, 'invites.sqlite');
   let store = new InvitationStore(path, ['step.example'], new Set(['root@step.example']));
   const runtime = heldDriver();
-  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    workspacesPerUser: 10,
+    dataRoot: provisionTestQuota(dir, 10),
+    driver: runtime.driver,
+  });
   const record = () => {};
   const base = new Set(['root@step.example', 'bob@step.example', 'alice@step.example']);
   store.change('root@step.example', 'alice@step.example', false, base);
@@ -1011,7 +1024,11 @@ test('admin revocation during runtime startup prevents conversation creation', a
     await gate;
     return start(...args);
   };
-  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    workspacesPerUser: 10,
+    dataRoot: provisionTestQuota(dir, 10),
+    driver: runtime.driver,
+  });
   const audit = () => {};
   const server = createGateway({
     manager,
@@ -1080,7 +1097,11 @@ test('admin revocation during run preparation prevents implicit conversation cre
     await gate;
     return start(...args);
   };
-  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    workspacesPerUser: 10,
+    dataRoot: provisionTestQuota(dir, 10),
+    driver: runtime.driver,
+  });
   const audit = () => {};
   const server = createGateway({
     manager,
@@ -1131,7 +1152,11 @@ test('cross-process revoke before cancel dispatch prevents the runtime cancel', 
   const base = new Set(['root@step.example', 'alice@step.example']);
   const store = new InvitationStore(db, ['step.example'], new Set(['root@step.example']));
   const runtime = heldDriver();
-  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    workspacesPerUser: 10,
+    dataRoot: provisionTestQuota(dir, 10),
+    driver: runtime.driver,
+  });
   let release!: () => void;
   let entered!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
@@ -1210,7 +1235,11 @@ test('admin revoke before runtime dispatch prevents the queued ask across invita
     ['step.example'],
     new Set(['root@step.example']),
   );
-  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: heldDriver().driver });
+  const manager = new RuntimeManager({
+    workspacesPerUser: 10,
+    dataRoot: provisionTestQuota(dir, 10),
+    driver: heldDriver().driver,
+  });
   let release!: () => void;
   let entered!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));

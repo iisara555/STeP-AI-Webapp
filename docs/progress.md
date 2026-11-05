@@ -1,5 +1,138 @@
 # Progress
 
+## #58 · Quota publication deadline (local, ยังไม่ ready)
+
+- รักษา uncommitted changes บน branch เดิม ไม่มี commit/push/GitHub/production/secrets หรือ worktree อื่น
+- Node 24.22.2: deterministic clock/wait regression จำลอง process กลับมาหลัง deadline 5 วินาที
+  พร้อม policy ที่เพิ่ง publish ครอบคลุมทั้ง witness และ candidate → witness → policy;
+  ก่อนแก้ล้มทั้ง 2 ข้อ (ไม่ throw) หลังแก้ผ่าน ตรวจ deadline ก่อนยอมรับ policy
+  คง fail closed ไม่ recreate policy และตรวจ inode ว่า policy/witness เดิมยังอยู่ พร้อม retry ใหม่ได้
+- Direct provisioning/policy/crash suite ผ่าน 48/48; build และ formatting ผ่าน
+  direct server types ยังมี 17 Harness diagnostics เดิม ไม่มี server diagnostic
+- เรียก npm check/test/test:db/test:engine และ Playwright identity-trial แล้ว:
+  check ติด spawnSync EPERM, test runners ติด tsx IPC EPERM และ Playwright webServer เริ่มไม่ได้
+  direct runner ใช้ --test-isolation=none เพื่อหลบ host subprocess restriction ไม่ได้ปิด workspace isolation
+  ไม่เรียก check:engine-pin เพราะติดต่อ GitHub ตามข้อห้ามผู้ใช้ ไม่มี real-account/deployment acceptance
+
+## #58 · Empty-root candidate interleaving (local, ยังไม่ ready)
+
+- รักษา uncommitted changes บน branch เดิม ไม่มี commit/push/GitHub/production/secrets หรือ worktree อื่น
+- Node 24.22.2: deterministic subprocess barrier หยุดผู้ชนะหลังสร้าง `.quota-init-*`
+  ก่อน witness; control/output อยู่ข้างนอก data root และทั้งสอง initializer ไม่ใช้ onboarding flag
+  ทดสอบกับ snapshot ก่อนแก้แล้วล้ม 2 ข้อด้วย `QUOTA_ONBOARDING_REQUIRED`; หลังแก้ limit ตรงสำเร็จ
+  ทั้งคู่ และ limit ต่างปฏิเสธด้วย `QUOTA_POLICY_MISMATCH`
+- Root ที่มีเฉพาะ candidate directories รอ publication ไม่เกิน 5 วินาทีรวมช่วง witness → policy
+  ตรวจ witness ซ้ำหลัง directory scan เพื่อรองรับ publication/cleanup ระหว่าง scan
+  ไม่อ่าน candidate และไม่ใช้ชื่อ directory เป็นอำนาจ: forged/stale directory, file, symlink,
+  root ที่มีข้อมูลอื่น และ candidate ที่หายระหว่างรอไม่สร้าง policy; lost policy ยัง fail closed
+  README บันทึก timeout/error และ retry หลังผู้ชนะจบไว้แล้ว
+- Direct provisioning 38/38, policy 5/5, crash 3/3, database isolation 10/10 และ build ผ่าน
+  บน Node 24.22.2; direct server types มีเพียง 17 Harness diagnostics เดิม ไม่มี server diagnostic
+- เรียก npm check/test/test:db/test:engine และ Playwright identity-trial แล้ว: spawnSync/tsx IPC
+  ถูก EPERM และ Playwright webServer เริ่มไม่ได้; direct cross-process/race/regressions ถูก host abort
+  ไม่ถือว่าผ่านหรือข้าม isolation; ไม่รัน check:engine-pin เพราะติดต่อ GitHub ตามข้อห้ามผู้ใช้
+  ไม่มี real-account/deployment acceptance และยังไม่พร้อม ready
+
+## #58 · Concurrent provisioning link interleaving (local, ยังไม่ ready)
+
+- รักษา uncommitted changes บน branch เดิม ไม่มี commit/push/GitHub/production/secrets หรือ worktree อื่น
+- Node 24.22.2 (default Node 22.22.1 ไม่ถึง requirement): deterministic subprocess barrier
+  หยุดผู้ชนะหลัง witness link ก่อน policy link แล้วเริ่ม initializer อีกตัว; red ได้
+  `QUOTA_POLICY_REQUIRED` ทั้ง limit ตรงและต่างกัน แม้ผู้ชนะสำเร็จ
+- รวม bounded observation wait 5 วินาทีสำหรับทั้ง witness ที่เห็นตอนเข้า init และ EEXIST
+  ตรวจ inode witness/paths ซ้ำ ไม่สร้าง policy จาก witness; ordinary startup ยัง fail closed ทันที
+  crash/established policy ที่หายยังปฏิเสธหลัง deadline ไม่มีการ repair/reset
+  README อธิบาย retry หลังผู้ชนะจบและ recovery เมื่อสูญหาย เพราะแยก slow/crash/deletion ไม่ได้
+- แยก stdout จาก warning stderr ใน concurrent provisioning และ crash subprocess tests
+- provisioning 31/31, policy 5/5 และ crash 3/3 ผ่าน; build ผ่าน บน Node 24.22.2
+  direct quota cross-process/race/regressions ถูก host abort ไม่ถือว่าผ่าน
+- เรียก npm check/test/test:db/test:engine และ Playwright identity-trial แล้ว:
+  spawnSync/tsx IPC EPERM และ webServer เริ่มไม่ได้; ไม่ skip isolation หรืออ้าง suite เต็มผ่าน
+  ไม่รัน check:engine-pin เพราะเรียก GitHub ซึ่งผู้ใช้ห้าม ไม่มี real-account/deployment acceptance
+
+## #58 · Quota onboarding review follow-up (local, ยังไม่ ready)
+
+- รักษางาน uncommitted ทั้งหมดบน branch เดิม ไม่มี commit/push/GitHub/production/secrets หรือ worktree อื่น
+- Node 24.22.2 red-first: subprocess exit ทันทีหลัง hard-link witness ของ legacy policy ที่ limit ไม่ตรง
+  ทำให้ startup ยอมรับ policy เดิม และ recursive mkdir สร้าง descendant ผ่าน symlink แม้ init ปฏิเสธ
+  ทั้งสอง regression ล้มก่อนแก้และผ่านหลังแก้
+- Legacy onboarding ตรวจ inode, table, row และ limit ภายใต้ SQLite write lock ก่อน publish witness
+  ด้วย hard link แบบไม่ทับของเดิม ไม่มี provisional witness และไม่ลบ witness ที่ reader อาจเห็นแล้ว
+  crash ก่อน link ยังไม่ให้อำนาจ; crash หลัง link ใช้ได้เฉพาะ policy ที่ผ่าน validation
+  ไม่พึ่ง rename หรือสมมติว่าไม่มี initializer พร้อมกัน
+- ตรวจ ancestor ที่มีอยู่ก่อนเขียน แล้วสร้าง directory ทีละระดับและตรวจซ้ำ ปฏิเสธ symlink โดยไม่สร้าง descendant
+  ยังไม่ fence hostile filesystem swaps ระหว่าง syscall หรือรับประกัน power-loss durability
+- Provisioning 29/29 ผ่าน รวม subprocess crash, reader ก่อน publication และ initializer พร้อมกัน
+  ของ root ใหม่/legacy ทั้ง limit ตรงและต่างกัน; build ผ่าน บน Node 24.22.2
+- npm check ติด spawnSync EPERM; npm test/test:db/test:engine ติด tsx IPC EPERM;
+  direct server types มีเฉพาะ 17 Harness diagnostics เดิม ไม่มี server diagnostic
+  Playwright identity-trial เริ่ม webServer ไม่ได้; ไม่เรียก check:engine-pin เพราะติดต่อ GitHub
+  ขัดขอบเขตผู้ใช้ ไม่มี real-account/deployment acceptance และยังไม่พร้อม ready
+- Direct database 29/29 ผ่าน; unit ที่ไม่ใช้ HTTP ผ่าน 111 ข้อ ส่วน gateway-host abort
+  เรียก engine ทุกไฟล์โดยตรงแล้ว: HTTP/child process บางไฟล์ abort หรือ listen EPERM;
+  isolation ยังล้ม 4 ข้อจาก host loopback/namespace ไม่ได้ skip/ปิด isolation
+  shutdown-cleanup ล้ม 1 ครั้งด้วย RUNTIME_MANAGER_SHUTTING_DOWN และ rerun ผ่าน 5/5 จึงบันทึกเป็น intermittent
+
+## #58 · Security follow-up: quota provisioning (local, ยังไม่ ready)
+
+- เก็บงาน uncommitted เดิมไว้บน branch เดิม ไม่มี commit/push/GitHub/production/secrets หรือ worktree อื่น
+- Node 24.22.2 red-first: regression ใหม่ล้ม 3 ข้อก่อนแก้ ได้แก่ init limit 1 → ลบ DB → init limit 9,
+  symlink policy ไปอีก root และ populated root ที่ไม่มีการยืนยัน onboarding
+- เพิ่ม `.workspace-quota-established` เป็น hard-link witness ก่อน publish policy: init และ ordinary startup
+  ปฏิเสธ policy ที่หาย รวม retry หลัง process ล้มระหว่าง witness กับ policy ไม่ใช้ witness ซ่อม DB อัตโนมัติ
+  populated/legacy root ต้องยืนยัน exact absolute root ผ่าน `--onboard-existing-root <absolute-root>`
+  และไม่สามารถ override witness เดิมได้; restore/destructive recovery เป็น operator workflow แยกใน README
+- ทุก policy boundary ตรวจ ancestor directory, policy, witness และ SQLite sidecars ปฏิเสธ symlink/unsafe types
+  ถือ O_NOFOLLOW descriptor และตรวจ inode ก่อน/หลัง SQLite open รวมก่อน publish; deterministic path-swap test ผ่าน
+  ไม่รับประกันป้องกัน privileged filesystem attacker, path race ทุก syscall หรือ power-loss durability
+- Crash-after-rename test provision ครั้งเดียวก่อน child เริ่ม แล้ว ordinary restart โดยไม่ provision
+  ยืนยัน Workspace เดิมยังนับ quota และ DB ที่ถูกลบทำให้ restart ล้ม; crash ระหว่าง initial transaction
+  ตรวจ ordinary startup ล้มโดยไม่เรียก provisioning เพื่อกลบ policy ที่หาย
+- ตรวจโดยตรง: provisioning 24/24, crash 3/3, quota policy 5/5; unit ที่ไม่ใช้ HTTP 113/113,
+  database 29/29, build และ formatting ผ่าน; server types มีเฉพาะ 17 Harness diagnostics เดิม ไม่มี server diagnostic
+- เรียก npm check/test/test:db/test:engine แล้ว: host ปฏิเสธ spawnSync/tsx IPC ด้วย EPERM
+  direct engine ทุกไฟล์ถูกรัน: บาง HTTP/child-process abort หรือ listen EPERM; isolation ยังล้ม 4 ข้อจาก
+  Bubblewrap namespace ใช้ไม่ได้ ไม่ skip/ปิด isolation; Playwright identity-trial เริ่ม webServer ไม่ได้
+  ไม่รัน check:engine-pin เพราะ wrapper เรียก GitHub ls-remote ซึ่งผู้ใช้ห้าม งานยังไม่พร้อม ready
+  ต้องยืนยัน suite เต็มบน host ที่รองรับ ไม่มี real-account/deployment acceptance
+
+## #58 · นโยบาย quota ร่วมของ Workspace (รอตรวจทาน)
+
+- Follow-up ของผล parent (122 tests, 9 failures): บน Node 24.22.2 ทำซ้ำได้ว่า fixture
+  `withGateway` และ restart test ยังไม่ได้ provision policy ก่อนสร้าง RuntimeManager
+  แก้ fixture ให้ provision ตาม quota ของแต่ละ test; restart provision ครั้งเดียวก่อน startup แรก
+  และ cleanup รองรับ startup ที่ล้มโดยไม่กลบ error เดิม ไม่เปลี่ยน production fail-closed policy
+- ตรวจ follow-up: policy/provisioning 12/12, unit ที่ไม่ใช้ HTTP 113/113, database 29/29,
+  build และ formatting ผ่าน; frontend types ผ่าน, server ไม่มี diagnostic นอก Harness (17 ข้อเดิม)
+  targeted HTTP หลังแก้ abort ใน Node callback scope; loopback probe ยืนยัน `listen EPERM`
+  รัน engine ทั้ง 23 ไฟล์แยกกันแล้ว แต่ HTTP/child-process บางไฟล์ abort หรือถูก host ขัดขวาง
+  isolation ยังล้ม 4 ข้อจาก loopback/namespace ที่ใช้ไม่ได้ ไม่ปิดหรือข้าม isolation tests
+  npm check ถูก spawnSync EPERM; npm test/test:db/test:engine ถูก tsx IPC EPERM;
+  Playwright cloud เริ่ม webServer ไม่ได้ ยังต้องยืนยัน gateway suite บน host ที่รองรับ
+  ไม่รัน engine-pin wrapper เพราะเรียก GitHub (`ls-remote`) ซึ่งอยู่นอกขอบเขตที่ผู้ใช้อนุญาต
+- แยก operator provisioning (`npm run workspace:quota:init -- <data-root> <limit>`) จาก startup
+  ของ Gateway/RuntimeManager; startup และ publication เปิด SQLite ด้วย `mode=rw` ที่ไม่สร้างไฟล์
+  การลบ policy ที่ใช้งานแล้วจึงไม่ทำให้เริ่มใหม่ด้วย limit เดิมหรือต่างกันได้ และ manager เดิมก็ publish ไม่ได้
+  policy เสีย/ไม่มี row ไม่ถูกซ่อมอัตโนมัติ คำสั่ง provisioning ไม่ทับ policy เดิมและตรวจ limit ที่ผู้ชนะกำหนดไว้
+- Provisioning ใช้ private candidate ที่ commit/close ก่อน hard link แบบไม่ทับไฟล์ เพื่อรองรับผู้ดูแลเริ่มพร้อมกัน
+  limit เดียวกันสำเร็จทั้งคู่; limit ต่างกันยอมรับเพียง policy เดียว อีกคำสั่งปฏิเสธ
+  invitation/owner fences เดิมยังอยู่ ไม่มี SQLite lock ข้าม await; fixture สังเคราะห์ provision อย่างชัดเจน
+  ดู workflow สำหรับ root ใหม่, migration ครั้งแรก, backup/recovery และการหยุด writer ใน `server/README.md`
+- Red-first บน Node 24.22.2 พบ startup สร้าง policy เองและไฟล์ที่ถูกลบยอมรับ limit ใหม่ก่อนแก้
+  หลังแก้ focused policy tests 12/12 ผ่าน รวม manager ที่มี Workspace แล้ว, corruption, missing row,
+  explicit init, mismatch และ barrier ระหว่าง OS processes ก่อน publish; CLI init/repeat/mismatch ตรวจแล้ว
+- Node 24.22.2: build ผ่าน; direct unit 113 ผ่าน (ไฟล์ gateway-host ถูก host ขัดขวาง), direct database 29/29 ผ่าน
+  direct frontend types ผ่าน และ server types ไม่มี diagnostic ของ server (มี 17 diagnostic ของ Harness
+  ที่ wrapper เดิมเว้นให้ Desktop CI); formatting ผ่าน การรัน npm check/test/test:db/test:engine ตามปกติ
+  ถูก `EPERM` ของ spawnSync/tsx IPC ขัดขวาง; direct HTTP tests พบ loopback listen `EPERM` และบาง process
+  abort ใน Node callback scope ไม่ถือว่าผ่าน Engine isolation tests ล้ม 4 ข้อเพราะ Bubblewrap เปิด namespace ไม่ได้
+  ไม่ข้าม/ปิด isolation tests; Playwright cloud เริ่ม webServer ไม่สำเร็จใน host นี้
+  engine-pin wrapper ถูก spawnSync `EPERM` ขัดขวาง ไม่ตรวจ remote GitHub ตามขอบเขตงานนี้
+- ยังไม่พร้อมเรียกว่า ready: ต้องรัน suite เต็มและ isolation/Playwright อีกครั้งบน host ที่รองรับ
+  ไม่มีการใช้บัญชีจริง, production acceptance, secrets, GitHub, push, deploy หรือ commit ในงานนี้
+  การซ่อม policy ต้องหยุด writer และกู้ backup ที่ตรวจสอบแล้ว ไม่ใส่ init ใน restart loop
+  operator file replacement ระหว่าง writer เปิด SQLite และ power-loss durability ของ filesystem ไม่ได้ถูก fence
+
 ## #58 · Gateway invitation management (partial)
 
 - Workspace creation now checks the verified Google ID token's expiration synchronously inside the SQLite

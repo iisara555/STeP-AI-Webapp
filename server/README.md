@@ -133,14 +133,66 @@ STEP_APP_ORIGIN=https://… STEP_AI_BASE_URL=… STEP_AI_MODEL=… STEP_AI_KEY=�
 npm run gateway        # ฟังที่ 127.0.0.1:8787 ให้ reverse proxy/Cloudflare Tunnel อยู่ข้างหน้า
 ```
 
-`STEP_QUOTA_WORKSPACES` is required and must match the policy of every process using the same data root.
-The first updated process initializes `workspace-quota.sqlite` with that policy; a missing, invalid or mismatched
-policy fails closed. Stop all older writers before upgrading: only cooperating processes using the same database
-on a filesystem with working SQLite locks are coordinated. Keep the database with the workspace data; changing
-the limit requires stopping all writers and an explicit operator migration of its policy, not deleting the file
-while processes are running. Existing workspace directories count toward the limit, even after a crash between
-publication and SQLite commit. Trial processes currently use an explicit limit of 10 and refuse a different
-existing policy. Quota enforcement does not serialize edits to the separate operator invite file.
+ก่อนเริ่ม Gateway ครั้งแรก ผู้ดูแลต้องกำหนดนโยบาย quota แยกจาก startup (Node >=24):
+
+```bash
+npm run workspace:quota:init -- /srv/step/data 10
+# จากนั้นตั้ง STEP_DATA_ROOT=/srv/step/data และ STEP_QUOTA_WORKSPACES=10 แล้วเริ่ม Gateway ตามด้านบน
+```
+
+คำสั่งนี้ใช้สำหรับ provisioning ที่ผู้ดูแลอนุมัติเท่านั้น ไม่ใส่ใน startup script หรือ restart loop
+รวมถึง trial ที่ใช้ limit 10 (`STEP_TRIAL_DATA` / `STEP_IDENTITY_DATA`) ต้อง provision root ก่อนเริ่มเช่นกัน
+สำหรับ root เดิมที่ยังไม่เคยมีนโยบาย ให้หยุด writer รุ่นเก่าทั้งหมด ตรวจจำนวน Workspace และอนุมัติ limit
+ก่อนรันคำสั่งครั้งเดียว โดยยืนยัน absolute path ที่ตรวจสอบแล้วอย่างชัดเจน:
+`npm run workspace:quota:init -- /srv/step/data 10 --onboard-existing-root /srv/step/data`
+flag นี้ใช้รับ root เดิมที่ไม่เคยมี witness เท่านั้น ไม่ override policy ที่หายหรือเสีย
+คำสั่งไม่อ่านคำเชิญ ไม่ให้สิทธิ์ผู้ใช้ และไม่เริ่ม runtime หรือเรียก AI
+
+`workspace-quota.sqlite` เก็บนโยบายร่วมของทุก process; `STEP_QUOTA_WORKSPACES` ต้องตรงกับค่าที่ provision
+startup และการ publish เปิดไฟล์ที่มีอยู่เท่านั้น ถ้าไฟล์หาย เสีย ไม่มี policy หรือ limit ไม่ตรงจะปฏิเสธ
+โดยไม่สร้างหรือซ่อม policy อัตโนมัติ รวมถึงเมื่อไฟล์ถูกลบหลัง manager เริ่มแล้ว
+`.workspace-quota-established` เป็น hard link witness ที่สร้างก่อน publish policy และไม่เปิดด้วย SQLite
+สำหรับ legacy policy ที่มีอยู่แล้ว จะเปิด inode ที่ตรวจด้วย O_NOFOLLOW และตรวจ table, row และ limit
+ภายใต้ SQLite write lock ก่อนสร้าง witness แบบไม่ทับของเดิม; ไม่มี witness ชั่วคราวให้ reader เห็น
+หรือ cleanup ที่ลบ witness เมื่อ validation ล้ม หาก process ล้มก่อน link startup ยังปฏิเสธ
+หากล้มหลัง link legacy policy นั้นผ่าน validation แล้ว; ไม่ใช้ rename เพื่อสมมติว่าไม่มีผู้ชนะพร้อมกัน
+หาก policy หายแต่ witness ยังอยู่ ทั้ง init และ startup จะปฏิเสธ แม้ยืนยัน onboarding อีกครั้ง
+ต้องสำรอง witness และ policy เป็น inode เดียวกัน และกู้ทั้งคู่เมื่อหยุด writer แล้ว
+การ provision พร้อมกันใช้ไฟล์ชั่วคราวส่วนตัวและ hard link แบบไม่ทับของเดิม จึงเห็นเฉพาะ policy ที่ commit แล้ว
+หาก root มีเฉพาะ directory `.quota-init-*` ก่อน witness จะรอผู้ชนะ โดยไม่ต้องยืนยัน onboarding
+ชื่อ directory ไม่ให้อำนาจสร้าง policy: directory ปลอมหรือค้างที่ไม่มี witness จะจบด้วย
+`QUOTA_ONBOARDING_REQUIRED` ภายใน 5 วินาที และไม่สร้าง policy แม้ directory หายระหว่างรอ
+ข้อมูลเดิมชนิดอื่นยังต้องยืนยัน onboarding; ไม่อ่าน candidate หรือเดินตาม symlink
+หากเห็น witness ก่อน policy ทั้งตอนเข้า init และตอนแพ้ hard link จะรอ publication ไม่เกิน 5 วินาที
+(รวมเวลาที่รอ candidate ก่อน witness ถ้ามี)
+โดยไม่สร้างหรือซ่อม policy; limit เดียวกันสำเร็จเมื่อผู้ชนะ publish ภายในเวลานี้
+limit ต่างกันล้มเหลวด้วย `QUOTA_POLICY_MISMATCH` หลังตรวจ policy ของผู้ชนะ
+แยก process ที่ช้าจาก crash หรือ policy ที่ถูกลบไม่ได้: ครบเวลาให้ `QUOTA_POLICY_REQUIRED`
+หากยืนยันว่าผู้ชนะยังทำงานอยู่ ให้รอจบแล้วเรียก init ซ้ำ; หาก policy สูญหายให้ใช้ recovery ด้านล่าง
+ordinary startup ไม่รอและยังปฏิเสธ policy ที่หายทันที
+ไฟล์เดิมที่เสียหรือไม่มี policy จะไม่ถูกเขียนทับ หาก process ล้มก่อน publish อาจเหลือ `.quota-init-*`
+ที่ไม่ใช่นโยบายใช้งาน; หยุดผู้ provision ทั้งหมดก่อนล้าง directory ชั่วคราวเหล่านี้
+
+หาก policy ของ root ที่ใช้งานแล้วหายหรือเสีย ให้หยุด writer ทั้งหมดและกู้คืนจาก backup ที่ตรวจสอบแล้ว
+อย่าใช้ init เพื่อเปลี่ยน limit หรือแก้ไฟล์หาย การเปลี่ยน limit ต้องมี operator migration ที่ตรวจทานแยกต่างหาก
+ไม่มีคำสั่ง reset/reinitialize หรือเปลี่ยน limit ในงานนี้ ถ้าไม่มี backup ให้ทำ destructive recovery
+เป็นงาน operator แยก: หยุด writer ทุกตัว, เก็บ root เก่าและตรวจจำนวน Workspace, ขออนุมัตินโยบายใหม่,
+สร้าง root ใหม่แล้ว provision จากนั้นย้ายข้อมูลที่ตรวจสอบแล้วและยืนยันจำนวน/limit ก่อนสลับ configuration
+ห้ามลบ witness เพื่อหลบการปฏิเสธของ init; root เก่าที่ไม่มี witness อาจเป็น legacy หรือข้อมูลสูญหาย
+ผู้ดูแลต้องยืนยันประวัติจาก backup/audit ก่อนใช้ onboarding สำรอง policy พร้อม Workspace; directory ของ Workspace ที่มีอยู่ยังนับรวม
+แม้ process ล้มหลัง rename แต่ก่อน SQLite commit
+
+การประสานงานนี้ต้องใช้ writer รุ่นใหม่ทั้งหมดกับฐานข้อมูลเดียวกัน บน filesystem ที่รองรับ SQLite locks
+และ hard link อย่างถูกต้อง ไม่มี database lock ข้าม await; quota fence ครอบ synchronous publication
+ภายใต้ invitation fence เดิมเท่านั้น การแก้หรือลบไฟล์โดยผู้ดูแลขณะ writer เปิดฐานข้อมูลอยู่ไม่ได้ถูก fence
+(รวมถึง power-loss durability ของ filesystem) จึงต้องหยุด writer ก่อนซ่อม/ย้ายไฟล์
+ก่อนสร้าง root ตรวจ ancestor ที่มีอยู่ทั้งหมด แล้วสร้าง directory ทีละระดับและตรวจซ้ำ
+ทุก boundary ตรวจ ancestor directories, policy, witness และ SQLite sidecars ด้วย lstat
+ปฏิเสธ symlink และชนิดไฟล์ที่ไม่ปลอดภัย; การเปิด policy ถือ O_NOFOLLOW descriptor
+และเทียบ inode ก่อน/หลัง SQLite open เพื่อตรวจ path substitution เท่าที่ทำได้
+SQLite ยังเปิด pathname ของตนเอง จึงไม่รับประกันการป้องกันผู้โจมตีที่มีสิทธิ์เปลี่ยน filesystem
+ระหว่าง syscall หรือ privileged filesystem attacker และไม่รับประกัน power-loss durability
+Quota ไม่ serialize การแก้ operator invite file และไม่ได้เพิ่มสิทธิ์ให้ administrator เข้าถึงข้อมูลส่วนตัว
 
 ข้อจำกัดของ 3a:
 

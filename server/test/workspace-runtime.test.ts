@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, writeFile, symlink } from 'node:fs/promises';
@@ -20,7 +21,7 @@ async function withManager(
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-workspaces-'));
   const manager = new RuntimeManager({
     workspacesPerUser: 10,
-    dataRoot,
+    dataRoot: provisionTestQuota(dataRoot, 10),
     driver: processDriver(),
     ...options,
   });
