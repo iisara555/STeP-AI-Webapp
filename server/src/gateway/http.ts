@@ -113,8 +113,17 @@ export function createGateway(options: GatewayOptions) {
     [
       'POST',
       new RegExp(`^/api/workspaces/${WS}/stop$`),
-      async ({ who, params }) => {
-        const workspace = await manager.stop(who.userId, params[0]);
+      async ({ req, who, params }) => {
+        const workspace = await manager.stop(
+          who.userId,
+          params[0],
+          (signal) => (options.invitations ? options.invitations.dispatch(who.email, signal) : signal()),
+          async () => {
+            const current = await authenticate(req.headers.authorization);
+            if (!current || current.userId !== who.userId || current.email !== who.email)
+              throw new GatewayError('UNAUTHENTICATED');
+          },
+        );
         audit({
           actor: who.userId,
           action: 'workspace.stop',

@@ -120,6 +120,20 @@ export function processDriver({ startTimeoutMs = 30_000, isolated = false } = {}
       child.on('message', (message: RuntimeReply) => {
         if (message.type === 'event') for (const listener of eventListeners) listener(message.event);
       });
+      const stopWithAdmission = async (admit: (signal: () => void) => void) => {
+        let kill: ReturnType<typeof setTimeout> | undefined;
+        admit(() => {
+          if (child.exitCode !== null || child.signalCode !== null) return;
+          if (child.connected) child.disconnect();
+          else child.kill('SIGTERM');
+          kill = setTimeout(() => child.kill('SIGKILL'), 5_000);
+        });
+        try {
+          await exited;
+        } finally {
+          clearTimeout(kill);
+        }
+      };
       return {
         pid: child.pid,
         onExit: (listener) => void exited.then(listener),
@@ -131,14 +145,8 @@ export function processDriver({ startTimeoutMs = 30_000, isolated = false } = {}
           })),
         call: <M extends keyof RuntimeCalls>(method: M, params: RuntimeCalls[M]['params']) =>
           request(method, params) as Promise<RuntimeCalls[M]['result']>,
-        async stop() {
-          if (child.exitCode !== null || child.signalCode !== null) return;
-          const kill = setTimeout(() => child.kill('SIGKILL'), 5_000);
-          if (child.connected) child.disconnect();
-          else child.kill('SIGTERM');
-          await exited;
-          clearTimeout(kill);
-        },
+        stop: () => stopWithAdmission((signal) => signal()),
+        stopWithAdmission,
       };
     },
   };

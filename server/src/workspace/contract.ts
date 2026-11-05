@@ -111,6 +111,12 @@ export type RuntimeHandle = {
     params: RuntimeCalls[M]['params'],
   ): Promise<RuntimeCalls[M]['result']>;
   stop(): Promise<void>;
+  /**
+   * Call admit exactly once with the synchronous operation that performs the initial stop signal/enqueue.
+   * Never signal outside that callback or when admission throws. Resolve only after the runtime has stopped;
+   * drivers without this guarantee must omit the method and gateway stops will fail closed.
+   */
+  stopWithAdmission?(admit: (signal: () => void) => void): Promise<void>;
   /** Called once when the runtime ends for any reason, including stop(). */
   onExit(listener: (code: number | null) => void): void;
   /** Progress events of runs inside this runtime. */

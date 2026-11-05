@@ -2,6 +2,16 @@
 
 ## #58 · Gateway invitation management (partial)
 
+- Workspace stop now reauthenticates after pending starts and fences the process driver's synchronous
+  disconnect/signal with invitation revocation; the SQLite transaction ends before waiting for process exit.
+  Unsupported drivers fail closed for gateway stops; trusted idle/shutdown cleanup remains available. Concurrent
+  requests check authority separately, and failed stops retain the handle for retry. Ordering depends on all
+  administrators and gateways using the same correctly locking SQLite store. A stop admitted before revocation
+  may complete afterwards; operator-file changes cannot be made atomic with this SQLite fence.
+- Local Node 26 checks: engine 74/74, unit 117/117, database 29/29, build, check and engine-pin passed;
+  Playwright 86 passed and 2 mobile cloud cases were skipped. Chromium required local scratch copies of missing
+  system libraries. Real accounts and production deployment were not tested.
+
 - Added admin-only list, invite and revoke HTTP operations backed by durable SQLite denials under the
   operator invite file allowlist. Domain validation, fixed operator-managed admin roles and owner-only Workspaces
   prevent privilege escalation; revocation denies subsequent authentication. See `server/README.md`
@@ -21,7 +31,7 @@
   synchronous runtime IPC enqueue. Two synthetic HTTP tests first reproduced a conversation created after
   revocation during runtime startup, then passed with the fence. This ordering requires all gateway and admin
   processes to share the same correctly locking database. An enqueue before revocation can still create a
-  conversation afterwards; runtime startup and workspace create/start/stop remain unfenced.
+  conversation afterwards; runtime startup and workspace create/start remain unfenced (stop is now fenced as described above).
   Local checks: engine 64/64, unit 117/117, database 29/29, check, build and engine-pin passed using
   Node 22.22.1 (below the project's >=24 requirement; SQLite emitted experimental warnings). Cloud Playwright
   desktop could not launch without `libatk-1.0.so.0`; both mobile cases were skipped by the suite.

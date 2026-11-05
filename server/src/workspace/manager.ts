@@ -140,8 +140,7 @@ export class RuntimeManager {
         entry.state = 'running';
         handle.onExit(() => {
           if (this.live.get(key) !== entry) return;
-          if (entry.state !== 'stopping')
-            Object.assign(entry, { state: 'failed', handle: undefined, error: 'RUNTIME_EXITED' });
+          Object.assign(entry, { state: 'failed', handle: undefined, error: 'RUNTIME_EXITED' });
         });
       } catch {
         Object.assign(entry, { state: 'failed', error: 'RUNTIME_START_FAILED' });
@@ -154,9 +153,14 @@ export class RuntimeManager {
     return this.touchRecord(record, entry);
   }
 
-  async stop(actor: string, workspaceId: string): Promise<Workspace> {
+  async stop(
+    actor: string,
+    workspaceId: string,
+    admit?: (signal: () => void) => void,
+    authorize?: () => Promise<void>,
+  ): Promise<Workspace> {
     const record = await readRecord(this.dataRoot, actor, workspaceId);
-    await this.stopKey(this.key(record));
+    await this.stopKey(this.key(record), admit, authorize);
     return this.view(record);
   }
 
@@ -295,22 +299,48 @@ export class RuntimeManager {
     }
   }
 
-  private async stopKey(key: string) {
+  private async stopKey(
+    key: string,
+    admit?: (signal: () => void) => void,
+    authorize?: () => Promise<void>,
+  ): Promise<void> {
+    // Each caller waits for an earlier attempt, then independently checks authority and retries if needed.
+    while (this.live.get(key)?.stopping) {
+      await this.live.get(key)!.stopping!.catch(() => {});
+    }
     const entry = this.live.get(key);
-    if (!entry) return;
-    if (entry.stopping) return entry.stopping;
-    entry.stopping = (async () => {
+    if (!entry) {
+      await authorize?.();
+      admit?.(() => {});
+      return;
+    }
+    const stopping = (async () => {
       if (entry.starting) await entry.starting.catch(() => {});
-      try {
-        if (entry.handle) {
-          entry.state = 'stopping';
-          await entry.handle.stop();
-        }
-      } finally {
+      await authorize?.();
+      if (!entry.handle) {
+        admit?.(() => {});
         if (this.live.get(key) === entry) this.live.delete(key);
+        return;
+      }
+      const handle = entry.handle;
+      if (admit && !handle.stopWithAdmission) throw new Error('RUNTIME_STOP_ADMISSION_UNSUPPORTED');
+      const previousState = entry.state;
+      entry.state = 'stopping';
+      try {
+        if (admit) await handle.stopWithAdmission!(admit);
+        else await handle.stop();
+        if (this.live.get(key) === entry) this.live.delete(key);
+      } catch (error) {
+        if (this.live.get(key) === entry && entry.state === 'stopping') entry.state = previousState;
+        throw error;
       }
     })();
-    return entry.stopping;
+    entry.stopping = stopping;
+    try {
+      await stopping;
+    } finally {
+      if (entry.stopping === stopping) entry.stopping = undefined;
+    }
   }
 
   private async touchRecord(record: WorkspaceRecord, entry: Live) {
