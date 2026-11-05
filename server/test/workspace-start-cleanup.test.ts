@@ -46,13 +46,12 @@ test('failed startup cleanup retains capacity until shutdown retries successfull
     await assert.rejects(manager.start('alice', second.id), /RUNTIME_CAPACITY/);
     assert.equal(starts, 1);
     await assert.rejects(manager.shutdown(), /^WorkspaceError: RUNTIME_STOP_FAILED$/);
-    await assert.rejects(manager.start('alice', second.id), /RUNTIME_CAPACITY/);
+    await assert.rejects(manager.start('alice', second.id), /RUNTIME_MANAGER_SHUTTING_DOWN/);
     await manager.shutdown();
     assert.equal(stops, 3);
-    failGrant = false;
-    assert.equal((await manager.start('alice', second.id)).state, 'running');
-    assert.equal((await manager.health('alice', second.id)).ok, true);
-    assert.equal(starts, 2);
+    assert.equal((await manager.get('alice', first.id)).state, 'stopped');
+    await assert.rejects(manager.start('alice', second.id), /RUNTIME_MANAGER_SHUTTING_DOWN/);
+    assert.equal(starts, 1);
   } finally {
     await manager.shutdown();
     await rm(dir, { recursive: true, force: true });

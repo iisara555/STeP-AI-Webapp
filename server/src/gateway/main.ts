@@ -10,6 +10,7 @@ import { createGateway } from './http.ts';
 import { InvitationStore } from './invitation-store.ts';
 import { QuotaStore } from './quota-store.ts';
 import { DEFAULT_QUOTAS, RunService } from './runs.ts';
+import { gatewayShutdown } from './shutdown.ts';
 
 const env = (name: string, fallback?: string) => {
   const value = process.env[name] ?? fallback;
@@ -84,14 +85,21 @@ const host = process.env.STEP_GATEWAY_HOST ?? '127.0.0.1';
 const port = number('STEP_GATEWAY_PORT', 8787);
 server.listen(port, host, () => console.log(`STeP Gateway: http://${host}:${port}`));
 
-const shutdown = () => {
-  clearInterval(sweep);
-  server.close();
-  void manager.shutdown().finally(() => {
-    quotaStore.close();
-    invitations.close();
-    process.exit(0);
-  });
-};
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+const shutdown = gatewayShutdown(
+  () => {
+    clearInterval(sweep);
+    server.close();
+  },
+  () => manager.shutdown(),
+  () => {
+    try {
+      quotaStore.close();
+    } finally {
+      invitations.close();
+    }
+  },
+  (status) => process.exit(status),
+  (error) => console.error('Gateway shutdown failed:', error),
+);
+process.on('SIGTERM', () => void shutdown().catch(() => {}));
+process.on('SIGINT', () => void shutdown().catch(() => {}));

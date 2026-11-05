@@ -65,6 +65,8 @@ export type RuntimeStats = { running: number; starting: number; failed: number; 
 
 export class RuntimeManager {
   private readonly live = new Map<string, Live>();
+  private shuttingDown = false;
+  private shutdownAttempt?: Promise<void>;
   private readonly activeCalls = new Map<string, number>();
   /** Event listeners by Workspace; they outlive a runtime so a resumed Workspace keeps reporting to them. */
   private readonly listeners = new Map<string, Set<(event: RuntimeEvent) => void>>();
@@ -110,7 +112,9 @@ export class RuntimeManager {
 
   /** Starts the runtime, or resumes it from its folder after a stop, idle stop or crash. */
   async start(actor: string, workspaceId: string): Promise<Workspace> {
+    if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
     const record = await readRecord(this.dataRoot, actor, workspaceId);
+    if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
     const key = this.key(record);
     const current = this.live.get(key);
     if (current?.stopping) {
@@ -292,7 +296,20 @@ export class RuntimeManager {
   }
 
   async shutdown() {
-    await Promise.all([...this.live.keys()].map((key) => this.stopKey(key)));
+    this.shuttingDown = true;
+    if (this.shutdownAttempt) return this.shutdownAttempt;
+    const attempt = (async () => {
+      const outcomes = await Promise.allSettled([...this.live.keys()].map((key) => this.stopKey(key)));
+      const errors = outcomes.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : []));
+      if (errors.length === 1) throw errors[0];
+      if (errors.length) throw new AggregateError(errors, 'RUNTIME_SHUTDOWN_FAILED');
+    })();
+    this.shutdownAttempt = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (this.shutdownAttempt === attempt) this.shutdownAttempt = undefined;
+    }
   }
 
   private async call<T>(actor: string, workspaceId: string, fn: (handle: RuntimeHandle) => Promise<T>) {
