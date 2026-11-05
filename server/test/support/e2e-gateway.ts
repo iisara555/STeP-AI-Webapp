@@ -25,7 +25,7 @@ function scriptedDriver(): RuntimeDriver {
   const conversations = new Map<string, { title: string; messages: ConversationMessage[] }>();
   const running = new Map<string, () => void>();
   let next = 0;
-  return {
+  const driver: RuntimeDriver = {
     async start() {
       const listeners = new Set<(event: RuntimeEvent) => void>();
       let exit: (code: number | null) => void = () => {};
@@ -80,7 +80,15 @@ function scriptedDriver(): RuntimeDriver {
         }) as any,
       };
     },
+    startWithAdmission(spec, admit) {
+      let started!: ReturnType<RuntimeDriver['start']>;
+      admit(() => {
+        started = driver.start(spec);
+      });
+      return started;
+    },
   };
+  return driver;
 }
 
 const dataRoot = await mkdtemp(join(tmpdir(), 'step-e2e-gateway-'));
