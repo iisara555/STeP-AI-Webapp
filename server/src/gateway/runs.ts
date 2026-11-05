@@ -112,7 +112,7 @@ export class RunService {
     await this.manager.get(actor, workspaceId);
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
     const dayKey = `${actor}:${this.day()}`;
-    if ((this.daily.get(dayKey) ?? 0) >= this.quotas.runsPerUserPerDay)
+    if (!this.quotaStore && (this.daily.get(dayKey) ?? 0) >= this.quotas.runsPerUserPerDay)
       throw new GatewayError('QUOTA_DAILY_RUNS');
     if (input.sessionId && this.active.has(this.sessionKey(actor, workspaceId, input.sessionId)))
       throw new GatewayError('RUN_ALREADY_ACTIVE');
@@ -127,7 +127,7 @@ export class RunService {
     } else if ((this.daily.get(admissionKey) ?? 0) >= this.quotas.runsPerUserPerDay) {
       throw new GatewayError('QUOTA_DAILY_RUNS');
     }
-    this.daily.set(admissionKey, (this.daily.get(admissionKey) ?? 0) + 1);
+    if (!this.quotaStore) this.daily.set(admissionKey, (this.daily.get(admissionKey) ?? 0) + 1);
     let admitted = false;
     try {
       await authorize();
@@ -170,9 +170,22 @@ export class RunService {
       return this.view(run);
     } finally {
       if (!admitted) {
-        this.quotaStore?.release(actor, day);
-        const count = this.daily.get(admissionKey);
-        if (count !== undefined) this.daily.set(admissionKey, Math.max(0, count - 1));
+        if (this.quotaStore) {
+          try {
+            this.quotaStore.release(actor, day);
+          } catch {
+            // Keep the original setup error. The durable count remains authoritative even if
+            // the release outcome is uncertain; do not admit based on a local approximation.
+            try {
+              this.audit({ actor, action: 'quota.release', workspaceId, outcome: 'failed' });
+            } catch {
+              // An audit sink failure must not replace the setup error either.
+            }
+          }
+        } else {
+          const count = this.daily.get(admissionKey);
+          if (count !== undefined) this.daily.set(admissionKey, Math.max(0, count - 1));
+        }
       }
     }
   }

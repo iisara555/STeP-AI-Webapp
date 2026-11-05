@@ -57,8 +57,19 @@
 ## Cloud quota persistence (#58, partial)
 
 - Gateway daily run admissions now use a local SQLite counter, atomically reserved and retained across
-  gateway restarts. Reservations happen before runtime setup; failed preparation returns the slot, while a
-  crash during preparation may conservatively consume one. Accepted runs count even if they fail; counters use UTC days.
+  gateway restarts. Reservations happen before runtime setup; failed preparation attempts to return the slot.
+  If release fails, the original preparation error is preserved and a metadata-only `quota.release` failure
+  audit is attempted; the durable counter remains authoritative, so an uncommitted release can consume a slot
+  through the UTC day. Audit writes are best-effort, not guaranteed alerts. A crash during preparation can also
+  consume a slot. Accepted runs count even if they fail; counters use UTC days.
+- Synthetic gated preparation tests cover revocation during subscription and conversation creation: a
+  conversation already being created can still be created, but later admission/dispatch is blocked when the
+  next check observes revocation. UTC-boundary cleanup and cross-process release are also tested; these do not
+  eliminate the check-to-side-effect races documented above. Release failures are injected before and after
+  a real SQLite update; this does not reproduce every SQLite I/O or locking failure.
+- Local verification: gateway/quota tests 29/29, engine tests 62/62, unit tests 117/117, database tests
+  29/29, type/format check, build and engine-pin check passed. Cloud Playwright desktop tests could not launch
+  because `libatk-1.0.so.0` is missing; the two mobile cases were skipped by the suite.
 - Synthetic tests exercise concurrent HTTP admission across a gateway object restart and independent OS
   processes contending for the same counter. This is not yet the per-user monthly AI quota: administrator-
   configurable limits, usage reporting, invitation UI, process-level gateway restart and production

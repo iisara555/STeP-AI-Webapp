@@ -32,6 +32,31 @@ test('quota reservations survive reopening and concurrent connections cannot exc
   }
 });
 
+test('a different process can release a reservation for later admission', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'step-quota-release-process-'));
+  const path = join(dir, 'quota.sqlite');
+  const store = new QuotaStore(path);
+  try {
+    assert.equal(store.reserve('g123', '2026-11-04', 1), true);
+    const moduleUrl = pathToFileURL(join(process.cwd(), 'server/src/gateway/quota-store.ts')).href;
+    const script = `import { QuotaStore } from ${JSON.stringify(moduleUrl)}; const s = new QuotaStore(process.argv[1]); s.release('g123', '2026-11-04'); s.close();`;
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, path], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let errors = '';
+    child.stderr.setEncoding('utf8').on('data', (chunk) => {
+      errors += chunk;
+    });
+    const [code] = await once(child, 'exit');
+    assert.equal(code, 0, errors);
+    assert.equal(store.reserve('g123', '2026-11-04', 1), true);
+    assert.equal(store.reserve('g123', '2026-11-04', 1), false);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('independent processes contend for the same durable admission counter', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'step-quota-process-'));
   try {

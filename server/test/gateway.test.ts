@@ -645,6 +645,59 @@ test('an in-flight private response is withheld after revocation', async () => {
   }
 });
 
+test('release failures preserve setup errors and durable quota is authoritative', async () => {
+  for (const commitBeforeFailure of [false, true]) {
+    const root = await mkdtemp(join(tmpdir(), 'step-release-'));
+    class FaultyStore extends QuotaStore {
+      override release(actor: string, day: string) {
+        if (commitBeforeFailure) super.release(actor, day);
+        throw new Error('synthetic release failure');
+      }
+    }
+    const store = new FaultyStore(join(root, 'quota.sqlite'));
+    const observer = new QuotaStore(join(root, 'quota.sqlite'));
+    const manager = {
+      get: async () => ({}),
+      subscribe: async () => () => {},
+      newConversation: async () => ({ sessionId: 'synthetic' }),
+      ask: async () => new Promise<AskResult>(() => {}),
+    } as unknown as RuntimeManager;
+    const audit: AuditEntry[] = [];
+    const service = new RunService(
+      manager,
+      (entry) => audit.push(entry),
+      { ...DEFAULT_QUOTAS, runsPerUserPerDay: 1 },
+      Date.now,
+      store,
+    );
+    const original = new Error('synthetic authorization failure');
+    try {
+      await assert.rejects(
+        service.start('alice', 'workspace', { text: 'x' }, async () => {
+          throw original;
+        }),
+        (error) => error === original,
+      );
+      assert.ok(audit.some((entry) => entry.action === 'quota.release' && entry.outcome === 'failed'));
+      if (commitBeforeFailure) {
+        assert.equal((await service.start('alice', 'workspace', { text: 'retry' })).status, 'running');
+        assert.equal(observer.reserve('alice', new Date().toISOString().slice(0, 10), 1), false);
+      } else {
+        await assert.rejects(service.start('alice', 'workspace', { text: 'retry' }), {
+          code: 'QUOTA_DAILY_RUNS',
+        });
+        assert.equal(observer.reserve('alice', new Date().toISOString().slice(0, 10), 1), false);
+        observer.release('alice', new Date().toISOString().slice(0, 10));
+        assert.equal((await service.start('alice', 'workspace', { text: 'retry' })).status, 'running');
+      }
+    } finally {
+      observer.close();
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test('revocation during run preparation prevents admission and dispatch', async () => {
   let allowed = true,
     release!: () => void,
@@ -705,6 +758,114 @@ test('revocation during run preparation prevents admission and dispatch', async 
     server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
     quotaStore.close();
+  }
+});
+
+test('revocation during subscription or conversation creation blocks later preparation and dispatch', async () => {
+  for (const stage of ['subscribe', 'conversation'] as const) {
+    let allowed = true,
+      release!: () => void,
+      entered!: () => void,
+      conversations = 0,
+      asks = 0;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const pause = async () => {
+      entered();
+      await gate;
+    };
+    const manager = {
+      get: async () => ({}),
+      subscribe: async () => {
+        if (stage === 'subscribe') await pause();
+        return () => {};
+      },
+      newConversation: async () => {
+        conversations++;
+        if (stage === 'conversation') await pause();
+        return { sessionId: 'synthetic' };
+      },
+      ask: async () => {
+        asks++;
+        return new Promise<AskResult>(() => {});
+      },
+    } as unknown as RuntimeManager;
+    const store = new QuotaStore(':memory:');
+    const runs = new RunService(
+      manager,
+      () => {},
+      { ...DEFAULT_QUOTAS, runsPerUserPerDay: 1 },
+      Date.now,
+      store,
+    );
+    const denied = new Error('revoked');
+    const authorize = async () => {
+      if (!allowed) throw denied;
+    };
+    try {
+      const pending = runs.start('alice', 'workspace', { text: 'x' }, authorize);
+      await waiting;
+      allowed = false;
+      release();
+      await assert.rejects(pending, (error) => error === denied);
+      assert.equal(conversations, stage === 'subscribe' ? 0 : 1);
+      assert.equal(asks, 0);
+      assert.equal(runs.stats().today.started, 0);
+      allowed = true;
+      assert.equal((await runs.start('alice', 'workspace', { text: 'retry' }, authorize)).status, 'running');
+    } finally {
+      release();
+      store.close();
+    }
+  }
+});
+
+test('failed preparation crossing UTC midnight releases its original day only', async () => {
+  for (const durable of [false, true]) {
+    let time = Date.parse('2026-11-04T23:59:59Z'),
+      release!: () => void,
+      entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const manager = {
+      get: async () => ({}),
+      subscribe: async () => () => {},
+      newConversation: async () => ({ sessionId: 'synthetic' }),
+      ask: async () => new Promise<AskResult>(() => {}),
+    } as unknown as RuntimeManager;
+    const store = durable ? new QuotaStore(':memory:') : undefined;
+    const runs = new RunService(
+      manager,
+      () => {},
+      { ...DEFAULT_QUOTAS, runsPerUserPerDay: 1 },
+      () => time,
+      store,
+    );
+    const denied = new Error('revoked');
+    try {
+      const old = runs.start('alice', 'workspace', { text: 'old' }, async () => {
+        entered();
+        await gate;
+        throw denied;
+      });
+      await waiting;
+      time = Date.parse('2026-11-05T00:00:01Z');
+      assert.equal((await runs.start('alice', 'workspace', { text: 'new' })).status, 'running');
+      release();
+      await assert.rejects(old, (error) => error === denied);
+      await assert.rejects(runs.start('alice', 'workspace', { text: 'extra' }), { code: 'QUOTA_DAILY_RUNS' });
+    } finally {
+      release();
+      store?.close();
+    }
   }
 });
 
