@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { AskInput, WorkspaceError, WorkspaceName } from '../workspace/contract.ts';
 import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
-import { identityExpired, type Authenticator, type Identity } from './auth.ts';
+import { credentialStillValid, identityExpired, type Authenticator, type Identity } from './auth.ts';
 import type { InvitationStore } from './invitation-store.ts';
 import {
   codeOf,
@@ -67,13 +67,15 @@ const RUN = '(run_[0-9a-f]{32})';
 export function createGateway(options: GatewayOptions) {
   const { manager, runs, authenticate, audit, origin } = options;
   const quotas = options.quotas ?? DEFAULT_QUOTAS;
+  if (quotas.workspacesPerUser !== manager.workspacesPerUser) throw new Error('QUOTA_POLICY_MISMATCH');
   const heartbeatMs = options.heartbeatMs ?? 15_000;
   const now = options.now ?? Date.now;
   const startedAt = now();
 
   const dispatch = <T>(who: Identity, send: () => T): T => {
     const admit = () => {
-      if (identityExpired(who, now())) throw new GatewayError('UNAUTHENTICATED');
+      if (identityExpired(who, now()) || !credentialStillValid(who))
+        throw new GatewayError('UNAUTHENTICATED');
       return send();
     };
     return options.invitations ? options.invitations.dispatch(who.email, admit) : admit();
@@ -96,8 +98,6 @@ export function createGateway(options: GatewayOptions) {
       /^\/api\/workspaces$/,
       async ({ req, who }) => {
         const { name } = parseBody(CreateWorkspace, await readJson(req));
-        if ((await manager.list(who.userId)).length >= quotas.workspacesPerUser)
-          throw new GatewayError('QUOTA_WORKSPACES');
         const workspace = await manager.create(who.userId, { name }, (publish) => dispatch(who, publish));
         audit({
           actor: who.userId,
@@ -241,7 +241,8 @@ export function createGateway(options: GatewayOptions) {
         if (!options.invitations || !options.baseInvitations) throw new GatewayError('NOT_FOUND');
         const { email } = parseBody(z.object({ email: z.string() }).strict(), await readJson(req));
         options.invitations.change(who.email, email, active, await options.baseInvitations(), () => {
-          if (identityExpired(who, now())) throw new GatewayError('UNAUTHENTICATED');
+          if (identityExpired(who, now()) || !credentialStillValid(who))
+            throw new GatewayError('UNAUTHENTICATED');
         });
         audit({
           actor: who.userId,

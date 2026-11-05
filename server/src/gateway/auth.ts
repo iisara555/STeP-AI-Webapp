@@ -31,6 +31,14 @@ export type GoogleAuthOptions = {
 
 const ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
 const SKEW_SECONDS = 60;
+const freshness = new WeakMap<Identity, () => boolean>();
+
+/** Recheck the verified Google token's time validity at a synchronous side-effect boundary.
+ * Other authenticators do not provide this guarantee. This does not check external revocation.
+ */
+export function credentialStillValid(identity: Identity): boolean {
+  return freshness.get(identity)?.() ?? true;
+}
 
 /** Same inclusive expiry boundary and clock skew as Google token verification. */
 export function identityExpired(identity: Identity, now = Date.now()): boolean {
@@ -81,7 +89,15 @@ export function googleIdTokenAuth(options: GoogleAuthOptions): Authenticator {
     )
       return null;
     if (!(await options.invited()).has(email)) return null;
-    return { userId: `g${claims.sub}`, email, admin: admins.has(email), tokenExpiresAt: claims.exp };
+    const identity: Identity = {
+      userId: `g${claims.sub}`,
+      email,
+      admin: admins.has(email),
+      tokenExpiresAt: claims.exp,
+    };
+    const expires = claims.exp as number;
+    freshness.set(identity, () => expires + SKEW_SECONDS >= Math.floor(now() / 1000));
+    return identity;
   };
 }
 

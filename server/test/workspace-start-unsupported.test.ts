@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -11,7 +12,8 @@ test('authenticated start fails closed when the driver cannot fence its spawn', 
   const runtime = heldDriver();
   let starts = 0;
   const manager = new RuntimeManager({
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
     driver: {
       start: (spec) => {
         starts++;

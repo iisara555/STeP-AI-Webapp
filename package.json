@@ -30,7 +30,8 @@
     "harness:verify": "tsx scripts/verify-upstream.ts",
     "harness:reference": "tsx scripts/desktop-reference.ts",
     "engine:owner-trial": "tsx --import ./server/src/register.mjs server/src/owner-trial.ts",
-    "engine:identity-trial": "tsx --import ./server/src/register.mjs server/src/identity-main.ts"
+    "engine:identity-trial": "tsx --import ./server/src/register.mjs server/src/identity-main.ts",
+    "workspace:quota:init": "node --import tsx server/src/workspace/provision-quota.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.118.0",

@@ -30,6 +30,7 @@ import {
   saveRecord,
   workspacePaths,
 } from './storage.ts';
+import { WorkspaceQuotaStore } from './quota-store.ts';
 
 /** Observe before returning to a fence whose COMMIT can throw after IPC enqueue.
  * Keep the original Promise so admitted callers still receive the runtime result/error.
@@ -42,6 +43,7 @@ function observeDispatch<T>(result: Promise<T>): Promise<T> {
 export type RuntimeManagerOptions = {
   dataRoot: string;
   driver: RuntimeDriver;
+  workspacesPerUser: number;
   /** Admission control for the shared server: runtimes beyond this wait for the user to retry. */
   maxRunning?: number;
   /** A running Workspace with no activity for this long is stopped by sweepIdle(); its data stays. */
@@ -79,7 +81,19 @@ type Live = {
 
 export type RuntimeStats = { running: number; starting: number; failed: number; max: number; busy: number };
 
+export class WorkspacePublicationUncertainError extends Error {
+  constructor(
+    readonly workspaceId: string,
+    cause: unknown,
+  ) {
+    super('WORKSPACE_PUBLICATION_UNCERTAIN', { cause });
+  }
+}
+
 export class RuntimeManager {
+  get workspacesPerUser(): number {
+    return this.workspaceQuota.workspacesPerUser;
+  }
   private readonly live = new Map<string, Live>();
   private shuttingDown = false;
   private shutdownAttempt?: Promise<void>;
@@ -87,6 +101,7 @@ export class RuntimeManager {
   /** Event listeners by Workspace; they outlive a runtime so a resumed Workspace keeps reporting to them. */
   private readonly listeners = new Map<string, Set<(event: RuntimeEvent) => void>>();
   private readonly dataRoot: string;
+  private readonly workspaceQuota: WorkspaceQuotaStore;
   private readonly driver: RuntimeDriver;
   private readonly maxRunning: number;
   private readonly idleMs: number;
@@ -97,6 +112,7 @@ export class RuntimeManager {
   constructor({
     dataRoot,
     driver,
+    workspacesPerUser,
     maxRunning = 8,
     idleMs = 30 * 60_000,
     connectTimeoutMs = 30_000,
@@ -104,6 +120,7 @@ export class RuntimeManager {
     grant = () => undefined,
   }: RuntimeManagerOptions) {
     this.dataRoot = dataRoot;
+    this.workspaceQuota = new WorkspaceQuotaStore(dataRoot, workspacesPerUser);
     this.driver = driver;
     this.maxRunning = maxRunning;
     this.idleMs = idleMs;
@@ -123,7 +140,40 @@ export class RuntimeManager {
     const name = parse(WorkspaceName, input.name, 'INVALID_NAME');
     const at = new Date(this.now()).toISOString();
     const record: WorkspaceRecord = { id: newWorkspaceId(), ownerId, name, createdAt: at, lastActiveAt: at };
-    await createWorkspaceFolders(this.dataRoot, record, admit);
+    let renamed = false;
+    try {
+      await createWorkspaceFolders(this.dataRoot, record, (publish) =>
+        this.workspaceQuota.publish(ownerId, () => {
+          let active = true;
+          let published = false;
+          const guardedPublish = () => {
+            if (!active || published) throw new Error('PUBLICATION_NOT_SYNCHRONOUS');
+            published = true;
+            publish();
+            renamed = true;
+          };
+          try {
+            if (admit) {
+              const result: unknown = admit(guardedPublish);
+              if (
+                result !== undefined &&
+                result !== null &&
+                typeof (result as PromiseLike<unknown>).then === 'function'
+              ) {
+                void Promise.resolve(result).catch(() => {});
+                throw new Error('PUBLICATION_NOT_SYNCHRONOUS');
+              }
+            } else guardedPublish();
+            if (!renamed) throw new Error('PUBLICATION_NOT_SYNCHRONOUS');
+          } finally {
+            active = false;
+          }
+        }),
+      );
+    } catch (error) {
+      if (renamed) throw new WorkspacePublicationUncertainError(record.id, error);
+      throw error;
+    }
     return this.view(record);
   }
 

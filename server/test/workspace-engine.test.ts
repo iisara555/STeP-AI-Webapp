@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage } from 'node:http';
@@ -57,7 +58,8 @@ async function withWorkspaces(
   const provider = await syntheticProvider();
   const clock = { now: Date.now() };
   const manager = new RuntimeManager({
-    dataRoot,
+    workspacesPerUser: 10,
+    dataRoot: provisionTestQuota(dataRoot, 10),
     driver: processDriver(),
     now: () => clock.now,
     grant: () => ({ baseUrl: provider.baseUrl, model: 'synthetic', token: TOKEN }),

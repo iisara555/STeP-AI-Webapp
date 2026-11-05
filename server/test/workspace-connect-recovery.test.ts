@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -46,7 +47,8 @@ for (const cleanupFails of [false, true]) {
         return handle;
       };
       const manager = new RuntimeManager({
-        dataRoot: dir,
+        dataRoot: provisionTestQuota(dir, 10),
+        workspacesPerUser: 10,
         driver: runtime.driver,
         maxRunning: 1,
         grant: async () => {
@@ -156,7 +158,8 @@ test('real SQLite COMMIT failure after connect enqueue observes later rejection 
     return handle;
   };
   const manager = new RuntimeManager({
-    dataRoot: dir,
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
     driver: runtime.driver,
     maxRunning: 1,
     grant: async () => {
@@ -233,7 +236,8 @@ for (const timesOut of [false, true]) {
       return handle;
     };
     const manager = new RuntimeManager({
-      dataRoot: dir,
+      dataRoot: provisionTestQuota(dir, 10),
+      workspacesPerUser: 10,
       driver: runtime.driver,
       connectTimeoutMs: 10,
       grant: async () => {

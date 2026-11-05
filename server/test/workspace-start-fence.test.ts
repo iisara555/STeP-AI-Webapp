@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -38,7 +39,11 @@ test('cross-process revoke before workspace start prevents spawn and metadata ch
       return result!;
     },
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver });
+  const manager = new RuntimeManager({
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
+    driver,
+  });
   const workspace = await manager.create('alice', { name: 'race' });
   const metadata = join(workspacePaths(dir, 'alice', workspace.id).dir, 'workspace.json');
   const before = await readFile(metadata, 'utf8');

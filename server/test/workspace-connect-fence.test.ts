@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -49,7 +50,8 @@ for (const cleanupFails of [false, true]) {
       return handle;
     };
     const manager = new RuntimeManager({
-      dataRoot: dir,
+      dataRoot: provisionTestQuota(dir, 10),
+      workspacesPerUser: 10,
       driver: runtime.driver,
       grant: async () => {
         entered();
@@ -144,7 +146,8 @@ for (const withStore of [false, true]) {
       return handle;
     };
     const manager = new RuntimeManager({
-      dataRoot: dir,
+      dataRoot: provisionTestQuota(dir, 10),
+      workspacesPerUser: 10,
       driver: runtime.driver,
       grant: async () => {
         now = 161_000;

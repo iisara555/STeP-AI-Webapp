@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -32,7 +33,11 @@ test('messages fences enqueue after start resolves; another caller keeps its own
     };
     return handle;
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
+    driver: runtime.driver,
+  });
   let allowed = true;
   const authority = {
     authorize: async () => {},
@@ -81,7 +86,12 @@ for (const running of [false, true]) {
     const dir = await fs.mkdtemp(join(tmpdir(), 'step-touch-fence-'));
     const runtime = heldDriver();
     let now = 0;
-    const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver, now: () => now });
+    const manager = new RuntimeManager({
+      dataRoot: provisionTestQuota(dir, 10),
+      workspacesPerUser: 10,
+      driver: runtime.driver,
+      now: () => now,
+    });
     const written = deferred();
     const release = deferred();
     const writeFile = fs.writeFile;
@@ -131,7 +141,12 @@ test('revocation blocks completion metadata but preserves an admitted run result
   let now = 0;
   let allowed = true;
   const sent = deferred();
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver, now: () => now });
+  const manager = new RuntimeManager({
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
+    driver: runtime.driver,
+    now: () => now,
+  });
   const authority = {
     authorize: async () => {},
     admit: (send: () => void) => {

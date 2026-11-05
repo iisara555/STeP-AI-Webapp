@@ -1,3 +1,4 @@
+import { provisionTestQuota } from '../../server/test/support/quota.ts';
 import { test, expect } from '@playwright/test';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -36,7 +37,12 @@ test('two invited users chat concurrently in separate workspaces', async ({ brow
     email: `${subject}@example.org`,
     domain: 'example.org',
   }));
-  const gateway = await createIdentityGateway({ identities, dataRoot: dir, clientId: 'synthetic', origin });
+  const gateway = await createIdentityGateway({
+    identities,
+    dataRoot: provisionTestQuota(dir, 10),
+    clientId: 'synthetic',
+    origin,
+  });
   await new Promise<void>((resolve) => gateway.server.listen(port, '127.0.0.1', resolve));
   const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
   try {

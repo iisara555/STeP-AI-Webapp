@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -41,7 +42,11 @@ for (const method of ['messages', 'newConversation', 'ask', 'cancel'] as const) 
         }) as typeof call;
         return handle;
       };
-      const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+      const manager = new RuntimeManager({
+        dataRoot: provisionTestQuota(dir, 10),
+        workspacesPerUser: 10,
+        driver: runtime.driver,
+      });
       const dispatch = <T>(send: () => T): T => {
         try {
           return store.dispatch('alice@step.example', send);
@@ -102,7 +107,12 @@ test('failed ask COMMIT retains busy and same-session run until runtime settleme
     CREATE TABLE parent (id INTEGER PRIMARY KEY);
     CREATE TABLE child (id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED);`);
   const runtime = heldDriver();
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver, idleMs: 1 });
+  const manager = new RuntimeManager({
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
+    driver: runtime.driver,
+    idleMs: 1,
+  });
   const runs = new RunService(manager, () => {});
   let sent!: () => void;
   const enqueued = new Promise<void>((resolve) => {
@@ -166,7 +176,11 @@ for (const runtimeFails of [true, false]) {
       }) as typeof call;
       return handle;
     };
-    const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+    const manager = new RuntimeManager({
+      dataRoot: provisionTestQuota(dir, 10),
+      workspacesPerUser: 10,
+      driver: runtime.driver,
+    });
     try {
       const workspace = await manager.create('alice', { name: 'completion' });
       await assert.rejects(

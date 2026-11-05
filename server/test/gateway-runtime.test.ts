@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 // ADR 0001 phase 3 pass criterion through the real pieces: the Gateway's HTTP API, a Workspace runtime process
 // running the pinned Desktop engine, and a loopback AI endpoint that answers only when released. Nothing leaves the
 // machine and no real account is used.
@@ -80,7 +81,8 @@ test('closing the browser leaves the run working; coming back resumes it, and a 
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-gateway-runtime-'));
   const provider = await heldProvider();
   const manager = new RuntimeManager({
-    dataRoot,
+    workspacesPerUser: 10,
+    dataRoot: provisionTestQuota(dataRoot, 10),
     driver: processDriver(),
     grant: () => ({ baseUrl: provider.baseUrl, model: 'synthetic', token: 'synthetic-token' }),
   });

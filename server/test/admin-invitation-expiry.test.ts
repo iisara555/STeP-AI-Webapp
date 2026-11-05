@@ -39,7 +39,7 @@ for (const active of [false, true]) {
           clock = (exp + (expired ? 61 : 60)) * 1000 + 999;
         };
         const server = createGateway({
-          manager: {} as RuntimeManager,
+          manager: { workspacesPerUser: 10 } as RuntimeManager,
           runs: {} as RunService,
           audit: (event) => {
             audits.push(event);

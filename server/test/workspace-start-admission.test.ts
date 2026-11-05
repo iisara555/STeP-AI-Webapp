@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -79,7 +80,11 @@ for (const [method, suffix, body] of [
       });
       return result!;
     };
-    const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+    const manager = new RuntimeManager({
+      dataRoot: provisionTestQuota(dir, 10),
+      workspacesPerUser: 10,
+      driver: runtime.driver,
+    });
     const workspace = await manager.create('alice', { name: 'synthetic' });
     const metadata = join(workspacePaths(dir, 'alice', workspace.id).dir, 'workspace.json');
     const before = await readFile(metadata, 'utf8');
@@ -135,7 +140,11 @@ test('shared start checks each caller and permits an authorized waiter after lea
     });
     return result!;
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
+    driver: runtime.driver,
+  });
   try {
     const workspace = await manager.create('alice', { name: 'synthetic' });
     const leader = assert.rejects(
@@ -182,7 +191,11 @@ test('shared waiter revoked during startup fails independently without stopping 
     await release.promise;
     return result!;
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
+    driver: runtime.driver,
+  });
   try {
     const workspace = await manager.create('alice', { name: 'synthetic' });
     const leader = manager.start('alice', workspace.id, (spawn) => spawn());
@@ -229,7 +242,11 @@ test('SQLite admission ends before asynchronous driver preparation and readiness
     second.change('root@step.example', 'alice@step.example', true, base);
     return result!;
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
+    driver: runtime.driver,
+  });
   try {
     const workspace = await manager.create('alice', { name: 'synthetic' });
     assert.equal(
@@ -284,7 +301,11 @@ test('HTTP revoke before manager entry prevents unfenced spawn and metadata writ
     spawns++;
     return originalDriverStart(spec);
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
+    driver: runtime.driver,
+  });
   const workspace = await manager.create('alice', { name: 'synthetic' });
   const metadata = join(workspacePaths(dir, 'alice', workspace.id).dir, 'workspace.json');
   const before = await readFile(metadata, 'utf8');
@@ -368,7 +389,11 @@ test('process driver spawns inside admission and confirms cleanup after a post-s
     assert.equal(db.prepare('SELECT count(*) AS n FROM child').get()?.n, 0);
     assert.equal(spawns, 1);
     assert.equal(exits, 1, 'startup rejected before confirming child exit');
-    const manager = new RuntimeManager({ dataRoot: dir, driver });
+    const manager = new RuntimeManager({
+      dataRoot: provisionTestQuota(dir, 10),
+      workspacesPerUser: 10,
+      driver,
+    });
     try {
       const workspace = await manager.create('alice', { name: 'spawn COMMIT' });
       await assert.rejects(
