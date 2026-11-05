@@ -5,7 +5,8 @@
 - Workspace stop now reauthenticates after pending starts and fences the process driver's synchronous
   disconnect/signal with invitation revocation; the SQLite transaction ends before waiting for process exit.
   Unsupported drivers fail closed for gateway stops; trusted idle/shutdown cleanup remains available. Concurrent
-  requests check authority separately, and failed stops retain the handle for retry. Ordering depends on all
+  requests check authority separately. If a stop may have signalled before failing, its handle remains reserved
+  in failed state until exit or a successful cleanup retry; starts cannot reuse or replace it in the meantime. Ordering depends on all
   administrators and gateways using the same correctly locking SQLite store. A stop admitted before revocation
   may complete afterwards; operator-file changes cannot be made atomic with this SQLite fence.
 - Local Node 26 checks: engine 74/74, unit 117/117, database 29/29, build, check and engine-pin passed;

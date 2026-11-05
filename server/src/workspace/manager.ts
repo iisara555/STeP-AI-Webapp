@@ -123,6 +123,8 @@ export class RuntimeManager {
       return this.start(actor, workspaceId);
     }
     if (current?.state === 'running') return this.touchRecord(record, current);
+    // A failed stop may have signalled the runtime. Do not reuse or replace it until exit or a retry.
+    if (current?.state === 'failed' && current.handle) throw new WorkspaceError('RUNTIME_NOT_RUNNING');
     if (current?.starting) {
       await current.starting;
       return this.view(record);
@@ -321,7 +323,7 @@ export class RuntimeManager {
       admit?.(() => {});
       return;
     }
-    const attempt = { rejectedBeforeSignal: false };
+    const attempt = { rejectedBeforeSignal: false, signalMayHaveOccurred: false };
     entry.stopAttempt = attempt;
     const stopping = (async () => {
       if (entry.starting) await entry.starting.catch(() => {});
@@ -336,6 +338,7 @@ export class RuntimeManager {
         try {
           admit!(() => {
             signalled = true;
+            attempt.signalMayHaveOccurred = true;
             signal();
           });
         } catch (error) {
@@ -349,15 +352,24 @@ export class RuntimeManager {
         return;
       }
       const handle = entry.handle;
-      if (admit && !handle.stopWithAdmission) throw new Error('RUNTIME_STOP_ADMISSION_UNSUPPORTED');
+      if (admit && !handle.stopWithAdmission) {
+        attempt.rejectedBeforeSignal = true;
+        throw new Error('RUNTIME_STOP_ADMISSION_UNSUPPORTED');
+      }
       const previousState = entry.state;
       entry.state = 'stopping';
       try {
         if (admit) await handle.stopWithAdmission!(admitted);
-        else await handle.stop();
+        else {
+          attempt.signalMayHaveOccurred = true;
+          await handle.stop();
+        }
         if (this.live.get(key) === entry) this.live.delete(key);
       } catch (error) {
-        if (this.live.get(key) === entry && entry.state === 'stopping') entry.state = previousState;
+        if (this.live.get(key) === entry && entry.state === 'stopping') {
+          entry.state = attempt.signalMayHaveOccurred ? 'failed' : previousState;
+          if (attempt.signalMayHaveOccurred) entry.error = 'RUNTIME_STOP_FAILED';
+        }
         throw error;
       }
     })();
@@ -381,7 +393,11 @@ export class RuntimeManager {
 
   private running() {
     return [...this.live.values()].filter(
-      (entry) => entry.state === 'running' || entry.state === 'starting' || entry.state === 'stopping',
+      (entry) =>
+        entry.state === 'running' ||
+        entry.state === 'starting' ||
+        entry.state === 'stopping' ||
+        !!entry.handle,
     ).length;
   }
 

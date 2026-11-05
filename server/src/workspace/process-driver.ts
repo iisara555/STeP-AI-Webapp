@@ -127,6 +127,9 @@ export function processDriver({ startTimeoutMs = 30_000, isolated = false } = {}
           if (child.connected) child.disconnect();
           else child.kill('SIGTERM');
           kill = setTimeout(() => child.kill('SIGKILL'), 5_000);
+          // Admission can throw after signalling (for example if its transaction fails to commit).
+          // Keep the escalation armed until exit even when stopWithAdmission rejects.
+          void exited.then(() => clearTimeout(kill));
         });
         try {
           await exited;

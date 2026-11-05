@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { RuntimeManager } from '../src/workspace/manager.ts';
 import { processDriver } from '../src/workspace/process-driver.ts';
 import { InvitationStore } from '../src/gateway/invitation-store.ts';
@@ -21,9 +22,7 @@ async function setup(stop: (admit: (signal: () => void) => void) => Promise<void
     async start(spec) {
       return {
         health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
-        call: async () => {
-          throw new Error('unused');
-        },
+        call: async () => ({ sessionId: 'session' }) as never,
         onExit: () => {},
         stop: async () => {
           trustedStops++;
@@ -74,7 +73,8 @@ test('failed stop retains the handle and a subsequent stop retries', async () =>
       ctx.manager.stop('alice', ctx.id, (signal) => signal()),
       /stop failed/,
     );
-    assert.equal((await ctx.manager.get('alice', ctx.id)).state, 'running');
+    assert.equal((await ctx.manager.get('alice', ctx.id)).state, 'failed');
+    await assert.rejects(ctx.manager.start('alice', ctx.id), /RUNTIME_NOT_RUNNING/);
     assert.equal((await ctx.manager.stop('alice', ctx.id, (signal) => signal())).state, 'stopped');
     assert.equal(attempts, 2);
   } finally {
@@ -243,7 +243,10 @@ for (const failure of ['authorization', 'driver-after-signal'] as const) {
       if (failure === 'authorization') assert.equal((started as { state: string }).state, 'running');
       assert.equal(signals, failure === 'authorization' ? 0 : 1);
       assert.equal(starts, 1);
-      assert.equal((await manager.get('alice', w.id)).state, 'running');
+      assert.equal(
+        (await manager.get('alice', w.id)).state,
+        failure === 'authorization' ? 'running' : 'failed',
+      );
     } finally {
       release.release();
       await manager.shutdown();
@@ -326,5 +329,94 @@ test('invitation lock is released while waiting for stop completion', async () =
     first.close();
     second.close();
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('SQLite commit failure after process signal fails closed until exit and then recovers', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'step-stop-commit-'));
+  const path = join(dir, 'db.sqlite');
+  const store = new InvitationStore(path, ['step.example'], new Set());
+  const db = (store as unknown as { db: DatabaseSync }).db;
+  db.exec('PRAGMA busy_timeout=0');
+  const reader = new DatabaseSync(path);
+  const manager = new RuntimeManager({ dataRoot: dir, driver: processDriver() });
+  try {
+    const w = await manager.create('alice', { name: 'synthetic' });
+    await manager.start('alice', w.id);
+    reader.exec('BEGIN; SELECT * FROM invitations');
+    await assert.rejects(
+      manager.stop('alice', w.id, (signal) =>
+        store.dispatch('alice@step.example', () => {
+          db.exec("INSERT INTO invitations VALUES ('other@step.example', 1)");
+          signal();
+        }),
+      ),
+      /locked|busy/i,
+    );
+    assert.equal((await manager.get('alice', w.id)).state, 'failed');
+    assert.equal((await manager.health('alice', w.id)).ok, false);
+    // A retry must not report a disconnected child as running.
+    const recovered = await manager.start('alice', w.id).catch(() => undefined);
+    if (recovered) assert.equal((await manager.health('alice', w.id)).ok, true);
+    reader.exec('ROLLBACK');
+    await manager.stop('alice', w.id);
+    assert.equal((await manager.start('alice', w.id)).state, 'running');
+    assert.equal((await manager.health('alice', w.id)).ok, true);
+  } finally {
+    try {
+      reader.exec('ROLLBACK');
+    } catch {}
+    await manager.shutdown();
+    reader.close();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('unsupported admission does not poison concurrent starts or calls', async () => {
+  const entered = gate();
+  const release = gate();
+  const ctx = await setup(async () => {}, false);
+  try {
+    const stop = ctx.manager.stop(
+      'alice',
+      ctx.id,
+      () => {},
+      async () => {
+        entered.release();
+        await release.promise;
+      },
+    );
+    const rejected = assert.rejects(stop, /ADMISSION_UNSUPPORTED/);
+    await entered.promise;
+    const start = ctx.manager.start('alice', ctx.id);
+    const call = ctx.manager.newConversation('alice', ctx.id);
+    // Ensure start reached the pending stop before releasing authorization.
+    const entry = (ctx.manager as unknown as { live: Map<string, { stopping?: Promise<void> }> }).live.get(
+      `alice/${ctx.id}`,
+    )!;
+    const waiting = gate();
+    let stopping = entry.stopping;
+    let reads = 0;
+    Object.defineProperty(entry, 'stopping', {
+      configurable: true,
+      get() {
+        if (++reads === 4) waiting.release();
+        return stopping;
+      },
+      set(value) {
+        stopping = value;
+      },
+    });
+    await waiting.promise;
+    release.release();
+    await rejected;
+    assert.equal((await start).state, 'running');
+    assert.equal((await call).sessionId, 'session');
+    assert.equal((await ctx.manager.health('alice', ctx.id)).ok, true);
+    assert.equal(ctx.trustedStops(), 0);
+  } finally {
+    release.release();
+    await ctx.cleanup();
   }
 });
