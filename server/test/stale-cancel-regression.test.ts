@@ -12,7 +12,7 @@ import { heldDriver } from './support/held-driver.ts';
 test('stale cancellation cannot cancel a later run in the same conversation', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'step-stale-cancel-'));
   const runtime = heldDriver();
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: runtime.driver });
   const audit = () => {};
   const runs = new RunService(manager, audit);
   let release!: () => void;
@@ -79,7 +79,7 @@ test('stale cancellation cannot cancel a later run in the same conversation', as
 test('stale cancel cannot overtake a delayed next dispatch; another session progresses', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'step-stale-order-'));
   const runtime = heldDriver();
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: runtime.driver });
   const runs = new RunService(manager, () => {});
   let releaseCancel!: () => void;
   let cancelEntered!: () => void;

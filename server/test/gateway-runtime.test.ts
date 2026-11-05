@@ -80,6 +80,7 @@ test('closing the browser leaves the run working; coming back resumes it, and a 
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-gateway-runtime-'));
   const provider = await heldProvider();
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot,
     driver: processDriver(),
     grant: () => ({ baseUrl: provider.baseUrl, model: 'synthetic', token: 'synthetic-token' }),

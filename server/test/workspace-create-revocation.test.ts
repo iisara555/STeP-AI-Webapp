@@ -25,6 +25,7 @@ test('revocation while workspace creation is pending prevents publication', asyn
     new Set(['root@step.example']),
   );
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     driver: {
       start: async () => {
@@ -99,6 +100,7 @@ test('token expiring after authentication but before publication leaves no works
     now: () => now,
   });
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     driver: {
       start: async () => {
@@ -155,6 +157,7 @@ test('publication is fenced after preparation and denied staging is removed', as
     new Set(['root@step.example']),
   );
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     driver: {
       start: async () => {
@@ -182,6 +185,7 @@ test('publication is fenced after preparation and denied staging is removed', as
 test('concurrent creates remain independent and errors after publication do not undo a workspace', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'step-create-concurrent-'));
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     driver: {
       start: async () => {

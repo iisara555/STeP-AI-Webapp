@@ -51,7 +51,7 @@ test('revocation before a pending workspace stop reaches the runtime prevents th
       };
     },
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver });
   // Observe entry to the real stopKey without delaying or replacing its implementation.
   const internal = manager as unknown as {
     stopKey: (

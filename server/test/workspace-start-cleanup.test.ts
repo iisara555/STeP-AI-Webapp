@@ -30,6 +30,7 @@ test('failed startup cleanup retains capacity until shutdown retries successfull
     },
   };
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     driver,
     maxRunning: 1,
@@ -91,6 +92,7 @@ test('shutdown waits for pending failed startup cleanup and retries the retained
     },
   };
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     driver,
     maxRunning: 1,
@@ -136,6 +138,7 @@ test('an orphan exit releases capacity without a cleanup retry', async () => {
     },
   };
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     driver,
     maxRunning: 1,
@@ -171,6 +174,7 @@ test('a successful retry of unconfirmed driver startup cleanup clears the diagno
     },
   };
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     driver: {
       start: async () => {
@@ -213,6 +217,7 @@ test('shutdown during a hung connect waits for timeout and confirmed cleanup, re
     },
   };
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     driver,
     maxRunning: 1,

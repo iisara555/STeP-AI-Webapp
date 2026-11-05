@@ -83,7 +83,7 @@ function scriptedDriver(): RuntimeDriver {
 }
 
 const dataRoot = await mkdtemp(join(tmpdir(), 'step-e2e-gateway-'));
-const manager = new RuntimeManager({ dataRoot, driver: scriptedDriver() });
+const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot, driver: scriptedDriver() });
 const authenticate: Authenticator = async (header) => {
   const payload = /^Bearer [^.]+\.([^.]+)\.[^.]+$/.exec(header ?? '')?.[1];
   if (!payload) return null;

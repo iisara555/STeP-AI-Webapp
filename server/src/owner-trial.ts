@@ -25,6 +25,7 @@ if (!address || typeof address === 'string') throw new Error('Provider failed to
 const manager = new RuntimeManager({
   dataRoot: process.env.STEP_TRIAL_DATA || '.data/owner-trial',
   driver: processDriver(),
+  workspacesPerUser: 10,
   maxRunning: 1,
   grant: () => ({ baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'synthetic', token: 'synthetic' }),
 });

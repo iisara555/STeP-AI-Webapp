@@ -23,7 +23,7 @@ async function withGateway(
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-web-gateway-'));
   const runtime = heldDriver();
-  const manager = new RuntimeManager({ dataRoot, driver: runtime.driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot, driver: runtime.driver });
   const authenticate: Authenticator = async (header) =>
     header === 'Bearer alice' ? { userId: 'alice', email: 'alice@step.example', admin: false } : null;
   const audit = () => {};

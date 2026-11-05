@@ -29,12 +29,23 @@ export async function createIdentityGateway(options: {
   await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve));
   const address = provider.address();
   if (!address || typeof address === 'string') throw new Error('PROVIDER_START_FAILED');
-  const manager = new RuntimeManager({
-    dataRoot: options.dataRoot,
-    driver: options.driver ?? processDriver({ isolated: true }),
-    idleMs: options.idleMs,
-    grant: () => ({ baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'synthetic', token: 'synthetic' }),
-  });
+  let manager: RuntimeManager;
+  try {
+    manager = new RuntimeManager({
+      dataRoot: options.dataRoot,
+      driver: options.driver ?? processDriver({ isolated: true }),
+      workspacesPerUser: 10,
+      idleMs: options.idleMs,
+      grant: () => ({
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        model: 'synthetic',
+        token: 'synthetic',
+      }),
+    });
+  } catch (error) {
+    await new Promise<void>((resolve) => provider.close(() => resolve()));
+    throw error;
+  }
   const sweepMs = options.sweepMs ?? 60_000;
   if (!Number.isFinite(sweepMs) || sweepMs <= 0) throw new Error('INVALID_SWEEP_INTERVAL');
   const sweeper = setInterval(() => void manager.sweepIdle().catch(() => {}), sweepMs);

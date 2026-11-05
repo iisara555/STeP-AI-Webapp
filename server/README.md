@@ -104,10 +104,20 @@ This guarantee requires every gateway and admin writer to use this code and the 
 filesystem with working SQLite locks; separate database copies, older processes, or direct database edits that
 ignore the protocol are not coordinated. It covers IPC enqueue, not when the child receives the message or
 makes provider requests. An enqueue before revocation may create a conversation afterwards. It does not stop
-existing runs or fence Workspace creation/start/stop or other in-flight side effects. A cancel enqueued before
+existing runs or fence Workspace start/stop or other in-flight side effects. Workspace creation uses a separate
+quota lock followed by the invitation lock and publishes synchronously inside both. A cancel enqueued before
 revocation can still take effect afterwards; revocation itself does not cancel a run.
 
-An operator file edit is **not** serialized with dispatch or delivery: it takes effect on subsequent file
+Workspace creation is not idempotent. If it returns `WORKSPACE_PUBLICATION_UNCERTAIN` (or its response is
+lost), do not blindly retry: the caller should authenticate again and list their Workspaces to reconcile the
+result. A published folder still consumes quota even if a later admission or SQLite commit fails. The runtime
+error includes the generated workspace ID; the HTTP error intentionally does not disclose it without a fresh
+authorization check. Initial quota policy creation publishes a fully initialized SQLite file atomically;
+interrupted first starts can leave private `.quota-init-*` directories, which an operator may remove after
+stopping all creators. An existing missing or corrupt policy still fails closed: do not delete or recreate the
+policy store without an operator-led investigation and confirmation of the shared policy.
+
+An operator file edit is **not** serialized with workspace publication, dispatch or delivery: it takes effect on subsequent file
 reads, but previously authorized work or private output can still be enqueued after the file is changed.
 Use the admin revocation API for the ordering guarantee. File edits, token expiry, and other external identity changes cannot be made
 atomic by the SQLite lock. Already-buffered bytes cannot be retracted. Authentication/file errors fail closed. No
@@ -116,11 +126,21 @@ remain open.
 
 ```bash
 STEP_DATA_ROOT=/srv/step/data \
+STEP_QUOTA_WORKSPACES=10 \
 STEP_INVITES_FILE=/srv/step/invites.txt \
 STEP_GOOGLE_CLIENT_ID=… STEP_ALLOWED_DOMAINS=step.cmu.ac.th STEP_ADMINS=… \
 STEP_APP_ORIGIN=https://… STEP_AI_BASE_URL=… STEP_AI_MODEL=… STEP_AI_KEY=… \
 npm run gateway        # ฟังที่ 127.0.0.1:8787 ให้ reverse proxy/Cloudflare Tunnel อยู่ข้างหน้า
 ```
+
+`STEP_QUOTA_WORKSPACES` is required and must match the policy of every process using the same data root.
+The first updated process initializes `workspace-quota.sqlite` with that policy; a missing, invalid or mismatched
+policy fails closed. Stop all older writers before upgrading: only cooperating processes using the same database
+on a filesystem with working SQLite locks are coordinated. Keep the database with the workspace data; changing
+the limit requires stopping all writers and an explicit operator migration of its policy, not deleting the file
+while processes are running. Existing workspace directories count toward the limit, even after a crash between
+publication and SQLite commit. Trial processes currently use an explicit limit of 10 and refuse a different
+existing policy. Quota enforcement does not serialize edits to the separate operator invite file.
 
 ข้อจำกัดของ 3a:
 

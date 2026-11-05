@@ -18,7 +18,12 @@ async function withManager(
   options: Partial<ConstructorParameters<typeof RuntimeManager>[0]> = {},
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-workspaces-'));
-  const manager = new RuntimeManager({ dataRoot, driver: processDriver(), ...options });
+  const manager = new RuntimeManager({
+    workspacesPerUser: 10,
+    dataRoot,
+    driver: processDriver(),
+    ...options,
+  });
   try {
     await fn(manager, dataRoot);
   } finally {

@@ -57,6 +57,7 @@ async function withWorkspaces(
   const provider = await syntheticProvider();
   const clock = { now: Date.now() };
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot,
     driver: processDriver(),
     now: () => clock.now,

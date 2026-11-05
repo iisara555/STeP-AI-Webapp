@@ -31,7 +31,7 @@ async function setup(stop: (admit: (signal: () => void) => void) => Promise<void
       };
     },
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver });
   const workspace = await manager.create('alice', { name: 'synthetic' });
   await manager.start('alice', workspace.id);
   return {
@@ -132,7 +132,7 @@ test('start and call wait independently for a denied stop and reuse the running 
       };
     },
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver });
   const w = await manager.create('alice', { name: 'A' });
   try {
     await manager.start('alice', w.id);
@@ -201,7 +201,7 @@ for (const failure of ['authorization', 'driver-after-signal'] as const) {
         };
       },
     };
-    const manager = new RuntimeManager({ dataRoot: dir, driver });
+    const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver });
     const w = await manager.create('alice', { name: 'A' });
     try {
       await manager.start('alice', w.id);
@@ -280,7 +280,7 @@ test('concurrent stop independently checks authority after a successful stop', a
 
 test('the process driver does not disconnect on denied admission and can subsequently stop', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'step-stop-process-'));
-  const manager = new RuntimeManager({ dataRoot: dir, driver: processDriver() });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: processDriver() });
   try {
     const w = await manager.create('alice', { name: 'synthetic' });
     await manager.start('alice', w.id);
@@ -339,7 +339,7 @@ test('SQLite commit failure after process signal fails closed until exit and the
   const db = (store as unknown as { db: DatabaseSync }).db;
   db.exec('PRAGMA busy_timeout=0');
   const reader = new DatabaseSync(path);
-  const manager = new RuntimeManager({ dataRoot: dir, driver: processDriver() });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: processDriver() });
   try {
     const w = await manager.create('alice', { name: 'synthetic' });
     await manager.start('alice', w.id);

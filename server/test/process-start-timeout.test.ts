@@ -18,7 +18,11 @@ test('shutdown cannot finish while the timed-out startup child is still alive', 
     signalled();
     return true;
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver: processDriver({ startTimeoutMs: 1 }) });
+  const manager = new RuntimeManager({
+    workspacesPerUser: 10,
+    dataRoot: dir,
+    driver: processDriver({ startTimeoutMs: 1 }),
+  });
   try {
     const workspace = await manager.create('alice', { name: 'test' });
     const start = manager.start('alice', workspace.id).catch(() => {});
@@ -53,6 +57,7 @@ test('failed signals retain a live child and shutdown reports failure within a b
     throw new Error('disconnect denied');
   };
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     maxRunning: 1,
     driver: processDriver({ startTimeoutMs: 1, stopTimeoutMs: 10 }),
@@ -83,6 +88,7 @@ test('hung connect is timed out and shutdown confirms the actual child exit', as
   const connecting = new Promise<void>((resolve) => (entered = resolve));
   const driver = processDriver({ stopTimeoutMs: 100 });
   const manager = new RuntimeManager({
+    workspacesPerUser: 10,
     dataRoot: dir,
     driver: {
       async start(spec) {

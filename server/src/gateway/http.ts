@@ -67,6 +67,7 @@ const RUN = '(run_[0-9a-f]{32})';
 export function createGateway(options: GatewayOptions) {
   const { manager, runs, authenticate, audit, origin } = options;
   const quotas = options.quotas ?? DEFAULT_QUOTAS;
+  if (quotas.workspacesPerUser !== manager.workspacesPerUser) throw new Error('QUOTA_POLICY_MISMATCH');
   const heartbeatMs = options.heartbeatMs ?? 15_000;
   const now = options.now ?? Date.now;
   const startedAt = now();
@@ -79,8 +80,7 @@ export function createGateway(options: GatewayOptions) {
       /^\/api\/workspaces$/,
       async ({ req, who }) => {
         const { name } = parseBody(CreateWorkspace, await readJson(req));
-        if ((await manager.list(who.userId)).length >= quotas.workspacesPerUser)
-          throw new GatewayError('QUOTA_WORKSPACES');
+
         const workspace = await manager.create(who.userId, { name }, (publish) => {
           const admit = () => {
             if (!credentialStillValid(who)) throw new GatewayError('UNAUTHENTICATED');

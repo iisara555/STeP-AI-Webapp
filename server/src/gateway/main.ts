@@ -45,10 +45,13 @@ const domains = [...list(env('STEP_ALLOWED_DOMAINS'))];
 const admins = list(process.env.STEP_ADMINS ?? '');
 const invitations = new InvitationStore(join(dataRoot, 'gateway-invitations.sqlite'), domains, admins);
 const baseInvitations = async () => list(await readFile(invitesFile, 'utf8'));
+// Production must explicitly configure the shared workspace policy.
+const workspacesPerUser = number('STEP_QUOTA_WORKSPACES', Number(env('STEP_QUOTA_WORKSPACES')));
 
 const manager = new RuntimeManager({
   dataRoot,
   driver: processDriver(),
+  workspacesPerUser,
   maxRunning: number('STEP_MAX_RUNNING', 8),
   idleMs: number('STEP_IDLE_MINUTES', 30) * 60_000,
   grant: () => ({
@@ -59,7 +62,7 @@ const manager = new RuntimeManager({
 });
 const audit = fileAudit(dataRoot);
 const quotas = {
-  workspacesPerUser: number('STEP_QUOTA_WORKSPACES', DEFAULT_QUOTAS.workspacesPerUser),
+  workspacesPerUser,
   activeRunsPerUser: number('STEP_QUOTA_ACTIVE_RUNS', DEFAULT_QUOTAS.activeRunsPerUser),
   runsPerUserPerDay: number('STEP_QUOTA_DAILY_RUNS', DEFAULT_QUOTAS.runsPerUserPerDay),
 };

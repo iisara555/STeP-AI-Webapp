@@ -42,7 +42,11 @@ async function withGateway(
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-gateway-'));
   const runtime = heldDriver();
-  const manager = new RuntimeManager({ dataRoot, driver: runtime.driver });
+  const manager = new RuntimeManager({
+    workspacesPerUser: quotas.workspacesPerUser,
+    dataRoot,
+    driver: runtime.driver,
+  });
   const audit: AuditEntry[] = [];
   const record = (entry: AuditEntry) => void audit.push(entry);
   const store = durableQuota ? new QuotaStore(join(dataRoot, 'quota.sqlite')) : undefined;
@@ -110,7 +114,11 @@ test('gateway restart retains daily admissions under concurrent HTTP requests', 
   let manager: RuntimeManager | undefined;
   let store: QuotaStore | undefined;
   async function start() {
-    manager = new RuntimeManager({ dataRoot, driver: heldDriver().driver });
+    manager = new RuntimeManager({
+      workspacesPerUser: quotas.workspacesPerUser,
+      dataRoot,
+      driver: heldDriver().driver,
+    });
     store = new QuotaStore(join(dataRoot, 'quota.sqlite'));
     const audit = () => {};
     server = createGateway({
@@ -465,7 +473,7 @@ test('admin invitations grant and revoke access, persist across store reopen, an
   const path = join(dir, 'invites.sqlite');
   let store = new InvitationStore(path, ['step.example'], new Set(['root@step.example']));
   const runtime = heldDriver();
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: runtime.driver });
   const record = () => {};
   const base = new Set(['root@step.example', 'bob@step.example', 'alice@step.example']);
   store.change('root@step.example', 'alice@step.example', false, base);
@@ -575,7 +583,7 @@ test('an open event stream stops before delivering an event after revocation', a
   let emit!: (event: { id: number; type: string; data: unknown }) => void;
   let stopped = false;
   const server = createGateway({
-    manager: {} as RuntimeManager,
+    manager: { workspacesPerUser: 10 } as RuntimeManager,
     runs: {
       follow: async (_u: string, _w: string, _a: number, cb: typeof emit) => {
         emit = cb;
@@ -620,6 +628,7 @@ test('an in-flight private response is withheld after revocation', async () => {
   });
   const server = createGateway({
     manager: {
+      workspacesPerUser: 10,
       list: async () => {
         entered();
         await gate;
@@ -711,6 +720,7 @@ test('revocation during run preparation prevents admission and dispatch', async 
     entered = r;
   });
   const manager = {
+    workspacesPerUser: 10,
     get: async () => {
       entered();
       await gate;
@@ -898,7 +908,7 @@ test('SSE disconnects on event burst while authorization is stalled', async () =
     release = r;
   });
   const server = createGateway({
-    manager: {} as RuntimeManager,
+    manager: { workspacesPerUser: 10 } as RuntimeManager,
     runs: {
       follow: async (_u: string, _w: string, _a: number, cb: typeof emit) => {
         emit = cb;
@@ -936,7 +946,7 @@ test('SSE disconnects when the response applies backpressure', async () => {
   let stopped = false;
   const original = ServerResponse.prototype.write;
   const server = createGateway({
-    manager: {} as RuntimeManager,
+    manager: { workspacesPerUser: 10 } as RuntimeManager,
     runs: {
       follow: async (_u: string, _w: string, _a: number, cb: typeof emit) => {
         emit = cb;
@@ -1001,7 +1011,7 @@ test('admin revocation during runtime startup prevents conversation creation', a
     await gate;
     return start(...args);
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: runtime.driver });
   const audit = () => {};
   const server = createGateway({
     manager,
@@ -1070,7 +1080,7 @@ test('admin revocation during run preparation prevents implicit conversation cre
     await gate;
     return start(...args);
   };
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: runtime.driver });
   const audit = () => {};
   const server = createGateway({
     manager,
@@ -1121,7 +1131,7 @@ test('cross-process revoke before cancel dispatch prevents the runtime cancel', 
   const base = new Set(['root@step.example', 'alice@step.example']);
   const store = new InvitationStore(db, ['step.example'], new Set(['root@step.example']));
   const runtime = heldDriver();
-  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: runtime.driver });
   let release!: () => void;
   let entered!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
@@ -1200,7 +1210,7 @@ test('admin revoke before runtime dispatch prevents the queued ask across invita
     ['step.example'],
     new Set(['root@step.example']),
   );
-  const manager = new RuntimeManager({ dataRoot: dir, driver: heldDriver().driver });
+  const manager = new RuntimeManager({ workspacesPerUser: 10, dataRoot: dir, driver: heldDriver().driver });
   let release!: () => void;
   let entered!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
@@ -1331,7 +1341,7 @@ test('private HTTP delivery rejects a cross-process revoke after the last authen
   const moduleUrl = new URL('../src/gateway/invitation-store.ts', import.meta.url).href;
   let count = 0;
   const server = createGateway({
-    manager: {} as RuntimeManager,
+    manager: { workspacesPerUser: 10 } as RuntimeManager,
     runs: {} as RunService,
     invitations: store,
     audit: () => {},
@@ -1370,7 +1380,7 @@ test('SSE suppresses an event when another process revokes after authentication 
   let emit!: (event: { id: number; type: string; data: unknown }) => void;
   let stopped = false;
   const server = createGateway({
-    manager: {} as RuntimeManager,
+    manager: { workspacesPerUser: 10 } as RuntimeManager,
     runs: {
       follow: async (_u: string, _w: string, _a: number, cb: typeof emit) => {
         emit = cb;
@@ -1448,7 +1458,7 @@ test('cross-process revocation waits for synchronous HTTP enqueue and then compl
   const original = ServerResponse.prototype.end;
   let observed = false;
   const server = createGateway({
-    manager: {} as RuntimeManager,
+    manager: { workspacesPerUser: 10 } as RuntimeManager,
     runs: {} as RunService,
     invitations: store,
     authenticate: async () => PEOPLE.alice,
@@ -1491,7 +1501,7 @@ test('HTTP delivery fails closed when the invitation fence is unavailable', asyn
   const store = new InvitationStore(':memory:', ['step.example'], new Set(['root@step.example']));
   store.close();
   const server = createGateway({
-    manager: {} as RuntimeManager,
+    manager: { workspacesPerUser: 10 } as RuntimeManager,
     runs: {} as RunService,
     invitations: store,
     authenticate: async () => PEOPLE.alice,
