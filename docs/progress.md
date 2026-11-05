@@ -13,6 +13,11 @@
 - The operator file is authoritative even for previously managed grants; private SSE events and ordinary
   responses reauthenticate before delivery. Idle streams are not proactively closed, and in-flight
   side effects are not cancelled; authorization and writes cannot be atomic with external file edits.
+  HTTP handlers can mutate state before their final authentication check, including when an administrator
+  revokes during an awaited operation. Run preparation rechecks before subscription and conversation creation,
+  but revocation may still commit after a check and before an asynchronous side effect. Full prevention needs
+  a revocation-coordinated side-effect boundary for every mutation; synchronous delivery/ask fencing alone
+  does not provide that guarantee. Already-started operations and file-based changes remain separate risks.
   Playwright cloud checks could not launch Chromium: host lacks `libatk-1.0.so.0`.
 
 ## #57 · ตรวจขอบเขต process เพิ่มเติม (ยังไม่เสร็จ)
@@ -52,7 +57,8 @@
 ## Cloud quota persistence (#58, partial)
 
 - Gateway daily run admissions now use a local SQLite counter, atomically reserved and retained across
-  gateway restarts. Accepted runs count even if they fail or the gateway crashes; counters use UTC days.
+  gateway restarts. Reservations happen before runtime setup; failed preparation returns the slot, while a
+  crash during preparation may conservatively consume one. Accepted runs count even if they fail; counters use UTC days.
 - Synthetic tests exercise concurrent HTTP admission across a gateway object restart and independent OS
   processes contending for the same counter. This is not yet the per-user monthly AI quota: administrator-
   configurable limits, usage reporting, invitation UI, process-level gateway restart and production

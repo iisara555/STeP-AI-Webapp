@@ -117,16 +117,8 @@ export class RunService {
     if (input.sessionId && this.active.has(this.sessionKey(actor, workspaceId, input.sessionId)))
       throw new GatewayError('RUN_ALREADY_ACTIVE');
 
-    // Listen before asking, so the first streamed words are in the feed.
-    const feed = await this.feed(actor, workspaceId);
-    const sessionId = input.sessionId ?? (await this.manager.newConversation(actor, workspaceId)).sessionId;
-    await authorize();
-    const key = this.sessionKey(actor, workspaceId, sessionId);
-    if (this.active.has(key)) throw new GatewayError('RUN_ALREADY_ACTIVE');
-    // Checked again after the awaits above, so two requests at once cannot both pass the limit.
-    if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
-
-    // Reserve at admission, after all awaits. SQLite serializes competing processes.
+    // Reserve before any runtime subscription or conversation creation. Failed setup returns the slot;
+    // a process crash may conservatively consume one until the UTC day changes.
     const day = this.day();
     const admissionKey = `${actor}:${day}`;
     if (this.quotaStore) {
@@ -135,33 +127,54 @@ export class RunService {
     } else if ((this.daily.get(admissionKey) ?? 0) >= this.quotas.runsPerUserPerDay) {
       throw new GatewayError('QUOTA_DAILY_RUNS');
     }
-
-    let dispatched!: () => void;
-    const run: OwnedRun = {
-      id: `run_${randomUUID().replaceAll('-', '')}`,
-      ownerId: actor,
-      workspaceId,
-      sessionId,
-      status: 'running',
-      startedAt: new Date(this.now()).toISOString(),
-      dispatched: new Promise((done) => (dispatched = done)),
-    };
-    this.runs.set(run.id, run);
-    this.active.set(key, run.id);
     this.daily.set(admissionKey, (this.daily.get(admissionKey) ?? 0) + 1);
-    this.count('started');
-    feed.push('run', this.view(run));
-    this.audit({ actor, action: 'run.start', workspaceId, runId: run.id, outcome: 'accepted' });
+    let admitted = false;
+    try {
+      await authorize();
+      // Listen before asking, so the first streamed words are in the feed.
+      const feed = await this.feed(actor, workspaceId);
+      await authorize();
+      const sessionId = input.sessionId ?? (await this.manager.newConversation(actor, workspaceId)).sessionId;
+      await authorize();
+      const key = this.sessionKey(actor, workspaceId, sessionId);
+      if (this.active.has(key)) throw new GatewayError('RUN_ALREADY_ACTIVE');
+      // Checked again after the awaits above, so two requests at once cannot both pass the limit.
+      if (this.activeCount(actor) >= this.quotas.activeRunsPerUser)
+        throw new GatewayError('QUOTA_ACTIVE_RUNS');
 
-    // Deliberately not awaited: the run outlives the request that started it.
-    void this.manager.ask(actor, workspaceId, { text: input.text, sessionId }, dispatched, dispatch).then(
-      (result) => this.finish(run, feed, result),
-      (error) => {
-        dispatched();
-        this.finish(run, feed, undefined, codeOf(error));
-      },
-    );
-    return this.view(run);
+      let dispatched!: () => void;
+      const run: OwnedRun = {
+        id: `run_${randomUUID().replaceAll('-', '')}`,
+        ownerId: actor,
+        workspaceId,
+        sessionId,
+        status: 'running',
+        startedAt: new Date(this.now()).toISOString(),
+        dispatched: new Promise((done) => (dispatched = done)),
+      };
+      this.runs.set(run.id, run);
+      this.active.set(key, run.id);
+      admitted = true;
+      this.count('started');
+      feed.push('run', this.view(run));
+      this.audit({ actor, action: 'run.start', workspaceId, runId: run.id, outcome: 'accepted' });
+
+      // Deliberately not awaited: the run outlives the request that started it.
+      void this.manager.ask(actor, workspaceId, { text: input.text, sessionId }, dispatched, dispatch).then(
+        (result) => this.finish(run, feed, result),
+        (error) => {
+          dispatched();
+          this.finish(run, feed, undefined, codeOf(error));
+        },
+      );
+      return this.view(run);
+    } finally {
+      if (!admitted) {
+        this.quotaStore?.release(actor, day);
+        const count = this.daily.get(admissionKey);
+        if (count !== undefined) this.daily.set(admissionKey, Math.max(0, count - 1));
+      }
+    }
   }
 
   get(actor: string, workspaceId: string, runId: string): Run {

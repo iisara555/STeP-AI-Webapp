@@ -32,6 +32,12 @@ export class QuotaStore {
     return Number(result.changes) === 1;
   }
 
+  release(userId: string, day: string): void {
+    this.db
+      .prepare('UPDATE daily_usage SET runs = runs - 1 WHERE user_id = ? AND day = ? AND runs > 0')
+      .run(userId, day);
+  }
+
   close(): void {
     this.db.close();
   }

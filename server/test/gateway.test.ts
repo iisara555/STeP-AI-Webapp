@@ -93,6 +93,10 @@ test('concurrent HTTP requests cannot exceed the durable daily run quota', async
         assert.equal(response.status, 429);
         assert.deepEqual(await response.json(), { code: 'QUOTA_DAILY_RUNS' });
       }
+      const conversations = await (
+        await call('alice', `/api/workspaces/${workspace.id}/conversations`)
+      ).json();
+      assert.equal(conversations.length, 2, 'rejected admissions must not create conversations');
     },
     { workspacesPerUser: 2, activeRunsPerUser: 20, runsPerUserPerDay: 2 },
     true,
@@ -645,7 +649,8 @@ test('revocation during run preparation prevents admission and dispatch', async 
   let allowed = true,
     release!: () => void,
     entered!: () => void,
-    asks = 0;
+    asks = 0,
+    conversations = 0;
   const gate = new Promise<void>((r) => {
     release = r;
   });
@@ -658,13 +663,18 @@ test('revocation during run preparation prevents admission and dispatch', async 
       await gate;
     },
     subscribe: async () => () => {},
-    newConversation: async () => ({ sessionId: 'synthetic' }),
+    newConversation: async () => {
+      conversations++;
+      return { sessionId: 'synthetic' };
+    },
     ask: async () => {
       asks++;
       return { status: 'review' };
     },
   } as unknown as RuntimeManager;
-  const runs = new RunService(manager, () => {});
+  const quotaStore = new QuotaStore(':memory:');
+  const quotas = { ...DEFAULT_QUOTAS, runsPerUserPerDay: 1 };
+  const runs = new RunService(manager, () => {}, quotas, Date.now, quotaStore);
   const server = createGateway({
     manager,
     runs,
@@ -682,11 +692,19 @@ test('revocation during run preparation prevents admission and dispatch', async 
     release();
     assert.equal((await result).status, 401);
     assert.equal(asks, 0);
+    assert.equal(conversations, 0, 'revoked preparation must not create a conversation');
     assert.equal(runs.stats().today.started, 0);
+    allowed = true;
+    const retry = await fetch(
+      `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/workspaces/ws_${'a'.repeat(32)}/runs`,
+      { ...post({ text: 'retry' }), headers: { 'content-type': 'application/json' } },
+    );
+    assert.equal(retry.status, 202, 'failed preparation returns its durable reservation');
   } finally {
     release();
     server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
+    quotaStore.close();
   }
 });
 
