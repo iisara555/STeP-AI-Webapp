@@ -5,6 +5,7 @@ import {
   AskInput,
   newWorkspaceId,
   ProviderGrant,
+  RuntimeStartCleanupError,
   parse,
   UserId,
   WorkspaceError,
@@ -153,7 +154,15 @@ export class RuntimeManager {
         });
         if (entry.handle !== handle) throw new Error('RUNTIME_EXITED');
         entry.state = 'running';
-      } catch {
+      } catch (error) {
+        if (error instanceof RuntimeStartCleanupError) {
+          entry.handle = error.handle;
+          entry.startupCleanupFailed = true;
+          error.handle.onExit(() => {
+            if (this.live.get(key) !== entry || entry.handle !== error.handle) return;
+            Object.assign(entry, { state: 'failed', handle: undefined, error: 'RUNTIME_EXITED' });
+          });
+        }
         if (entry.handle) {
           const handle = entry.handle;
           try {

@@ -129,6 +129,13 @@ export type RuntimeDriver = {
   start(spec: RuntimeSpec): Promise<RuntimeHandle>;
 };
 
+/** Startup failed with a process that has not been confirmed dead. */
+export class RuntimeStartCleanupError extends Error {
+  constructor(readonly handle: RuntimeHandle) {
+    super('RUNTIME_START_CLEANUP_FAILED');
+  }
+}
+
 export type WorkspaceErrorCode =
   | 'INVALID_ID'
   | 'INVALID_NAME'

@@ -4,11 +4,13 @@ import { fork, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
+  RuntimeStartCleanupError,
   WorkspaceError,
   type RuntimeCalls,
   type RuntimeDriver,
   type RuntimeEvent,
   type RuntimeHealth,
+  type RuntimeHandle,
   type RuntimeSpec,
 } from './contract.ts';
 
@@ -78,7 +80,11 @@ export function isolatedRuntimeArgs(spec: RuntimeSpec): string[] {
   ];
 }
 
-export function processDriver({ startTimeoutMs = 30_000, isolated = false } = {}): RuntimeDriver {
+export function processDriver({
+  startTimeoutMs = 30_000,
+  isolated = false,
+  stopTimeoutMs = 5_000,
+} = {}): RuntimeDriver {
   return {
     async start(spec) {
       const child = fork(ENTRY, [], {
@@ -89,9 +95,13 @@ export function processDriver({ startTimeoutMs = 30_000, isolated = false } = {}
         stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
         serialization: 'json',
       });
-      await ready(child, startTimeoutMs);
       let nonce = 0;
-      const exited = new Promise<number | null>((done) => child.once('exit', (code) => done(code)));
+      const exited = new Promise<number | null>((done) => {
+        child.once('exit', (code) => done(code));
+        child.on('error', () => {
+          if (child.pid === undefined) done(null);
+        });
+      });
       const request = (method: string, params: unknown, timeoutMs?: number) =>
         new Promise<unknown>((done, fail) => {
           const id = ++nonce;
@@ -120,24 +130,46 @@ export function processDriver({ startTimeoutMs = 30_000, isolated = false } = {}
       child.on('message', (message: RuntimeReply) => {
         if (message.type === 'event') for (const listener of eventListeners) listener(message.event);
       });
-      const stopWithAdmission = async (admit: (signal: () => void) => void) => {
+      const stopWithAdmission = async (admit: (signal: () => void) => void, force = false) => {
         let kill: ReturnType<typeof setTimeout> | undefined;
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        let failStop!: (error: Error) => void;
+        const failure = new Promise<never>((_, reject) => {
+          failStop = reject;
+        });
+        void failure.catch(() => {});
         admit(() => {
           if (child.exitCode !== null || child.signalCode !== null) return;
-          if (child.connected) child.disconnect();
-          else child.kill('SIGTERM');
-          kill = setTimeout(() => child.kill('SIGKILL'), 5_000);
+          try {
+            if (force) child.kill('SIGKILL');
+            else if (child.connected) child.disconnect();
+            else child.kill('SIGTERM');
+          } catch {
+            /* still attempt the forced stop */
+          }
+          kill = setTimeout(() => {
+            try {
+              child.kill('SIGKILL');
+            } catch {
+              /* timeout reports unconfirmed exit */
+            }
+          }, stopTimeoutMs);
+          timeout = setTimeout(() => failStop(new WorkspaceError('RUNTIME_STOP_FAILED')), stopTimeoutMs * 2);
           // Admission can throw after signalling (for example if its transaction fails to commit).
           // Keep the escalation armed until exit even when stopWithAdmission rejects.
-          void exited.then(() => clearTimeout(kill));
+          void exited.then(() => {
+            clearTimeout(kill);
+            clearTimeout(timeout);
+          });
         });
         try {
-          await exited;
+          await Promise.race([exited, failure]);
         } finally {
           clearTimeout(kill);
+          clearTimeout(timeout);
         }
       };
-      return {
+      const handle: RuntimeHandle = {
         pid: child.pid,
         onExit: (listener) => void exited.then(listener),
         onEvent: (listener) => void eventListeners.add(listener),
@@ -151,6 +183,17 @@ export function processDriver({ startTimeoutMs = 30_000, isolated = false } = {}
         stop: () => stopWithAdmission((signal) => signal()),
         stopWithAdmission,
       };
+      try {
+        await ready(child, startTimeoutMs);
+      } catch {
+        try {
+          await stopWithAdmission((signal) => signal(), true);
+        } catch {
+          throw new RuntimeStartCleanupError(handle);
+        }
+        throw new WorkspaceError('RUNTIME_START_FAILED');
+      }
+      return handle;
     },
   };
 }
@@ -159,7 +202,6 @@ function ready(child: ChildProcess, timeoutMs: number) {
   return new Promise<void>((done, fail) => {
     const failed = () => {
       cleanup();
-      child.kill('SIGKILL');
       fail(new WorkspaceError('RUNTIME_START_FAILED'));
     };
     const timer = setTimeout(failed, timeoutMs);
