@@ -2,6 +2,12 @@
 
 ## #58 · Gateway invitation management (partial)
 
+- A runtime whose startup and cleanup both fail remains failed and reserves capacity until exit or a successful
+  stop/shutdown retry; owner diagnostics distinguish the cleanup failure without exposing provider errors. Synthetic
+  driver tests cover concurrent shutdown and retry; manager crashes and orphan cleanup across restarts remain open.
+  Node 26.12.1: engine 82, unit 117, database 29, check, build and engine-pin passed; Playwright 86 passed,
+  two skipped using scratch copies of missing Chromium libraries. No real accounts or deployment were tested.
+
 - Workspace stop now reauthenticates after pending starts and fences the process driver's synchronous
   disconnect/signal with invitation revocation; the SQLite transaction ends before waiting for process exit.
   Unsupported drivers fail closed for gateway stops; trusted idle/shutdown cleanup remains available. Concurrent

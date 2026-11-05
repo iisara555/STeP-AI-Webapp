@@ -54,6 +54,7 @@ type Live = {
   starting?: Promise<void>;
   stopping?: Promise<void>;
   stopAttempt?: { rejectedBeforeSignal: boolean };
+  startupCleanupFailed?: boolean;
   lastActive: number;
   /** Requests in flight; a busy runtime is never stopped as idle, so work goes on after the browser closes. */
   busy: number;
@@ -135,24 +136,33 @@ export class RuntimeManager {
     entry.starting = (async () => {
       try {
         const handle = await this.driver.start(workspacePaths(this.dataRoot, record.ownerId, record.id));
-        try {
-          const provider = await this.grant(record.ownerId, record.id);
-          if (provider) await handle.call('connect', ProviderGrant.parse(provider));
-        } catch (error) {
-          await handle.stop();
-          throw error;
-        }
+        entry.handle = handle;
+        handle.onExit(() => {
+          if (this.live.get(key) !== entry || entry.handle !== handle) return;
+          Object.assign(entry, { state: 'failed', handle: undefined, error: 'RUNTIME_EXITED' });
+        });
+        const provider = await this.grant(record.ownerId, record.id);
+        if (provider) await handle.call('connect', ProviderGrant.parse(provider));
+        if (entry.handle !== handle) throw new Error('RUNTIME_EXITED');
         handle.onEvent?.((event) => {
           for (const listener of this.listeners.get(key) ?? []) listener(event);
         });
-        entry.handle = handle;
+        if (entry.handle !== handle) throw new Error('RUNTIME_EXITED');
         entry.state = 'running';
-        handle.onExit(() => {
-          if (this.live.get(key) !== entry) return;
-          Object.assign(entry, { state: 'failed', handle: undefined, error: 'RUNTIME_EXITED' });
-        });
       } catch {
-        Object.assign(entry, { state: 'failed', error: 'RUNTIME_START_FAILED' });
+        if (entry.handle) {
+          const handle = entry.handle;
+          try {
+            await handle.stop();
+            if (entry.handle === handle) entry.handle = undefined;
+          } catch {
+            if (entry.handle === handle) entry.startupCleanupFailed = true;
+          }
+        }
+        Object.assign(entry, {
+          state: 'failed',
+          error: entry.startupCleanupFailed ? 'RUNTIME_START_CLEANUP_FAILED' : 'RUNTIME_START_FAILED',
+        });
         throw new WorkspaceError('RUNTIME_START_FAILED');
       } finally {
         entry.starting = undefined;
@@ -370,6 +380,8 @@ export class RuntimeManager {
           entry.state = attempt.signalMayHaveOccurred ? 'failed' : previousState;
           if (attempt.signalMayHaveOccurred) entry.error = 'RUNTIME_STOP_FAILED';
         }
+        if (entry.startupCleanupFailed && attempt.signalMayHaveOccurred)
+          throw new WorkspaceError('RUNTIME_STOP_FAILED');
         throw error;
       }
     })();
