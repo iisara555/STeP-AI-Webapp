@@ -101,12 +101,16 @@ export class RuntimeManager {
     this.grant = grant;
   }
 
-  async create(actor: string, input: { name: string }): Promise<Workspace> {
+  async create(
+    actor: string,
+    input: { name: string },
+    admit?: (publish: () => void) => void,
+  ): Promise<Workspace> {
     const ownerId = parse(UserId, actor, 'INVALID_ID');
     const name = parse(WorkspaceName, input.name, 'INVALID_NAME');
     const at = new Date(this.now()).toISOString();
     const record: WorkspaceRecord = { id: newWorkspaceId(), ownerId, name, createdAt: at, lastActiveAt: at };
-    await createWorkspaceFolders(this.dataRoot, record);
+    await createWorkspaceFolders(this.dataRoot, record, admit);
     return this.view(record);
   }
 

@@ -81,7 +81,9 @@ export function createGateway(options: GatewayOptions) {
         const { name } = parseBody(CreateWorkspace, await readJson(req));
         if ((await manager.list(who.userId)).length >= quotas.workspacesPerUser)
           throw new GatewayError('QUOTA_WORKSPACES');
-        const workspace = await manager.create(who.userId, { name });
+        const workspace = await manager.create(who.userId, { name }, (publish) =>
+          options.invitations ? options.invitations.dispatch(who.email, publish) : publish(),
+        );
         audit({
           actor: who.userId,
           action: 'workspace.create',

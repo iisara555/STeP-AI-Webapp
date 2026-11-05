@@ -2,6 +2,16 @@
 
 ## #58 · Gateway invitation management (partial)
 
+- Workspace creation prepares a private, non-listable staging directory and publishes it with a synchronous
+  rename inside the invitation SQLite fence. A synthetic HTTP regression reproduced a revoked request creating
+  a workspace before this change; tests also cover denial after preparation, cleanup, concurrent creations and
+  uncertain errors after publication. A creation published before revocation remains valid even if its response
+  fails. A crash can leave an invisible staging directory; no crash recovery has been added. This ordering
+  requires cooperating gateways sharing the same correctly locking SQLite database, and does not fence external
+  operator-file edits. The pre-existing workspace quota check is not atomic across concurrent creates.
+  Node 26.12.1: engine 96, unit 117, database 29, check, build and engine-pin passed; cloud Playwright desktop
+  2 passed and mobile 2 skipped. No real accounts or deployment were tested.
+
 - A runtime whose startup and cleanup both fail remains failed and reserves capacity until exit or a successful
   stop/shutdown retry; owner diagnostics distinguish the cleanup failure without exposing provider errors. Synthetic
   driver tests cover concurrent shutdown and retry; manager crashes and orphan cleanup across restarts remain open.
@@ -38,7 +48,7 @@
   synchronous runtime IPC enqueue. Two synthetic HTTP tests first reproduced a conversation created after
   revocation during runtime startup, then passed with the fence. This ordering requires all gateway and admin
   processes to share the same correctly locking database. An enqueue before revocation can still create a
-  conversation afterwards; runtime startup and workspace create/start remain unfenced (stop is now fenced as described above).
+  conversation afterwards; runtime startup and workspace start remain unfenced (create and stop are fenced as described above).
   Local checks: engine 64/64, unit 117/117, database 29/29, check, build and engine-pin passed using
   Node 22.22.1 (below the project's >=24 requirement; SQLite emitted experimental warnings). Cloud Playwright
   desktop could not launch without `libatk-1.0.so.0`; both mobile cases were skipped by the suite.
