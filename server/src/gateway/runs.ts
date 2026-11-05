@@ -216,7 +216,15 @@ export class RunService {
     // A cancel right after the start must not overtake the request it cancels.
     await run.dispatched;
     if (run.status !== 'running') throw new GatewayError('RUN_NOT_ACTIVE');
-    await this.manager.cancel(actor, workspaceId, run.sessionId, dispatch);
+    // Recheck inside the authorization fence, immediately before enqueueing. The manager and
+    // fence can both await; meanwhile this run may finish and a new run may use the session.
+    // There must be no await between this check and send: the runtime channel preserves order.
+    await this.manager.cancel(actor, workspaceId, run.sessionId, (send) =>
+      dispatch(() => {
+        if (run.status !== 'running') throw new GatewayError('RUN_NOT_ACTIVE');
+        return send();
+      }),
+    );
     this.audit({ actor, action: 'run.cancel', workspaceId, runId, outcome: 'requested' });
     return this.view(run);
   }
