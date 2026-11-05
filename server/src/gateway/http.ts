@@ -133,7 +133,9 @@ export function createGateway(options: GatewayOptions) {
       'POST',
       new RegExp(`^/api/workspaces/${WS}/conversations$`),
       async ({ who, params }) => {
-        const conversation = await manager.newConversation(who.userId, params[0]);
+        const conversation = await manager.newConversation(who.userId, params[0], (send) =>
+          options.invitations ? options.invitations.dispatch(who.email, send) : send(),
+        );
         audit({
           actor: who.userId,
           action: 'conversation.create',
@@ -168,6 +170,7 @@ export function createGateway(options: GatewayOptions) {
             if (!current || current.userId !== who.userId || current.email !== who.email)
               throw new GatewayError('UNAUTHENTICATED');
           },
+          (send) => (options.invitations ? options.invitations.dispatch(who.email, send) : send()),
           (send) => (options.invitations ? options.invitations.dispatch(who.email, send) : send()),
         );
       },

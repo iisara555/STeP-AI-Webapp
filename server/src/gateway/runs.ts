@@ -2,7 +2,7 @@
 // it: closing the browser ends only the event stream, the runtime keeps working, and a client that comes back
 // replays what it missed from the Workspace's feed and can still cancel.
 import { randomUUID } from 'node:crypto';
-import type { AskResult, RuntimeEvent } from '../workspace/contract.ts';
+import type { AskResult, RuntimeEvent, SessionRef } from '../workspace/contract.ts';
 import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
 import type { QuotaStore } from './quota-store.ts';
@@ -108,6 +108,7 @@ export class RunService {
     input: { text: string; sessionId?: string },
     authorize: () => Promise<void> = async () => {},
     dispatch: (send: () => Promise<AskResult>) => Promise<AskResult> = (send) => send(),
+    dispatchConversation: (send: () => Promise<SessionRef>) => Promise<SessionRef> = (send) => send(),
   ): Promise<Run> {
     await this.manager.get(actor, workspaceId);
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
@@ -134,7 +135,9 @@ export class RunService {
       // Listen before asking, so the first streamed words are in the feed.
       const feed = await this.feed(actor, workspaceId);
       await authorize();
-      const sessionId = input.sessionId ?? (await this.manager.newConversation(actor, workspaceId)).sessionId;
+      const sessionId =
+        input.sessionId ??
+        (await this.manager.newConversation(actor, workspaceId, dispatchConversation)).sessionId;
       await authorize();
       const key = this.sessionKey(actor, workspaceId, sessionId);
       if (this.active.has(key)) throw new GatewayError('RUN_ALREADY_ACTIVE');

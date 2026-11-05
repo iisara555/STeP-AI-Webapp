@@ -87,9 +87,10 @@ Authentication is checked again immediately before run admission, before an HTTP
 private SSE event. An unauthorized stream closes on its next event; idle streams may remain open. Streams
 also close on socket backpressure or more than 128 pending events; clients must reconnect from the last
 received event ID. A replay exceeding that pending limit emits a `reset` instead of replaying the gap;
-the client must reload conversation state. Run preparation can create an empty conversation or start a runtime
-before admission. For administrator revocations, the gateway serializes the SQLite denial and the synchronous
-`ask` IPC enqueue in the same invitation database: if the denial commits first, that ask is not enqueued;
+the client must reload conversation state. Run preparation can start a runtime before admission. For administrator
+revocations, the gateway serializes the SQLite denial and the synchronous `newConversation` IPC enqueue
+(both the direct endpoint and implicit run preparation) and `ask` IPC enqueue in the same invitation database:
+if the denial commits first, the corresponding request is not enqueued;
 if enqueue happens first, revocation can succeed afterwards and does not cancel the run. The same SQLite
 ordering fences each private HTTP response enqueue and each private SSE event write: a denial committed first
 prevents that enqueue; a write first may still reach the client after the denial. Serialization is done before
@@ -102,7 +103,8 @@ admission still consumes quota. An administrator can explicitly re-invite the ad
 This guarantee requires every gateway and admin writer to use this code and the same SQLite database on a
 filesystem with working SQLite locks; separate database copies, older processes, or direct database edits that
 ignore the protocol are not coordinated. It covers IPC enqueue, not when the child receives the message or
-makes provider requests, and does not stop existing runs or other in-flight side effects.
+makes provider requests. An enqueue before revocation may create a conversation afterwards. It does not stop
+existing runs or fence Workspace creation/start/stop, cancellation or other in-flight side effects.
 
 An operator file edit is **not** serialized with dispatch or delivery: it takes effect on subsequent file
 reads, but previously authorized work or private output can still be enqueued after the file is changed.

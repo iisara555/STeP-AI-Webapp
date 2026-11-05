@@ -10,12 +10,20 @@
   Workspace isolation, revocation of file-based invitations, reinvitation and reopening the store.
 - Still open: admin UI, email delivery, expiry, target-identifying audit, cancellation of existing runs
   on revocation, real Google accounts, gateway process restart, and production acceptance.
+- Direct and implicit run-preparation conversation creation now use the invitation SQLite fence at the
+  synchronous runtime IPC enqueue. Two synthetic HTTP tests first reproduced a conversation created after
+  revocation during runtime startup, then passed with the fence. This ordering requires all gateway and admin
+  processes to share the same correctly locking database. An enqueue before revocation can still create a
+  conversation afterwards; runtime startup, workspace create/start/stop and cancel remain unfenced.
+  Local checks: engine 64/64, unit 117/117, database 29/29, check, build and engine-pin passed using
+  Node 22.22.1 (below the project's >=24 requirement; SQLite emitted experimental warnings). Cloud Playwright
+  desktop could not launch without `libatk-1.0.so.0`; both mobile cases were skipped by the suite.
 - The operator file is authoritative even for previously managed grants; private SSE events and ordinary
   responses reauthenticate before delivery. Idle streams are not proactively closed, and in-flight
   side effects are not cancelled; authorization and writes cannot be atomic with external file edits.
   HTTP handlers can mutate state before their final authentication check, including when an administrator
   revokes during an awaited operation. Run preparation rechecks before subscription and conversation creation,
-  but revocation may still commit after a check and before an asynchronous side effect. Full prevention needs
+  but revocation may still commit after a check and before other asynchronous side effects. Full prevention needs
   a revocation-coordinated side-effect boundary for every mutation; synchronous delivery/ask fencing alone
   does not provide that guarantee. Already-started operations and file-based changes remain separate risks.
   Playwright cloud checks could not launch Chromium: host lacks `libatk-1.0.so.0`.

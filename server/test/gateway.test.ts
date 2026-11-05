@@ -976,6 +976,144 @@ test('SSE disconnects when the response applies backpressure', async () => {
   }
 });
 
+test('admin revocation during runtime startup prevents conversation creation', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'step-conversation-revoke-'));
+  const base = new Set(['root@step.example', 'alice@step.example']);
+  const first = new InvitationStore(
+    join(dir, 'invites.sqlite'),
+    ['step.example'],
+    new Set(['root@step.example']),
+  );
+  const second = new InvitationStore(
+    join(dir, 'invites.sqlite'),
+    ['step.example'],
+    new Set(['root@step.example']),
+  );
+  const runtime = heldDriver();
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const ready = new Promise<void>((resolve) => (entered = resolve));
+  const start = runtime.driver.start.bind(runtime.driver);
+  runtime.driver.start = async (...args) => {
+    entered();
+    await gate;
+    return start(...args);
+  };
+  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const audit = () => {};
+  const server = createGateway({
+    manager,
+    runs: new RunService(manager, audit),
+    audit,
+    invitations: first,
+    baseInvitations: () => base,
+    authenticate: async (header) => {
+      const who = PEOPLE[header?.replace(/^Bearer /, '') ?? ''];
+      return who && first.invited(base).has(who.email) ? who : null;
+    },
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const call = (path: string, init: RequestInit = {}) =>
+    fetch(url + path, {
+      ...init,
+      headers: {
+        authorization: 'Bearer alice',
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+      },
+    });
+  try {
+    const workspace = await (await call('/api/workspaces', post({ name: 'race' }))).json();
+    const request = call(`/api/workspaces/${workspace.id}/conversations`, { method: 'POST' });
+    await ready;
+    second.change('root@step.example', 'alice@step.example', false, base);
+    release();
+    assert.equal((await request).status, 401);
+    second.change('root@step.example', 'alice@step.example', true, base);
+    const conversations = await (await call(`/api/workspaces/${workspace.id}/conversations`)).json();
+    assert.deepEqual(conversations, []);
+  } finally {
+    release();
+    server.closeAllConnections();
+    await new Promise<void>((done) => server.close(() => done()));
+    await manager.shutdown();
+    first.close();
+    second.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('admin revocation during run preparation prevents implicit conversation creation', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'step-conversation-revoke-'));
+  const base = new Set(['root@step.example', 'alice@step.example']);
+  const first = new InvitationStore(
+    join(dir, 'invites.sqlite'),
+    ['step.example'],
+    new Set(['root@step.example']),
+  );
+  const second = new InvitationStore(
+    join(dir, 'invites.sqlite'),
+    ['step.example'],
+    new Set(['root@step.example']),
+  );
+  const runtime = heldDriver();
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const ready = new Promise<void>((resolve) => (entered = resolve));
+  const start = runtime.driver.start.bind(runtime.driver);
+  runtime.driver.start = async (...args) => {
+    entered();
+    await gate;
+    return start(...args);
+  };
+  const manager = new RuntimeManager({ dataRoot: dir, driver: runtime.driver });
+  const audit = () => {};
+  const server = createGateway({
+    manager,
+    runs: new RunService(manager, audit),
+    audit,
+    invitations: first,
+    baseInvitations: () => base,
+    authenticate: async (header) => {
+      const who = PEOPLE[header?.replace(/^Bearer /, '') ?? ''];
+      return who && first.invited(base).has(who.email) ? who : null;
+    },
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const call = (path: string, init: RequestInit = {}) =>
+    fetch(url + path, {
+      ...init,
+      headers: {
+        authorization: 'Bearer alice',
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+      },
+    });
+  try {
+    const workspace = await (await call('/api/workspaces', post({ name: 'race' }))).json();
+    const request = call(`/api/workspaces/${workspace.id}/runs`, post({ text: 'synthetic' }));
+    await ready;
+    second.change('root@step.example', 'alice@step.example', false, base);
+    release();
+    assert.equal((await request).status, 401);
+    second.change('root@step.example', 'alice@step.example', true, base);
+    const conversations = await (await call(`/api/workspaces/${workspace.id}/conversations`)).json();
+    assert.deepEqual(conversations, []);
+  } finally {
+    release();
+    server.closeAllConnections();
+    await new Promise<void>((done) => server.close(() => done()));
+    await manager.shutdown();
+    first.close();
+    second.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('admin revoke before runtime dispatch prevents the queued ask across invitation store connections', async () => {
   const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
   const dir = await mkdtemp(join(tmpdir(), 'step-dispatch-revoke-'));

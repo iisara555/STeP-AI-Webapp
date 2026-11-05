@@ -197,8 +197,12 @@ export class RuntimeManager {
     return readConversationIndex(this.dataRoot, record.ownerId, record.id);
   }
 
-  async newConversation(actor: string, workspaceId: string): Promise<SessionRef> {
-    return this.call(actor, workspaceId, (handle) => handle.call('newConversation', {}));
+  async newConversation(
+    actor: string,
+    workspaceId: string,
+    dispatch: (send: () => Promise<SessionRef>) => Promise<SessionRef> = (send) => send(),
+  ): Promise<SessionRef> {
+    return this.call(actor, workspaceId, (handle) => dispatch(() => handle.call('newConversation', {})));
   }
 
   async messages(actor: string, workspaceId: string, sessionId: string): Promise<ConversationMessage[]> {
