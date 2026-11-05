@@ -4,7 +4,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RuntimeManager } from '../src/workspace/manager.ts';
-import type { RuntimeDriver } from '../src/workspace/contract.ts';
+import {
+  RuntimeStartCleanupError,
+  type RuntimeDriver,
+  type RuntimeHandle,
+} from '../src/workspace/contract.ts';
 
 test('failed startup cleanup retains capacity until shutdown retries successfully', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'step-start-cleanup-'));
@@ -151,6 +155,97 @@ test('an orphan exit releases capacity without a cleanup retry', async () => {
     assert.equal(stops, 1);
   } finally {
     await manager.shutdown();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a successful retry of unconfirmed driver startup cleanup clears the diagnostic', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'step-start-retry-'));
+  let stops = 0;
+  const handle: RuntimeHandle = {
+    health: async () => ({ ok: false, workspaceId: 'test' }),
+    call: async () => ({}) as never,
+    onExit: () => {},
+    stop: async () => {
+      stops++;
+    },
+  };
+  const manager = new RuntimeManager({
+    dataRoot: dir,
+    driver: {
+      start: async () => {
+        throw new RuntimeStartCleanupError(handle);
+      },
+    },
+  });
+  try {
+    const workspace = await manager.create('alice', { name: 'test' });
+    await assert.rejects(manager.start('alice', workspace.id), /RUNTIME_START_FAILED/);
+    assert.equal(stops, 1);
+    assert.equal((await manager.get('alice', workspace.id)).error, 'RUNTIME_START_FAILED');
+  } finally {
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('shutdown during a hung connect waits for timeout and confirmed cleanup, retaining failures for retry', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'step-connect-race-'));
+  let entered!: () => void;
+  let release!: () => void;
+  const connecting = new Promise<void>((resolve) => (entered = resolve));
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let stops = 0;
+  const driver: RuntimeDriver = {
+    async start(spec) {
+      return {
+        health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
+        call: async () => {
+          entered();
+          await gate;
+          return { ok: true } as never;
+        },
+        onExit: () => {},
+        stop: async () => {
+          if (++stops <= 2) throw new Error('stop failed');
+        },
+      };
+    },
+  };
+  const manager = new RuntimeManager({
+    dataRoot: dir,
+    driver,
+    maxRunning: 1,
+    connectTimeoutMs: 20,
+    grant: () => ({ baseUrl: 'https://example.com', token: 'secret', model: 'model' }),
+  });
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const first = await manager.create('alice', { name: 'first' });
+    const second = await manager.create('alice', { name: 'second' });
+    const start = assert.rejects(manager.start('alice', first.id), /RUNTIME_START_FAILED/);
+    await connecting;
+    const shutdown = assert.rejects(manager.shutdown(), /RUNTIME_STOP_FAILED/);
+    await Promise.race([
+      Promise.all([start, shutdown]),
+      new Promise<never>((_, reject) => {
+        watchdog = setTimeout(() => reject(new Error('shutdown hung during connect')), 500);
+      }),
+    ]);
+    assert.equal(stops, 2);
+    assert.equal((await manager.get('alice', first.id)).state, 'failed');
+    assert.equal((await manager.get('alice', first.id)).error, 'RUNTIME_STOP_FAILED');
+    await assert.rejects(manager.start('alice', second.id), /RUNTIME_MANAGER_SHUTTING_DOWN/);
+    await manager.shutdown();
+    assert.equal(stops, 3);
+    assert.equal((await manager.get('alice', first.id)).state, 'stopped');
+    release();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal((await manager.get('alice', first.id)).state, 'stopped');
+  } finally {
+    clearTimeout(watchdog);
+    release();
+    await manager.shutdown().catch(() => {});
     await rm(dir, { recursive: true, force: true });
   }
 });

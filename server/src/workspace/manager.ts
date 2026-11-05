@@ -38,6 +38,8 @@ export type RuntimeManagerOptions = {
   maxRunning?: number;
   /** A running Workspace with no activity for this long is stopped by sweepIdle(); its data stays. */
   idleMs?: number;
+  /** Maximum wait for the provider connect IPC after the driver has returned a handle. */
+  connectTimeoutMs?: number;
   now?: () => number;
   /**
    * The AI endpoint and short-lived token for one runtime start, asked for again at every start and resume so a
@@ -75,6 +77,7 @@ export class RuntimeManager {
   private readonly driver: RuntimeDriver;
   private readonly maxRunning: number;
   private readonly idleMs: number;
+  private readonly connectTimeoutMs: number;
   private readonly now: () => number;
   private readonly grant: NonNullable<RuntimeManagerOptions['grant']>;
 
@@ -83,6 +86,7 @@ export class RuntimeManager {
     driver,
     maxRunning = 8,
     idleMs = 30 * 60_000,
+    connectTimeoutMs = 30_000,
     now = Date.now,
     grant = () => undefined,
   }: RuntimeManagerOptions) {
@@ -90,6 +94,9 @@ export class RuntimeManager {
     this.driver = driver;
     this.maxRunning = maxRunning;
     this.idleMs = idleMs;
+    if (!Number.isFinite(connectTimeoutMs) || connectTimeoutMs <= 0)
+      throw new Error('INVALID_CONNECT_TIMEOUT');
+    this.connectTimeoutMs = connectTimeoutMs;
     this.now = now;
     this.grant = grant;
   }
@@ -147,7 +154,19 @@ export class RuntimeManager {
           Object.assign(entry, { state: 'failed', handle: undefined, error: 'RUNTIME_EXITED' });
         });
         const provider = await this.grant(record.ownerId, record.id);
-        if (provider) await handle.call('connect', ProviderGrant.parse(provider));
+        if (provider) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([
+              handle.call('connect', ProviderGrant.parse(provider)),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error('RUNTIME_CONNECT_TIMEOUT')), this.connectTimeoutMs);
+              }),
+            ]);
+          } finally {
+            clearTimeout(timer);
+          }
+        }
         if (entry.handle !== handle) throw new Error('RUNTIME_EXITED');
         handle.onEvent?.((event) => {
           for (const listener of this.listeners.get(key) ?? []) listener(event);
@@ -168,6 +187,7 @@ export class RuntimeManager {
           try {
             await handle.stop();
             if (entry.handle === handle) entry.handle = undefined;
+            entry.startupCleanupFailed = false;
           } catch {
             if (entry.handle === handle) entry.startupCleanupFailed = true;
           }

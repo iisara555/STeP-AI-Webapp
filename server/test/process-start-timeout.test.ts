@@ -74,3 +74,54 @@ test('failed signals retain a live child and shutdown reports failure within a b
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('hung connect is timed out and shutdown confirms the actual child exit', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'step-connect-child-'));
+  let pid: number | undefined;
+  let exited = false;
+  let entered!: () => void;
+  const connecting = new Promise<void>((resolve) => (entered = resolve));
+  const driver = processDriver({ stopTimeoutMs: 100 });
+  const manager = new RuntimeManager({
+    dataRoot: dir,
+    driver: {
+      async start(spec) {
+        const handle = await driver.start(spec);
+        pid = handle.pid;
+        handle.onExit(() => {
+          exited = true;
+        });
+        return {
+          ...handle,
+          call: (method, params) => {
+            if (method !== 'connect') return handle.call(method, params);
+            entered();
+            return new Promise(() => {});
+          },
+        };
+      },
+    },
+    connectTimeoutMs: 30,
+    grant: () => ({ baseUrl: 'https://example.com', token: 'synthetic', model: 'model' }),
+  });
+  try {
+    const workspace = await manager.create('alice', { name: 'test' });
+    const start = assert.rejects(manager.start('alice', workspace.id), /RUNTIME_START_FAILED/);
+    await connecting;
+    const shutdown = manager.shutdown();
+    await Promise.all([start, shutdown]);
+    assert.ok(pid);
+    assert.ok(exited, 'child exit must be confirmed');
+    assert.equal((await manager.get('alice', workspace.id)).state, 'stopped');
+  } finally {
+    if (pid && !exited) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        /* child already exited */
+      }
+    }
+    await manager.shutdown().catch(() => {});
+    await rm(dir, { recursive: true, force: true });
+  }
+});
