@@ -106,6 +106,9 @@ export type RuntimeCalls = {
 export type RuntimeHandle = {
   pid?: number;
   health(timeoutMs?: number): Promise<RuntimeHealth>;
+  /** Enqueue the request synchronously before returning its result Promise. No deferred enqueue is allowed:
+   * callers fence this invocation with revocation; only the response may be asynchronous.
+   */
   call<M extends keyof RuntimeCalls>(
     method: M,
     params: RuntimeCalls[M]['params'],
@@ -127,6 +130,12 @@ export type RuntimeHandle = {
 /** Docker, Podman or a systemd sandbox can replace the process driver without changing the contract. */
 export type RuntimeDriver = {
   start(spec: RuntimeSpec): Promise<RuntimeHandle>;
+  /** Invoke admit exactly once synchronously around the actual spawn, not around asynchronous preparation.
+   * The spawn callback must run before admit returns; readiness must be awaited after admission returns.
+   * A driver must clean up a spawned process if admission throws after invoking spawn.
+   * Drivers unable to provide this guarantee must omit this method.
+   */
+  startWithAdmission?(spec: RuntimeSpec, admit: (spawn: () => void) => void): Promise<RuntimeHandle>;
 };
 
 /** Startup failed with a process that has not been confirmed dead. */

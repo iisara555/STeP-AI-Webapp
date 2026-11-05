@@ -3,7 +3,7 @@
 // replays what it missed from the Workspace's feed and can still cancel.
 import { randomUUID } from 'node:crypto';
 import type { AskResult, RuntimeEvent, SessionRef } from '../workspace/contract.ts';
-import type { RuntimeManager } from '../workspace/manager.ts';
+import type { RuntimeManager, StartAuthority } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
 import type { QuotaStore } from './quota-store.ts';
 
@@ -109,6 +109,7 @@ export class RunService {
     authorize: () => Promise<void> = async () => {},
     dispatch: (send: () => Promise<AskResult>) => Promise<AskResult> = (send) => send(),
     dispatchConversation: (send: () => Promise<SessionRef>) => Promise<SessionRef> = (send) => send(),
+    authority?: StartAuthority,
   ): Promise<Run> {
     await this.manager.get(actor, workspaceId);
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
@@ -137,7 +138,7 @@ export class RunService {
       await authorize();
       const sessionId =
         input.sessionId ??
-        (await this.manager.newConversation(actor, workspaceId, dispatchConversation)).sessionId;
+        (await this.manager.newConversation(actor, workspaceId, dispatchConversation, authority)).sessionId;
       await authorize();
       const key = this.sessionKey(actor, workspaceId, sessionId);
       if (this.active.has(key)) throw new GatewayError('RUN_ALREADY_ACTIVE');
@@ -162,14 +163,31 @@ export class RunService {
       feed.push('run', this.view(run));
       this.audit({ actor, action: 'run.start', workspaceId, runId: run.id, outcome: 'accepted' });
 
+      let pendingSettlement: Promise<void> | undefined;
       // Deliberately not awaited: the run outlives the request that started it.
-      void this.manager.ask(actor, workspaceId, { text: input.text, sessionId }, dispatched, dispatch).then(
-        (result) => this.finish(run, feed, result),
-        (error) => {
-          dispatched();
-          this.finish(run, feed, undefined, codeOf(error));
-        },
-      );
+      void this.manager
+        .ask(
+          actor,
+          workspaceId,
+          { text: input.text, sessionId },
+          dispatched,
+          dispatch,
+          authority,
+          (settled) => {
+            pendingSettlement = settled;
+          },
+        )
+        .then(
+          (result) => this.finish(run, feed, result),
+          async (error) => {
+            dispatched();
+            // Admission failure does not prove that IPC had no effect. Expose the
+            // error code while retaining the active run until the sent work settles.
+            run.code = codeOf(error);
+            if (pendingSettlement) await pendingSettlement;
+            this.finish(run, feed, undefined, codeOf(error));
+          },
+        );
       return this.view(run);
     } finally {
       if (!admitted) {

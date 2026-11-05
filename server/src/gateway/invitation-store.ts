@@ -41,7 +41,17 @@ export class InvitationStore {
       throw error;
     }
   }
-  change(actor: string, email: string, active: boolean, base: Set<string>): void {
+  /** Check credentials synchronously after acquiring the writer lock, before authorization/mutation.
+   * Callers must finish asynchronous reads first; this callback must never await or open a transaction.
+   * Operator-file snapshots remain non-atomic with edits outside this SQLite database.
+   */
+  change(
+    actor: string,
+    email: string,
+    active: boolean,
+    base: Set<string>,
+    validateCredential: () => void = () => {},
+  ): void {
     const normalized = email.toLowerCase();
     if (
       !z.email().safeParse(normalized).success ||
@@ -52,6 +62,7 @@ export class InvitationStore {
     if (this.admins.has(normalized) || (active && !base.has(normalized))) throw new GatewayError('FORBIDDEN');
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      validateCredential();
       if (!this.admins.has(actor) || !this.invited(base).has(actor)) throw new GatewayError('FORBIDDEN');
       this.db
         .prepare(

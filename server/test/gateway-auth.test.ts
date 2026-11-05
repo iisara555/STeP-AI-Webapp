@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { googleIdTokenAuth } from '../src/gateway/auth.ts';
+import { googleIdTokenAuth, identityExpired } from '../src/gateway/auth.ts';
 
 // A synthetic signing key stands in for Google's; no request leaves the machine.
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -49,6 +49,7 @@ test('an invited, verified Google account of the organization signs in with a st
     userId: 'g110169484474386276334',
     email: 'staff@step.example',
     admin: true,
+    tokenExpiresAt: valid.exp,
   });
 });
 
@@ -109,4 +110,30 @@ test('persistent administrator changes control verified Google identities on the
   } finally {
     store.close();
   }
+});
+
+test('synchronous expiry uses verified claims and the verifier skew boundary', async () => {
+  const identity = (await auth()(token(valid)))!;
+  assert.equal(identity.tokenExpiresAt, valid.exp);
+  assert.equal(identityExpired(identity, (valid.exp + 60) * 1000 + 999), false);
+  assert.equal(identityExpired(identity, (valid.exp + 61) * 1000), true);
+  assert.ok(
+    await googleIdTokenAuth({
+      clientId: CLIENT,
+      domains: ['step.example'],
+      invited: () => new Set(['staff@step.example']),
+      keys: async () => [{ ...publicKey.export({ format: 'jwk' }), kid: KID }],
+      now: () => (valid.exp + 60) * 1000,
+    })(token(valid)),
+  );
+  assert.equal(
+    await googleIdTokenAuth({
+      clientId: CLIENT,
+      domains: ['step.example'],
+      invited: () => new Set(['staff@step.example']),
+      keys: async () => [{ ...publicKey.export({ format: 'jwk' }), kid: KID }],
+      now: () => (valid.exp + 61) * 1000,
+    })(token(valid)),
+    null,
+  );
 });

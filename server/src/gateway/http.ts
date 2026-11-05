@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { AskInput, WorkspaceError, WorkspaceName } from '../workspace/contract.ts';
 import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
-import type { Authenticator, Identity } from './auth.ts';
+import { identityExpired, type Authenticator, type Identity } from './auth.ts';
 import type { InvitationStore } from './invitation-store.ts';
 import {
   codeOf,
@@ -71,6 +71,23 @@ export function createGateway(options: GatewayOptions) {
   const now = options.now ?? Date.now;
   const startedAt = now();
 
+  const dispatch = <T>(who: Identity, send: () => T): T => {
+    const admit = () => {
+      if (identityExpired(who, now())) throw new GatewayError('UNAUTHENTICATED');
+      return send();
+    };
+    return options.invitations ? options.invitations.dispatch(who.email, admit) : admit();
+  };
+
+  const startAuthority = (req: IncomingMessage, who: Identity) => ({
+    authorize: async () => {
+      const current = await authenticate(req.headers.authorization);
+      if (!current || current.userId !== who.userId || current.email !== who.email)
+        throw new GatewayError('UNAUTHENTICATED');
+    },
+    admit: (spawn: () => void) => dispatch(who, spawn),
+  });
+
   const routes: Route[] = [
     ['GET', /^\/api\/me$/, async ({ who }) => who],
     ['GET', /^\/api\/workspaces$/, async ({ who }) => manager.list(who.userId)],
@@ -81,9 +98,7 @@ export function createGateway(options: GatewayOptions) {
         const { name } = parseBody(CreateWorkspace, await readJson(req));
         if ((await manager.list(who.userId)).length >= quotas.workspacesPerUser)
           throw new GatewayError('QUOTA_WORKSPACES');
-        const workspace = await manager.create(who.userId, { name }, (publish) =>
-          options.invitations ? options.invitations.dispatch(who.email, publish) : publish(),
-        );
+        const workspace = await manager.create(who.userId, { name }, (publish) => dispatch(who, publish));
         audit({
           actor: who.userId,
           action: 'workspace.create',
@@ -101,8 +116,9 @@ export function createGateway(options: GatewayOptions) {
     [
       'POST',
       new RegExp(`^/api/workspaces/${WS}/start$`),
-      async ({ who, params }) => {
-        const workspace = await manager.start(who.userId, params[0]);
+      async ({ req, who, params }) => {
+        const authority = startAuthority(req, who);
+        const workspace = await manager.start(who.userId, params[0], authority.admit, authority.authorize);
         audit({
           actor: who.userId,
           action: 'workspace.start',
@@ -119,7 +135,7 @@ export function createGateway(options: GatewayOptions) {
         const workspace = await manager.stop(
           who.userId,
           params[0],
-          (signal) => (options.invitations ? options.invitations.dispatch(who.email, signal) : signal()),
+          (signal) => dispatch(who, signal),
           async () => {
             const current = await authenticate(req.headers.authorization);
             if (!current || current.userId !== who.userId || current.email !== who.email)
@@ -143,9 +159,12 @@ export function createGateway(options: GatewayOptions) {
     [
       'POST',
       new RegExp(`^/api/workspaces/${WS}/conversations$`),
-      async ({ who, params }) => {
-        const conversation = await manager.newConversation(who.userId, params[0], (send) =>
-          options.invitations ? options.invitations.dispatch(who.email, send) : send(),
+      async ({ req, who, params }) => {
+        const conversation = await manager.newConversation(
+          who.userId,
+          params[0],
+          (send) => dispatch(who, send),
+          startAuthority(req, who),
         );
         audit({
           actor: who.userId,
@@ -159,7 +178,8 @@ export function createGateway(options: GatewayOptions) {
     [
       'GET',
       new RegExp(`^/api/workspaces/${WS}/conversations/([A-Za-z0-9_-]{1,200})/messages$`),
-      async ({ who, params }) => manager.messages(who.userId, params[0], params[1]),
+      async ({ req, who, params }) =>
+        manager.messages(who.userId, params[0], params[1], startAuthority(req, who)),
     ],
     [
       'GET',
@@ -181,8 +201,9 @@ export function createGateway(options: GatewayOptions) {
             if (!current || current.userId !== who.userId || current.email !== who.email)
               throw new GatewayError('UNAUTHENTICATED');
           },
-          (send) => (options.invitations ? options.invitations.dispatch(who.email, send) : send()),
-          (send) => (options.invitations ? options.invitations.dispatch(who.email, send) : send()),
+          (send) => dispatch(who, send),
+          (send) => dispatch(who, send),
+          startAuthority(req, who),
         );
       },
     ],
@@ -194,10 +215,7 @@ export function createGateway(options: GatewayOptions) {
     [
       'POST',
       new RegExp(`^/api/workspaces/${WS}/runs/${RUN}/cancel$`),
-      async ({ who, params }) =>
-        runs.cancel(who.userId, params[0], params[1], (send) =>
-          options.invitations ? options.invitations.dispatch(who.email, send) : send(),
-        ),
+      async ({ who, params }) => runs.cancel(who.userId, params[0], params[1], (send) => dispatch(who, send)),
     ],
     [
       'GET',
@@ -222,7 +240,9 @@ export function createGateway(options: GatewayOptions) {
         if (!who.admin) throw new GatewayError('FORBIDDEN');
         if (!options.invitations || !options.baseInvitations) throw new GatewayError('NOT_FOUND');
         const { email } = parseBody(z.object({ email: z.string() }).strict(), await readJson(req));
-        options.invitations.change(who.email, email, active, await options.baseInvitations());
+        options.invitations.change(who.email, email, active, await options.baseInvitations(), () => {
+          if (identityExpired(who, now())) throw new GatewayError('UNAUTHENTICATED');
+        });
         audit({
           actor: who.userId,
           action: active ? 'invitation.create' : 'invitation.revoke',
@@ -281,7 +301,7 @@ export function createGateway(options: GatewayOptions) {
           throw new GatewayError('UNAUTHENTICATED');
         const body = result === undefined ? undefined : JSON.stringify(result);
         const deliver = () => sendEncoded(res, res.statusCode, body);
-        return options.invitations ? options.invitations.dispatch(who.email, deliver) : deliver();
+        return dispatch(who, deliver);
       }
       throw new GatewayError('NOT_FOUND');
     } catch (error) {
@@ -335,7 +355,7 @@ export function createGateway(options: GatewayOptions) {
             if (!current || current.userId !== who.userId || current.email !== who.email) return close();
             const frame = `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
             const write = () => res.write(frame);
-            const accepted = options.invitations ? options.invitations.dispatch(who.email, write) : write();
+            const accepted = dispatch(who, write);
             if (!accepted) close();
           })
           .catch(close)

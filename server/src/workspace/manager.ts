@@ -31,6 +31,14 @@ import {
   workspacePaths,
 } from './storage.ts';
 
+/** Observe before returning to a fence whose COMMIT can throw after IPC enqueue.
+ * Keep the original Promise so admitted callers still receive the runtime result/error.
+ */
+function observeDispatch<T>(result: Promise<T>): Promise<T> {
+  void result.catch(() => {});
+  return result;
+}
+
 export type RuntimeManagerOptions = {
   dataRoot: string;
   driver: RuntimeDriver;
@@ -49,6 +57,11 @@ export type RuntimeManagerOptions = {
     ownerId: string,
     workspaceId: string,
   ) => ProviderGrant | undefined | Promise<ProviderGrant | undefined>;
+};
+
+export type StartAuthority = {
+  admit: (spawn: () => void) => void;
+  authorize: () => Promise<void>;
 };
 
 type Live = {
@@ -123,10 +136,18 @@ export class RuntimeManager {
   }
 
   /** Starts the runtime, or resumes it from its folder after a stop, idle stop or crash. */
-  async start(actor: string, workspaceId: string): Promise<Workspace> {
+  async start(
+    actor: string,
+    workspaceId: string,
+    admit?: (spawn: () => void) => void,
+    authorize?: () => Promise<void>,
+  ): Promise<Workspace> {
     if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
     const record = await readRecord(this.dataRoot, actor, workspaceId);
     if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
+    await authorize?.();
+    if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
+    admit?.(() => {});
     const key = this.key(record);
     const current = this.live.get(key);
     if (current?.stopping) {
@@ -137,21 +158,49 @@ export class RuntimeManager {
         // A different caller's rejected authority did not signal the runtime. Real stop failures still propagate.
         if (!attempt?.rejectedBeforeSignal) throw error;
       }
-      return this.start(actor, workspaceId);
+      return this.start(actor, workspaceId, admit, authorize);
     }
-    if (current?.state === 'running') return this.touchRecord(record, current);
+    if (current?.state === 'running') return this.touchRecord(record, current, admit);
     // A failed stop may have signalled the runtime. Do not reuse or replace it until exit or a retry.
     if (current?.state === 'failed' && current.handle) throw new WorkspaceError('RUNTIME_NOT_RUNNING');
     if (current?.starting) {
-      await current.starting;
+      try {
+        await current.starting;
+      } catch (error) {
+        await authorize?.();
+        admit?.(() => {});
+        // A denied leader whose process is absent belongs to that caller; a valid waiter can retry.
+        if (this.live.get(key) !== current) return this.start(actor, workspaceId, admit, authorize);
+        throw error;
+      }
+      await authorize?.();
+      admit?.(() => {});
       return this.view(record);
     }
     if (this.running() >= this.maxRunning) throw new WorkspaceError('RUNTIME_CAPACITY');
+    if (admit && !this.driver.startWithAdmission) throw new Error('RUNTIME_START_ADMISSION_UNSUPPORTED');
     const entry: Live = { state: 'starting', lastActive: this.now(), busy: 0 };
     this.live.set(key, entry);
     entry.starting = (async () => {
+      let spawned = false;
+      let connectAdmissionDenied = false;
+      let admissionFailure: { error: unknown } | undefined;
       try {
-        const handle = await this.driver.start(workspacePaths(this.dataRoot, record.ownerId, record.id));
+        const spec = workspacePaths(this.dataRoot, record.ownerId, record.id);
+        const handle = admit
+          ? await this.driver.startWithAdmission!(spec, (spawn) => {
+              try {
+                admit(() => {
+                  if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
+                  spawned = true;
+                  spawn();
+                });
+              } catch (error) {
+                admissionFailure = { error };
+                throw error;
+              }
+            })
+          : await this.driver.start(spec);
         entry.handle = handle;
         handle.onExit(() => {
           if (this.live.get(key) !== entry || entry.handle !== handle) return;
@@ -162,7 +211,28 @@ export class RuntimeManager {
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             await Promise.race([
-              handle.call('connect', ProviderGrant.parse(provider)),
+              (() => {
+                const grant = ProviderGrant.parse(provider);
+                let connected: Promise<{ ok: true }> | undefined;
+                // Fence the actual synchronous enqueue after the asynchronous grant wait.
+                const send = () => {
+                  connected = observeDispatch(handle.call('connect', grant));
+                };
+                if (admit) {
+                  let sent = false;
+                  try {
+                    admit(() => {
+                      sent = true;
+                      send();
+                    });
+                  } catch (error) {
+                    connectAdmissionDenied = !sent;
+                    admissionFailure = { error };
+                    throw error;
+                  }
+                } else send();
+                return connected!;
+              })(),
               new Promise<never>((_, reject) => {
                 timer = setTimeout(() => reject(new Error('RUNTIME_CONNECT_TIMEOUT')), this.connectTimeoutMs);
               }),
@@ -178,6 +248,10 @@ export class RuntimeManager {
         if (entry.handle !== handle) throw new Error('RUNTIME_EXITED');
         entry.state = 'running';
       } catch (error) {
+        if (admit && !spawned && !(error instanceof RuntimeStartCleanupError)) {
+          if (this.live.get(key) === entry) this.live.delete(key);
+          throw error;
+        }
         if (error instanceof RuntimeStartCleanupError) {
           entry.handle = error.handle;
           entry.startupCleanupFailed = true;
@@ -200,13 +274,22 @@ export class RuntimeManager {
           state: 'failed',
           error: entry.startupCleanupFailed ? 'RUNTIME_START_CLEANUP_FAILED' : 'RUNTIME_START_FAILED',
         });
+        // Only a denial before credential enqueue with confirmed process absence releases
+        // the shared reservation. Uncertain cleanup and post-enqueue failures remain visible.
+        if (connectAdmissionDenied && !entry.handle && !entry.startupCleanupFailed) {
+          if (this.live.get(key) === entry) this.live.delete(key);
+        }
+        // Cleanup uncertainty overrides the cause; only confirmed absence permits returning it.
+        if (!entry.handle && !entry.startupCleanupFailed && admissionFailure) throw admissionFailure.error;
         throw new WorkspaceError('RUNTIME_START_FAILED');
       } finally {
         entry.starting = undefined;
       }
     })();
     await entry.starting;
-    return this.touchRecord(record, entry);
+    await authorize?.();
+    admit?.(() => {});
+    return this.touchRecord(record, entry, admit);
   }
 
   async stop(
@@ -238,14 +321,21 @@ export class RuntimeManager {
     input: AskInput,
     onDispatch?: () => void,
     dispatch: (send: () => Promise<AskResult>) => Promise<AskResult> = (send) => send(),
+    authority?: StartAuthority,
+    onPending?: (settled: Promise<void>) => void,
   ): Promise<AskResult> {
     const request = parse(AskInput, input, 'INVALID_INPUT');
     // onDispatch runs just before the request is sent; the channel keeps order, so a later cancel comes after it.
-    return this.call(actor, workspaceId, (handle) =>
-      dispatch(() => {
-        onDispatch?.();
-        return handle.call('ask', request);
-      }),
+    return this.call(
+      actor,
+      workspaceId,
+      (handle, track) =>
+        dispatch(() => {
+          onDispatch?.();
+          return track(handle.call('ask', request));
+        }),
+      authority,
+      onPending,
     );
   }
 
@@ -261,13 +351,38 @@ export class RuntimeManager {
     actor: string,
     workspaceId: string,
     dispatch: (send: () => Promise<SessionRef>) => Promise<SessionRef> = (send) => send(),
+    authority?: StartAuthority,
   ): Promise<SessionRef> {
-    return this.call(actor, workspaceId, (handle) => dispatch(() => handle.call('newConversation', {})));
+    return this.call(
+      actor,
+      workspaceId,
+      (handle, track) => dispatch(() => track(handle.call('newConversation', {}))),
+      authority,
+    );
   }
 
-  async messages(actor: string, workspaceId: string, sessionId: string): Promise<ConversationMessage[]> {
+  async messages(
+    actor: string,
+    workspaceId: string,
+    sessionId: string,
+    authority?: StartAuthority,
+  ): Promise<ConversationMessage[]> {
     const ref = parse(SessionRef, { sessionId }, 'INVALID_INPUT');
-    return this.call(actor, workspaceId, (handle) => handle.call('messages', ref));
+    return this.call(
+      actor,
+      workspaceId,
+      (handle, track) => {
+        // RuntimeHandle.call enqueues synchronously; never await between admission and enqueue.
+        let result: Promise<ConversationMessage[]> | undefined;
+        const send = () => {
+          result = track(handle.call('messages', ref));
+        };
+        if (authority) authority.admit(send);
+        else send();
+        return result!;
+      },
+      authority,
+    );
   }
 
   /** Cancels a running answer. A stopped runtime has nothing running, so there is nothing to cancel. */
@@ -281,7 +396,29 @@ export class RuntimeManager {
     const record = await readRecord(this.dataRoot, actor, workspaceId);
     const entry = this.live.get(this.key(record));
     if (!entry?.handle || entry.state !== 'running') throw new WorkspaceError('RUNTIME_NOT_RUNNING');
-    await dispatch(() => entry.handle!.call('cancel', ref));
+    entry.busy++;
+    const pending: Promise<unknown>[] = [];
+    let failure: unknown;
+    try {
+      await dispatch(() => {
+        const result = observeDispatch(entry.handle!.call('cancel', ref));
+        pending.push(result);
+        return result;
+      });
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally {
+      // Even a failed admission may have sent cancellation. Do not make idle
+      // cleanup eligible until the acknowledgement (or runtime rejection) arrives.
+      void Promise.allSettled(pending).then((outcomes) => {
+        for (const outcome of outcomes) {
+          if (outcome.status === 'rejected' && outcome.reason !== failure)
+            console.error('RUNTIME_DISPATCH_FAILED_AFTER_ADMISSION_ERROR');
+        }
+        entry.busy--;
+      });
+    }
   }
 
   /** Receives the progress events of the owner's Workspace, across stops and resumes. Returns an unsubscribe. */
@@ -345,27 +482,69 @@ export class RuntimeManager {
     }
   }
 
-  private async call<T>(actor: string, workspaceId: string, fn: (handle: RuntimeHandle) => Promise<T>) {
+  private async call<T>(
+    actor: string,
+    workspaceId: string,
+    fn: (handle: RuntimeHandle, track: <R>(pending: Promise<R>) => Promise<R>) => Promise<T>,
+    authority?: StartAuthority,
+    onPending?: (settled: Promise<void>) => void,
+  ) {
     const record = await readRecord(this.dataRoot, actor, workspaceId);
     const key = this.key(record);
     this.activeCalls.set(key, (this.activeCalls.get(key) ?? 0) + 1);
     let entry: Live | undefined;
+    let retained = false;
     try {
-      await this.start(actor, workspaceId);
+      await this.start(actor, workspaceId, authority?.admit, authority?.authorize);
       entry = this.live.get(key);
       if (!entry?.handle || entry.state !== 'running') throw new WorkspaceError('RUNTIME_NOT_RUNNING');
       entry.busy++;
+      const pending: Promise<unknown>[] = [];
+      let completed = false;
+      const complete = async () => {
+        completed = true;
+        entry!.busy--;
+        await this.touchRecord(record, entry!, authority?.admit, true);
+      };
       try {
-        return await fn(entry.handle);
-      } finally {
-        entry.busy--;
-        await this.touchRecord(record, entry);
+        const result = await fn(entry.handle, <R>(promise: Promise<R>) => {
+          pending.push(promise);
+          return observeDispatch(promise);
+        });
+        await complete();
+        return result;
+      } catch (error) {
+        // A fence may throw after enqueue. Return that error promptly, but retain both
+        // idle protection and the Gateway's session reservation until every send settles.
+        retained = true;
+        const settled = (async () => {
+          const outcomes = await Promise.allSettled(pending);
+          for (const outcome of outcomes) {
+            if (outcome.status === 'rejected' && outcome.reason !== error)
+              console.error('RUNTIME_DISPATCH_FAILED_AFTER_ADMISSION_ERROR');
+          }
+          if (!completed) {
+            try {
+              await complete();
+            } catch {
+              // Secondary filesystem/admission failures must not replace the original error.
+              console.error('RUNTIME_COMPLETION_BOOKKEEPING_FAILED');
+            }
+          }
+        })();
+        onPending?.(settled);
+        void settled.finally(() => this.releaseCall(key));
+        throw error;
       }
     } finally {
-      const remaining = (this.activeCalls.get(key) ?? 1) - 1;
-      if (remaining) this.activeCalls.set(key, remaining);
-      else this.activeCalls.delete(key);
+      if (!retained) this.releaseCall(key);
     }
+  }
+
+  private releaseCall(key: string) {
+    const remaining = (this.activeCalls.get(key) ?? 1) - 1;
+    if (remaining) this.activeCalls.set(key, remaining);
+    else this.activeCalls.delete(key);
   }
 
   private async stopKey(
@@ -446,10 +625,31 @@ export class RuntimeManager {
     }
   }
 
-  private async touchRecord(record: WorkspaceRecord, entry: Live) {
-    entry.lastActive = this.now();
-    record.lastActiveAt = new Date(entry.lastActive).toISOString();
-    await saveRecord(this.dataRoot, record);
+  private async touchRecord(
+    record: WorkspaceRecord,
+    entry: Live,
+    admit?: (publish: () => void) => void,
+    skipDenied = false,
+  ) {
+    const lastActive = this.now();
+    record.lastActiveAt = new Date(lastActive).toISOString();
+    await saveRecord(this.dataRoot, record, (publish) => {
+      const commit = () => {
+        publish();
+        entry.lastActive = lastActive;
+      };
+      if (admit) {
+        let admitted = false;
+        try {
+          admit(() => {
+            admitted = true;
+            commit();
+          });
+        } catch (error) {
+          if (!skipDenied || admitted) throw error;
+        }
+      } else commit();
+    });
     return this.view(record);
   }
 

@@ -2,7 +2,7 @@
 // looked up only under its owner's folder, so one user's request can never name another user's Workspace.
 import { randomUUID } from 'node:crypto';
 import { renameSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rename, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
   parse,
@@ -45,13 +45,17 @@ export async function createWorkspaceFolders(
   return paths;
 }
 
-export async function saveRecord(dataRoot: string, record: WorkspaceRecord) {
+export async function saveRecord(
+  dataRoot: string,
+  record: WorkspaceRecord,
+  admit: (publish: () => void) => void = (publish) => publish(),
+) {
   const { dir } = workspacePaths(dataRoot, record.ownerId, record.id);
   const file = join(dir, 'workspace.json');
   const temp = file + '.' + randomUUID() + '.tmp';
   try {
     await writeFile(temp, JSON.stringify(record, null, 2), { mode: 0o600 });
-    await rename(temp, file);
+    admit(() => renameSync(temp, file));
   } finally {
     await rm(temp, { force: true });
   }

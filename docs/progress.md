@@ -2,6 +2,144 @@
 
 ## #58 · Gateway invitation management (partial)
 
+- Admin invitation expiry review: เพิ่ม synchronous credential validity check ภายใน transaction
+  `BEGIN IMMEDIATE` ของ `InvitationStore.change` หลังได้ writer lock ก่อนตรวจ admin/live invitation
+  และ mutation; body/base-file reads รอให้จบนอก transaction ไม่ซ้อน dispatch transaction และไม่ถือ lock
+  ข้าม await คง deny/allow และ authorization เดิม ตรวจ expiry จาก signed claims ด้วย floor seconds
+  และ inclusive skew 60 วินาที การเปลี่ยน operator-file ยังไม่ atomic: ใช้ snapshot ที่อ่านก่อน lock
+  การแก้ไฟล์ภายนอก SQLite อาจเกิดหลังอ่าน snapshot; ต้องใช้ cooperating writers กับ SQLite เดียวกัน
+- Red-first regression ใช้ synthetic RS256 token และ controlled clock: ก่อนแก้ 4 expired cases คืน 401
+  แต่เปลี่ยน invitation แล้ว หลังแก้ 8 cases ผ่าน ทั้ง grant/revoke, body/base read และ skew boundary
+  เพิ่ม writer-lock/committed actor revocation/authorization/rollback-release checks รวม targeted auth
+  14 tests ผ่าน Node 24.22.2; direct database isolation 29 ผ่าน และ build ผ่าน ไม่มี server type diagnostic
+  (มี 17 diagnostics เดิมใน pinned Harness) Required npm check/engine-pin ติด subprocess EPERM;
+  npm unit/db/engine ติด tsx IPC EPERM; direct combined unit/engine abort ใน Node callback assertion
+  formatting ผ่าน; workspace-runtime isolation ล้มเหลว 4 tests จาก sandbox namespace ไม่ถือว่าผ่าน
+  Playwright cloud-workspace เริ่ม configured web server ไม่สำเร็จ ยังไม่ประกาศพร้อมใช้งาน
+  เก็บ uncommitted work เดิมทั้งหมด ไม่มี production, secrets, GitHub, worktree อื่น, commit หรือ push
+
+- Startup error review: คง admission error object เดิมหลังยืนยัน cleanup สำเร็จ ทั้ง spawn และ connect;
+  token หมดอายุ/ถูกถอนสิทธิ์คืน UNAUTHENTICATED และ HTTP 401 แทน RUNTIME_START_FAILED
+  process-driver คืน cause เดิมหลังยืนยัน child exit ส่วน cleanup ที่ยังไม่ยืนยันยังใช้ error แบบ sanitized
+  และ diagnostic RUNTIME_START_CLEANUP_FAILED พร้อมเก็บ handle/capacity ตามเดิม ไม่เปิดสิทธิ์หรือ retry connect
+- Deterministic regressions ล้มเหลวก่อนแก้และผ่านหลังแก้: real SQLite deferred COMMIT ยืนยัน object เดิม
+  ผ่าน direct driver, manager → process-driver และ connect/shared waiter พร้อม rollback/confirmed exit;
+  ระหว่างรอ cleanup ยังปฏิเสธ runtime ใหม่ด้วย capacity และเมื่อ cleanup ล้มเหลวยังไม่เปิด capacity
+  expiry มี/ไม่มี invitation store คืน 401 และ revocation ไม่ส่ง credential, authorized waiter ยังตรวจสิทธิ์ตนเอง
+- Node 24.22.2: targeted startup/cleanup/stop/publication ผ่าน 46 tests, auth/dispatch ที่เกี่ยวข้องผ่าน 16,
+  direct database isolation ผ่าน 29; build และ repository formatting ผ่าน Direct server types มีเพียง
+  17 diagnostics เดิมใน pinned Harness ไม่มี server diagnostic npm check/engine-pin ติด subprocess EPERM;
+  npm unit/db/engine ติด tsx IPC EPERM, direct unit abort ใน Node async callback assertion;
+  runtime suite ผ่าน 13 แต่ isolation ล้มเหลว 4 เพราะ Bubblewrap สร้าง namespace ไม่ได้ ไม่ถือว่าผ่าน
+  Playwright cloud-workspace เริ่ม configured web server ไม่สำเร็จ ยังไม่รับรองพร้อมใช้งานหรือ deployment
+  เก็บงานเดิมทั้งหมด ไม่ใช้ production, real accounts, secrets, GitHub, worktree อื่น, commit หรือ push
+
+- Independent review follow-up: คง runtime error object เดิมเมื่อ completion metadata ล้มเหลวด้วย;
+  secondary failure ส่ง diagnostic แบบไม่ใส่ข้อมูล private ส่วน bookkeeping failure หลัง runtime สำเร็จ
+  ยังส่ง error ให้ caller ไม่แปลงเป็น success เมื่อ admission COMMIT ล้มเหลวหลัง enqueue จะส่ง error
+  ทันที แต่เก็บ busy/active-call จนทุก Promise ที่ส่งแล้ว settle; cancel acknowledgement ติดตามด้วย
+  RunService แสดง admission code ระหว่างยัง running และเก็บ session reservation จน settlement
+  จึงปฏิเสธ successor ระหว่างงานเดิม และอนุญาต successor หลังจบ โดยไม่ retry งานที่อาจมีผลแล้ว
+- Deterministic checks ใช้ real deferred SQLite COMMIT failure: dispatch 11/11 ผ่าน รวม successor
+  ผ่าน RunService → manager → runtime และ original runtime vs bookkeeping error; related manager
+  31/31 และ database isolation 29/29 ผ่านด้วย Node 24.22.2, build/format ผ่าน direct server types
+  มีเฉพาะ pinned-Harness diagnostics เดิม npm check/engine-pin ติด subprocess EPERM; npm unit/db/engine
+  ติด tsx IPC EPERM, direct unit abort ใน Node async callback assertion; Playwright เริ่ม web server ไม่สำเร็จ
+  workspace-runtime isolation ยังล้มเหลวจาก Bubblewrap namespace ไม่ถือว่าผ่านหรือพร้อมใช้งาน
+- หาก runtime ไม่ settle จะเก็บ reservation ต่อไปโดยไม่รอใน admission-error response; stop/shutdown
+  ยังเป็นทาง cleanup ที่มีอยู่ ไม่มี timeout ที่สรุปผิดว่าผลข้างเคียงถูกยกเลิก งานอาจสร้างคำตอบแล้วแม้ admission
+  ล้มเหลว ไม่มี automatic replay และไม่อ้างว่า rollback SQLite ย้อนผล IPC ได้ เก็บ uncommitted work เดิม
+  ไม่ใช้ production, remote, secrets, worktree อื่น, commit หรือ push
+
+- แก้ unhandled rejection หลัง enqueue `messages`, `newConversation`, `ask` และ `cancel` เมื่อ
+  admission COMMIT ล้มเหลว โดยติด handler ภายใน synchronous send ก่อนกลับเข้า fence และคืน Promise
+  เดิมเพื่อคง runtime error; ใช้ helper เดียวกับ connect ตรวจ process-driver start/stop แล้วไม่มี Promise
+  enqueue ที่ขาด handler แบบเดียวกัน เก็บ tests และ uncommitted work เดิมทั้งหมด
+- Regression ใหม่ 8 cases ใช้ SQLite deferred foreign key ให้ COMMIT ล้มเหลวจริงหลัง enqueue แล้วค่อย
+  reject runtime หลัง admission คลายออก ยืนยัน error object เดิม, rollback, enqueue ครั้งเดียว, runtime
+  ยังทำงานและ busy กลับเป็นศูนย์ รวม runtime rejection เมื่อ COMMIT สำเร็จ ก่อนแก้พบ unhandled rejection
+  ครบทั้งสี่ dispatch paths; หลังแก้ผ่านทั้ง 8 cases ด้วย Node 24.22.2 และ targeted เดิมอีก 48 tests ผ่าน
+  แบบแยกไฟล์ Cross-process start ติด localhost EPERM; stop reproduction และ combined run abort ภายใน
+  Node async callback assertion ไม่ถือว่าผ่าน `npm run check` ติด spawnSync EPERM; direct server types
+  มีเพียง 17 diagnostics เดิมใน pinned Harness ไม่มี server diagnostic และ repository formatting ผ่าน
+  ยังไม่รับรองพร้อมใช้งาน ไม่ทดสอบ real accounts/deployment และไม่ใช้ production, secrets, GitHub,
+  worktree อื่น, commit หรือ push
+
+- แก้ผล independent review ของ shared start: เมื่อ token ผู้เริ่มหมดอายุก่อน enqueue `connect`
+  และยืนยันว่า process ถูกเก็บกวาดแล้ว จะคืน reservation ให้ waiter ตรวจสิทธิ์ของตนเองและเริ่มใหม่
+  waiter ที่หมดอายุยังถูกปฏิเสธ; cleanup ที่ล้มเหลวยังเก็บ handle, capacity และ diagnostic เดิม
+  ไม่ retry อัตโนมัติเมื่อส่ง connect แล้ว หรือเมื่อ connect reject/timeout
+- ติด rejection handler ของ connect Promise ภายใน synchronous send ก่อน admission COMMIT กลับมา
+  เพื่อไม่ให้ rejection ภายหลังกลายเป็น unhandled เมื่อ COMMIT ล้มเหลว; Promise เดิมยังส่ง connect error
+  ตามปกติ deterministic tests ทำให้ทั้งสอง bug ล้มเหลวก่อนแก้ รวม real SQLite deferred foreign-key
+  constraint ที่ล้มเหลวตอน COMMIT หลัง enqueue และยืนยัน rollback, cleanup และไม่ retry shared waiter
+- ตรวจด้วย Node 24.22.2: targeted auth/start/connect/cleanup/publication/stop ผ่าน 48 tests (รวม regression
+  ใหม่ 7 tests), direct database isolation ผ่าน 29 tests, build และ formatting ผ่าน; direct server types
+  มีเพียง 17 diagnostics เดิมใน pinned Harness ตาม checker policy ไม่มี server diagnostic
+  `npm run check` และ engine-pin ติด subprocess EPERM; npm unit/db/engine ติด tsx IPC EPERM
+  direct unit abort ที่ Node async callback assertion; ลอง engine ครบ 23 files แยกกัน ผ่าน 12 files
+  ที่เหลือมี subprocess contention failure, localhost EPERM และ Node abort; isolation 4 tests ใน
+  workspace-runtime ล้มเหลวเพราะ Bubblewrap สร้าง namespace ไม่ได้ ไม่ข้ามหรือถือว่าผ่าน
+  Playwright cloud-workspace เริ่ม configured web server ไม่สำเร็จ จึงยังไม่รับรองพร้อมใช้งาน
+  ไม่ได้ทดสอบ real accounts/deployment; เก็บ uncommitted work เดิม ไม่มี GitHub, production, secrets,
+  การเขียน worktree อื่น, commit หรือ push
+
+- แก้ช่องว่างส่ง provider credential หลังรอ grant: deterministic regression ยืนยันว่าเดิมส่ง `connect`
+  หลังถอน invitation แล้วหนึ่งครั้ง; ขณะนี้ครอบ synchronous `RuntimeHandle.call(connect)` ด้วย admission
+  ของผู้เริ่ม runtime และใช้ cleanup เดิมเมื่อถูกปฏิเสธ รวมถึงเก็บ handle/capacity หาก cleanup ยังไม่ยืนยัน
+  การรอ grant และ connect response อยู่นอก SQLite transaction; ไม่เปลี่ยนอำนาจ invitation ข้าม process
+- Google verifier ส่งเฉพาะ expiry จาก claims ที่ตรวจ signature แล้วให้ synchronous admission ทุกจุดของ
+  Gateway ตรวจอีกครั้งภายใน fence (หรือโดยตรงเมื่อไม่มี invitation store) ใช้ `floor(now/1000)` และ
+  skew 60 วินาทีตาม verifier เดิม ทดสอบขอบเขตวินาทีและหมดอายุระหว่างรอ grant ทั้งมี/ไม่มี store
+  ข้อนี้ปรับข้อจำกัด token expiry ที่บันทึกไว้ก่อนหน้า; ไม่ทำให้ operator-file revocation เป็น atomic
+- ตรวจด้วย Node 24.22.2: targeted auth/start/connect/cleanup/publication/stop ผ่าน 41 tests; database
+  isolation ผ่าน 29 tests โดยรันตรง; build, frontend types และ formatting ผ่าน ส่วน server types มีเพียง
+  17 diagnostics ใน pinned Harness ที่ checker policy เดิมแยกไว้ ไม่มี server diagnostic ใหม่
+  `npm run check`, npm unit/database/engine wrappers และ engine-pin ยังติด subprocess/tsx IPC EPERM
+  direct unit/engine รวม abort ที่ Node async callback assertion จึงลอง engine ครบทั้ง 22 files แยกกัน:
+  11 files ผ่าน; ที่เหลือมี localhost EPERM, subprocess failure, Node abort และ 4 isolation tests ล้มเหลว
+  เพราะ Bubblewrap สร้าง namespace ไม่ได้ ไม่ข้ามหรือถือว่า isolation ผ่าน Cloud Playwright เริ่ม web server
+  ไม่สำเร็จ จึงยังไม่พร้อมรับรอง ไม่มี production/real-account acceptance และไม่ใช้ secrets, GitHub,
+  เขียน worktree อื่น, commit หรือ push; เก็บงานค้างเดิมทั้งหมดไว้
+
+- Start-fence review follow-up: deterministic regressions first reproduced a messages enqueue after revocation
+  following the awaited start, and a metadata rename after revocation during asynchronous staging. Messages now
+  fences the synchronous RuntimeHandle.call enqueue with each caller's authority; the contract requires synchronous
+  enqueue. Metadata stages outside the lock and publishes by synchronous rename inside admission, updating the
+  in-memory activity time only on publication. Tests cover both cold and already-running starts, temporary-file
+  cleanup, independent caller admission and retaining the admitted runtime. Completion metadata is also fenced;
+  a denied refresh is skipped so an already admitted run retains its result/error and is not cancelled by revocation.
+- Follow-up verification with Node 24.22.2: 32 targeted start/stop/cleanup/publication tests and 29 direct database
+  isolation tests passed, as did build, formatting and frontend types. Direct server types report only the existing
+  17 pinned-engine diagnostics excluded by the checker policy. `npm run check` cannot spawn its server checker
+  (EPERM); unit/database/engine npm wrappers cannot open tsx IPC, and engine-pin checking hits subprocess EPERM.
+  A combined direct runtime/engine test run aborted on Node's async callback assertion; cloud Playwright could
+  not start its configured web server. Full checks remain required before readiness. Existing tests and uncommitted
+  start-fence work were preserved; no production, real accounts, GitHub operations, other worktrees or commits.
+  The same shared-SQLite/cooperating-writer and operator-file/token-expiry limitations below still apply.
+
+- Workspace start now fences the process driver's synchronous fork with invitation revocation, including
+  starts reached through conversation creation, message reads and both run paths. Authentication is checked
+  again after filesystem reads and shared-start waits; each waiter checks its own authority. A denied leader
+  before spawn releases its reservation so an authorized waiter can retry. Unsupported drivers fail closed;
+  readiness, provider setup and cleanup run outside the SQLite transaction. A post-spawn admission error
+  triggers confirmed cleanup, retaining an unconfirmed handle/capacity through the existing cleanup path.
+- Node 24.22.2 verification in this restricted worktree: a scratch baseline regression reproduced a revoked
+  HTTP request returning 401 while still spawning; the changed code passes that regression. Socket-free
+  start/cleanup regressions 17/17, related stop regressions 8/8 and direct database isolation tests 29/29 passed.
+  Direct frontend/server type checks (excluding 17 pinned-engine diagnostics under the existing policy),
+  formatting and production build passed. Required npm check/engine/unit/database wrappers and engine-pin
+  checking hit sandbox EPERM on subprocess/IPC operations; the original cross-process HTTP regression cannot
+  bind localhost. Cloud Playwright could not start its web server. An attempted combined unit run without
+  subprocess isolation aborted inside Node's async callback assertion. Full engine, unit, cross-process HTTP,
+  engine-pin and browser verification remain required; this change is not declared ready or committed.
+- Admission orders cooperating gateways/administrators only when they use the same correctly locking SQLite
+  database. Operator-file edits and token expiry cannot be atomic with this fence; admission before revocation
+  can finish afterwards and revocation does not terminate an already admitted runtime. Runtime deduplication
+  and capacity remain manager-local; no cross-gateway singleton, crash/orphan recovery or real-account,
+  sandboxed-process or deployment acceptance is established by these synthetic checks. No production or
+  external services were changed.
+
 - Workspace creation prepares a private, non-listable staging directory and publishes it with a synchronous
   rename inside the invitation SQLite fence. A synthetic HTTP regression reproduced a revoked request creating
   a workspace before this change; tests also cover denial after preparation, cleanup, concurrent creations and
