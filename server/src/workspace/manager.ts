@@ -53,6 +53,7 @@ type Live = {
   handle?: RuntimeHandle;
   starting?: Promise<void>;
   stopping?: Promise<void>;
+  stopAttempt?: { rejectedBeforeSignal: boolean };
   lastActive: number;
   /** Requests in flight; a busy runtime is never stopped as idle, so work goes on after the browser closes. */
   busy: number;
@@ -112,7 +113,13 @@ export class RuntimeManager {
     const key = this.key(record);
     const current = this.live.get(key);
     if (current?.stopping) {
-      await current.stopping;
+      const attempt = current.stopAttempt;
+      try {
+        await current.stopping;
+      } catch (error) {
+        // A different caller's rejected authority did not signal the runtime. Real stop failures still propagate.
+        if (!attempt?.rejectedBeforeSignal) throw error;
+      }
       return this.start(actor, workspaceId);
     }
     if (current?.state === 'running') return this.touchRecord(record, current);
@@ -314,11 +321,30 @@ export class RuntimeManager {
       admit?.(() => {});
       return;
     }
+    const attempt = { rejectedBeforeSignal: false };
+    entry.stopAttempt = attempt;
     const stopping = (async () => {
       if (entry.starting) await entry.starting.catch(() => {});
-      await authorize?.();
+      try {
+        await authorize?.();
+      } catch (error) {
+        attempt.rejectedBeforeSignal = true;
+        throw error;
+      }
+      const admitted = (signal: () => void) => {
+        let signalled = false;
+        try {
+          admit!(() => {
+            signalled = true;
+            signal();
+          });
+        } catch (error) {
+          if (!signalled) attempt.rejectedBeforeSignal = true;
+          throw error;
+        }
+      };
       if (!entry.handle) {
-        admit?.(() => {});
+        if (admit) admitted(() => {});
         if (this.live.get(key) === entry) this.live.delete(key);
         return;
       }
@@ -327,7 +353,7 @@ export class RuntimeManager {
       const previousState = entry.state;
       entry.state = 'stopping';
       try {
-        if (admit) await handle.stopWithAdmission!(admit);
+        if (admit) await handle.stopWithAdmission!(admitted);
         else await handle.stop();
         if (this.live.get(key) === entry) this.live.delete(key);
       } catch (error) {
@@ -339,7 +365,10 @@ export class RuntimeManager {
     try {
       await stopping;
     } finally {
-      if (entry.stopping === stopping) entry.stopping = undefined;
+      if (entry.stopping === stopping) {
+        entry.stopping = undefined;
+        entry.stopAttempt = undefined;
+      }
     }
   }
 

@@ -109,6 +109,149 @@ test('concurrent stop retries after denied admission using its own authority', a
   }
 });
 
+test('start and call wait independently for a denied stop and reuse the running runtime', async () => {
+  const entered = gate();
+  const release = gate();
+  const waiting = gate();
+  let starts = 0;
+  let signals = 0;
+  const dir = await mkdtemp(join(tmpdir(), 'step-denied-start-'));
+  const driver: RuntimeDriver = {
+    async start(spec) {
+      starts++;
+      return {
+        health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
+        call: async () => ({ sessionId: 'session' }) as never,
+        onExit: () => {},
+        stop: async () => {},
+        async stopWithAdmission(admit) {
+          entered.release();
+          await release.promise;
+          admit(() => signals++);
+        },
+      };
+    },
+  };
+  const manager = new RuntimeManager({ dataRoot: dir, driver });
+  const w = await manager.create('alice', { name: 'A' });
+  try {
+    await manager.start('alice', w.id);
+    const denied = manager.stop('alice', w.id, () => {
+      throw new Error('denied');
+    });
+    const deniedResult = assert.rejects(denied, /denied/);
+    await entered.promise;
+    // Observe the barrier, not a timer: both operations must actually wait before denial.
+    const live = (manager as unknown as { live: Map<string, { stopping?: Promise<void> }> }).live;
+    const entry = live.get(`alice/${w.id}`)!;
+    let stopping = entry.stopping;
+    let reads = 0;
+    Object.defineProperty(entry, 'stopping', {
+      configurable: true,
+      get() {
+        if (++reads === 4) waiting.release();
+        return stopping;
+      },
+      set(value) {
+        stopping = value;
+      },
+    });
+    const start = manager.start('alice', w.id);
+    const call = manager.newConversation('alice', w.id);
+    const result = Promise.all([start, call]);
+    await waiting.promise;
+    release.release();
+    await deniedResult;
+    const [workspace, conversation] = await result;
+    assert.equal(workspace.state, 'running');
+    assert.equal(conversation.sessionId, 'session');
+    assert.equal(signals, 0);
+    assert.equal(starts, 1);
+    assert.equal((await manager.health('alice', w.id)).ok, true);
+  } finally {
+    release.release();
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+for (const failure of ['authorization', 'driver-after-signal'] as const) {
+  test(`waiting start handles ${failure} failure without masking the stop result`, async () => {
+    const entered = gate();
+    const release = gate();
+    const waiting = gate();
+    const error = new Error(failure);
+    let starts = 0;
+    let signals = 0;
+    const dir = await mkdtemp(join(tmpdir(), 'step-stop-wait-'));
+    const driver: RuntimeDriver = {
+      async start(spec) {
+        starts++;
+        return {
+          health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
+          call: async () => ({}) as never,
+          onExit: () => {},
+          stop: async () => {},
+          async stopWithAdmission(admit) {
+            admit(() => signals++);
+            entered.release();
+            await release.promise;
+            throw error;
+          },
+        };
+      },
+    };
+    const manager = new RuntimeManager({ dataRoot: dir, driver });
+    const w = await manager.create('alice', { name: 'A' });
+    try {
+      await manager.start('alice', w.id);
+      const stop = manager.stop(
+        'alice',
+        w.id,
+        (signal) => signal(),
+        async () => {
+          if (failure === 'authorization') {
+            entered.release();
+            await release.promise;
+            throw error;
+          }
+        },
+      );
+      const rejected = assert.rejects(stop, (actual) => actual === error);
+      await entered.promise;
+      const live = (manager as unknown as { live: Map<string, { stopping?: Promise<void> }> }).live;
+      const entry = live.get(`alice/${w.id}`)!;
+      let stopping = entry.stopping;
+      let reads = 0;
+      Object.defineProperty(entry, 'stopping', {
+        configurable: true,
+        get() {
+          if (++reads === 2) waiting.release();
+          return stopping;
+        },
+        set(value) {
+          stopping = value;
+        },
+      });
+      const start = manager.start('alice', w.id);
+      const result =
+        failure === 'authorization' ? start : assert.rejects(start, (actual) => actual === error);
+      await waiting.promise;
+      release.release();
+      await rejected;
+      const started = await result;
+      if (failure === 'authorization') assert.equal((started as { state: string }).state, 'running');
+      assert.equal(signals, failure === 'authorization' ? 0 : 1);
+      assert.equal(starts, 1);
+      assert.equal((await manager.get('alice', w.id)).state, 'running');
+    } finally {
+      release.release();
+      await manager.shutdown();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}
+
 test('concurrent stop independently checks authority after a successful stop', async () => {
   const entered = gate();
   const release = gate();
