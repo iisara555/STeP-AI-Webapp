@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { AskInput, WorkspaceError, WorkspaceName } from '../workspace/contract.ts';
 import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
-import type { Authenticator, Identity } from './auth.ts';
+import { credentialStillValid, type Authenticator, type Identity } from './auth.ts';
 import type { InvitationStore } from './invitation-store.ts';
 import {
   codeOf,
@@ -81,9 +81,13 @@ export function createGateway(options: GatewayOptions) {
         const { name } = parseBody(CreateWorkspace, await readJson(req));
         if ((await manager.list(who.userId)).length >= quotas.workspacesPerUser)
           throw new GatewayError('QUOTA_WORKSPACES');
-        const workspace = await manager.create(who.userId, { name }, (publish) =>
-          options.invitations ? options.invitations.dispatch(who.email, publish) : publish(),
-        );
+        const workspace = await manager.create(who.userId, { name }, (publish) => {
+          const admit = () => {
+            if (!credentialStillValid(who)) throw new GatewayError('UNAUTHENTICATED');
+            publish();
+          };
+          return options.invitations ? options.invitations.dispatch(who.email, admit) : admit();
+        });
         audit({
           actor: who.userId,
           action: 'workspace.create',

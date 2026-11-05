@@ -2,6 +2,15 @@
 
 ## #58 · Gateway invitation management (partial)
 
+- Workspace creation now checks the verified Google ID token's expiration synchronously inside the SQLite
+  invitation fence immediately before publication. The signed-token HTTP regression first reproduced a 401
+  with a published workspace, then verified denial and staging cleanup. This matches the existing verifier's
+  inclusive 60-second clock skew, not strict JWT expiry; time can advance between the check and rename.
+  Custom authenticators lack this synchronous expiry guarantee. Google token verification is local signature
+  and claim verification, not an external token-revocation check. Operator-file changes are not fenced.
+  Node 26.12.1: unit 117, database 29, engine 98, check, build and engine-pin passed; Playwright 86 passed,
+  two mobile cloud cases skipped. Real accounts and deployment were not tested.
+
 - Workspace creation prepares a private, non-listable staging directory and publishes it with a synchronous
   rename inside the invitation SQLite fence. A synthetic HTTP regression reproduced a revoked request creating
   a workspace before this change; tests also cover denial after preparation, cleanup, concurrent creations and

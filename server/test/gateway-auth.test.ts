@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { googleIdTokenAuth } from '../src/gateway/auth.ts';
+import { credentialStillValid, googleIdTokenAuth } from '../src/gateway/auth.ts';
 
 // A synthetic signing key stands in for Google's; no request leaves the machine.
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -50,6 +50,24 @@ test('an invited, verified Google account of the organization signs in with a st
     email: 'staff@step.example',
     admin: true,
   });
+});
+
+test('verified credential freshness uses the same inclusive skew as authentication', async () => {
+  let now = NOW;
+  const check = googleIdTokenAuth({
+    clientId: CLIENT,
+    domains: ['step.example'],
+    invited: () => new Set(['staff@step.example']),
+    keys: async () => [{ ...publicKey.export({ format: 'jwk' }), kid: KID }],
+    now: () => now,
+  });
+  const identity = await check(token({ ...valid, exp: NOW / 1000 }));
+  assert.ok(identity);
+  now = NOW + 60_999;
+  assert.equal(credentialStillValid(identity), true);
+  now = NOW + 61_000;
+  assert.equal(credentialStillValid(identity), false);
+  assert.equal(await check(token({ ...valid, exp: NOW / 1000 })), null);
 });
 
 test('every other token is refused', async () => {
