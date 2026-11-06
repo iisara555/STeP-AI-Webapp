@@ -1,5 +1,26 @@
 # Progress
 
+## #57 · fail-closed cleanup observation (test-only increment on 2db3a503)
+
+- New worktree `/home/itsara/projects/step-runner-cleanup-observation`, branch
+  `work/runner-cleanup-observation`. No production source, host configuration, permissions or pin changes.
+- Extracted pure command-result parsers into `server/test/support/cleanup-observation.ts` and wired the
+  host suite's `runnerPids()` / `units()` through them, with two-second command deadlines. Unknown observations
+  throw rather than becoming an empty cleanup inventory, including spawn errors, signals and timeouts.
+- `pgrep` accepts exit 1 only with empty output and no diagnostics; exit >1 fails. Exit 0 requires positive,
+  safe decimal PIDs; empty/malformed output and contradictory no-match output fail. `systemctl` requires
+  exit 0 and no diagnostics; all nonempty stdout is retained so unknown rows cannot be filtered into absence.
+- Test-first: reproduced missing exceptions for command exit failures, spawn/signal/diagnostic failures and
+  malformed PID results, then implemented each slice and verified green. Five ungated pure regression tests
+  use synthetic command results; no host provisioning is needed to exercise the failure cases.
+- Node 26.12.1 verification: pure regressions **5/5**, ungated engine suite **226/226**, application tests
+  **118/118**, database tests **29/29**, `npm run check`, build, engine-pin check and `git diff --check` passed.
+  Existing 17 upstream engine diagnostics, module.register deprecation and build chunk-size warnings remain.
+- CPU pressure was not rerun: this increment changes observation only, and live one-minute load was **1.75**,
+  above CPU acceptance's below-1 precondition. No memory/task pressure or Playwright run; no UI behavior changed.
+  Independent read-only inventory returned pgrep exit 1 with empty streams, systemctl exit 0 with empty streams,
+  and no disposable host-test folders. These results were checked rather than assuming failed queries were empty.
+
 ## #57 · bounded CPU enforcement acceptance (test-only increment on 92b93d80)
 
 - Dedicated branch/worktree: `work/step-runner-cpu-acceptance` at

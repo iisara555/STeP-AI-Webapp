@@ -28,6 +28,7 @@ import {
   type RuntimeSpec,
 } from '../src/workspace/contract.ts';
 import { workspacePaths } from '../src/workspace/storage.ts';
+import { parseRunnerPids, parseUnits } from './support/cleanup-observation.ts';
 import { frameReader, encodeFrame } from '../src/workspace/frames.ts';
 import {
   stepRunnerCommand,
@@ -199,17 +200,15 @@ describe('step-runner host driver', host, () => {
   const runnerUid = enabled ? Number(execFileSync('id', ['-u', 'step-runner'], { encoding: 'utf8' })) : 0;
 
   const runnerPids = () =>
-    new Set(
-      spawnSync('pgrep', ['-u', 'step-runner'], { encoding: 'utf8' })
-        .stdout.split(/\s+/)
-        .filter(Boolean)
-        .map(Number),
-    );
+    parseRunnerPids(spawnSync('pgrep', ['-u', 'step-runner'], { encoding: 'utf8', timeout: 2_000 }));
   const strays = () => [...runnerPids()].filter((pid) => !baseline.has(pid));
   const units = () =>
-    spawnSync('systemctl', ['--user', 'list-units', '--all', '--plain', '--no-legend', 'step-rt-*'], {
-      encoding: 'utf8',
-    }).stdout.trim();
+    parseUnits(
+      spawnSync('systemctl', ['--user', 'list-units', '--all', '--plain', '--no-legend', 'step-rt-*'], {
+        encoding: 'utf8',
+        timeout: 2_000,
+      }),
+    );
   const emptied = (cgroup: string) => {
     try {
       return readFileSync(join(cgroup, 'cgroup.events'), 'utf8').includes('populated 0');
