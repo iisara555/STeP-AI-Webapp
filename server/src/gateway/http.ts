@@ -261,6 +261,7 @@ export function createGateway(options: GatewayOptions) {
         return {
           ok: true,
           uptimeSeconds: Math.round((now() - startedAt) / 1000),
+          metricsScope: { processLocal: true, resetOnRestart: true, dailyCountersResetAt: 'UTC midnight' },
           runtimes: manager.stats(),
           runs: runs.stats(),
           quotas,

@@ -428,6 +428,11 @@ test('administrators see counts only; the audit trail keeps who/what/outcome wit
     assert.equal(health.status, 200);
     const text = await health.text();
     const body = JSON.parse(text);
+    assert.deepEqual(body.metricsScope, {
+      processLocal: true,
+      resetOnRestart: true,
+      dailyCountersResetAt: 'UTC midnight',
+    });
     assert.equal(body.runtimes.running, 1);
     assert.equal(body.runs.active, 0);
     assert.deepEqual(body.runs.today, { started: 1, done: 1, failed: 0, cancelled: 0 });

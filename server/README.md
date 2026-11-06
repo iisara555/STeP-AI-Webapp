@@ -47,7 +47,10 @@ Docker socket หรือ SQLite
 - `audit.ts` บันทึก `<data>/audit/<วัน UTC>.jsonl` (0600) เฉพาะ actor, action, workspaceId, runId, outcome และ code
   ไม่มีช่องสำหรับคำถาม คำตอบ หรือชื่อ Workspace
 - `GET /api/admin/health` สำหรับผู้ดูแลตาม `STEP_ADMINS`: นับ runtime และงานรายวัน ไม่มีชื่อ เจ้าของ หรือเนื้อหา และผู้ดูแลก็ยังเปิด
-  Workspace ของคนอื่นไม่ได้
+  Workspace ของคนอื่นไม่ได้ ตัวเลข `runtimes` และ `runs` เป็นของ Gateway process นี้เท่านั้น ไม่ใช่ยอดรวมทุก
+  process และเริ่มนับใหม่หลัง restart; `runs.today` กับ `failuresByCode` เปลี่ยนวันเวลาเที่ยงคืน UTC ด้วย
+  `metricsScope` ระบุขอบเขตนี้ให้ client ส่วน `quotas` คือค่ากำหนด ไม่ใช่ยอดคงเหลือหรือหลักฐานว่า disk quota,
+  isolation หรือ backup พร้อมใช้งาน การ restart ไม่ได้ล้างตัวนับ daily quota ที่เก็บใน SQLite
 
 | Method | Path                                                  | ทำอะไร                                                      |
 | ------ | ----------------------------------------------------- | ----------------------------------------------------------- |
