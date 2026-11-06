@@ -71,6 +71,41 @@ function isReply(value: any): value is RuntimeReply {
   );
 }
 
+/** Shared mutual-authentication handshake, also used after the runner's kernel credential check.
+ * No workload replies are delivered before its capability proof; no capability is sent on the socket. */
+export function authenticateRuntimePeer(
+  socket: Socket,
+  key: string,
+  receive: (value: RuntimeReply) => void,
+  rejected: () => void = () => {},
+) {
+  const challenge = randomBytes(32).toString('hex');
+  let authenticated = false;
+  const timer = setTimeout(() => socket.destroy(), 2000);
+  socket.once('close', () => {
+    clearTimeout(timer);
+    if (!authenticated) rejected();
+  });
+  const write = jsonChannel(socket, (value) => {
+    if (authenticated) {
+      if (!isReply(value)) return void socket.destroy();
+      receive(value);
+      return;
+    }
+    if (
+      !equal(value.proof, proof(key, 'runtime', challenge)) ||
+      typeof value.challenge !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(value.challenge)
+    )
+      return void socket.destroy();
+    authenticated = true;
+    clearTimeout(timer);
+    write({ proof: proof(key, 'manager', value.challenge) });
+  });
+  write({ challenge });
+  return write;
+}
+
 /** Prepare before admission; spawn itself remains synchronous inside the manager's fence. */
 export async function prepareUnixRuntime(socketRoot = tmpdir()) {
   const directory = await mkdtemp(join(socketRoot, 'ipc-'));
@@ -90,39 +125,24 @@ export async function prepareUnixRuntime(socketRoot = tmpdir()) {
   const server = createServer((socket) => {
     if (active || sockets.size >= 8) return void socket.destroy();
     sockets.add(socket);
-    const challenge = randomBytes(32).toString('hex');
-    const timer = setTimeout(() => socket.destroy(), 2000);
     socket.once('close', () => {
-      clearTimeout(timer);
       sockets.delete(socket);
       if (active === socket && child) {
         Object.defineProperty(child, 'connected', { value: false, writable: true, configurable: true });
         child.emit('disconnect');
       }
     });
-    const write = jsonChannel(socket, (value) => {
-      if (active === socket) {
-        if (!isReply(value)) return void socket.destroy();
-        child?.emit('message', value);
-        return;
+    const write = authenticateRuntimePeer(socket, key, (value) => {
+      if (!active) {
+        if (!child || value.type !== 'ready') return void socket.destroy();
+        active = socket;
+        send = write;
+        Object.defineProperty(child, 'connected', { value: true, writable: true, configurable: true });
+        for (const other of sockets) if (other !== socket) other.destroy();
       }
-      if (
-        active ||
-        !child ||
-        !equal(value.proof, proof(key, 'runtime', challenge)) ||
-        typeof value.challenge !== 'string' ||
-        !/^[a-f0-9]{64}$/.test(value.challenge)
-      )
-        return void socket.destroy();
-      active = socket;
-      clearTimeout(timer);
-      send = write;
-      Object.defineProperty(child, 'connected', { value: true, writable: true, configurable: true });
-      write({ proof: proof(key, 'manager', value.challenge) });
-      // One authenticated peer per incarnation; reject all other already-connected contenders.
-      for (const other of sockets) if (other !== socket) other.destroy();
+      if (active !== socket) return void socket.destroy();
+      child?.emit('message', value);
     });
-    write({ challenge });
   });
   try {
     await new Promise<void>((done, fail) => {

@@ -28,6 +28,9 @@ import {
   type RuntimeSpec,
 } from '../src/workspace/contract.ts';
 import { workspacePaths } from '../src/workspace/storage.ts';
+import { createSyntheticAssembly } from '../src/gateway/synthetic-assembly.ts';
+import { provisionTestQuota } from './support/quota.ts';
+import type { AddressInfo } from 'node:net';
 import { parseRunnerPids, parseUnits } from './support/cleanup-observation.ts';
 import { frameReader, encodeFrame } from '../src/workspace/frames.ts';
 import {
@@ -435,6 +438,100 @@ setTimeout(() => (out({ timeout: true, received }), process.exit(0)), 30000);
     assert.equal(units(), '');
   });
 
+  test(
+    'authenticated assembly: ten gateway identities use real runner runtimes and resume',
+    { timeout: 120_000 },
+    async () => {
+      const dataRoot = join(root, 'assembly-data');
+      mkdirSync(dataRoot);
+      provisionTestQuota(dataRoot, 2);
+      const assembly = createSyntheticAssembly({
+        purpose: 'synthetic-only',
+        dataRoot,
+        workspacesPerUser: 2,
+        authenticate: async (header) => {
+          const match = /^Bearer synthetic-(\d)$/.exec(header ?? '');
+          return match
+            ? {
+                userId: `synthetic-${match[1]}`,
+                email: `synthetic-${match[1]}@example.invalid`,
+                admin: false,
+              }
+            : null;
+        },
+        runtime: {
+          kind: 'step-runner',
+          options,
+          prepareWorkspace: async (spec) => {
+            // Disposable fixture access only, never a production policy or a home permission change.
+            if (!specs.some((existing) => existing.dir === spec.dir)) specs.push(spec);
+            for (let dir = spec.filesDir; dir !== root; dir = dirname(dir)) chmodSync(dir, 0o755);
+            chmodSync(spec.dir, 0o777);
+            chmodSync(spec.filesDir, 0o777);
+          },
+        },
+      });
+      await new Promise<void>((done) => assembly.server.listen(0, '127.0.0.1', done));
+      const url = `http://127.0.0.1:${(assembly.server.address() as AddressInfo).port}`;
+      const call = (i: number, path: string, body?: unknown) =>
+        fetch(url + path, {
+          method: body === undefined ? 'GET' : 'POST',
+          headers: { authorization: `Bearer synthetic-${i}`, 'content-type': 'application/json' },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+      try {
+        assert.equal((await fetch(url + '/api/workspaces')).status, 401);
+        const workspaces = await Promise.all(
+          Array.from({ length: 10 }, async (_, i) => {
+            const response = await call(i, '/api/workspaces', { name: `Synthetic runner ${i}` });
+            assert.equal(response.status, 200);
+            return response.json();
+          }),
+        );
+        await Promise.all(
+          workspaces.map(async (ws, i) => {
+            const response = await call(i, `/api/workspaces/${ws.id}/start`, {});
+            assert.equal(response.status, 200, await response.text());
+          }),
+        );
+        assert.equal(assembly.manager.stats().running, 10);
+        await Promise.all(
+          workspaces.map(async (ws, i) => {
+            const owner = `synthetic-${i}`;
+            assert.equal((await assembly.manager.health(owner, ws.id)).ok, true);
+            const result = await assembly.manager.ask(owner, ws.id, { text: 'ช่วยคิดชื่องานสัมมนาให้หน่อย' });
+            assert.equal(result.answer, 'คำตอบจำลองจาก Desktop engine');
+            assert.equal(
+              (
+                await call(
+                  (i + 1) % 10,
+                  `/api/workspaces/${ws.id}/conversations/${result.sessionId}/messages`,
+                )
+              ).status,
+              404,
+            );
+            await assembly.manager.stop(owner, ws.id);
+            const resumed = await assembly.manager.ask(owner, ws.id, {
+              text: 'ขออีกสามชื่อ',
+              sessionId: result.sessionId,
+            });
+            assert.equal(resumed.sessionId, result.sessionId);
+            assert.equal(resumed.answer, 'คำตอบจำลองจาก Desktop engine');
+            assert.deepEqual(
+              (await assembly.manager.messages(owner, ws.id, result.sessionId)).map(
+                (message) => message.role,
+              ),
+              ['user', 'assistant', 'user', 'assistant'],
+            );
+          }),
+        );
+      } finally {
+        await assembly.close();
+        await assertClean();
+      }
+    },
+  );
+
   test('runtime runs as step-runner inside its scope and answers calls', async () => {
     const spec = workspace();
     const handle = await driver().start(spec);
@@ -824,6 +921,48 @@ setTimeout(() => (out({ timeout: true, received }), process.exit(0)), 30000);
       assert.equal(health.workspaceId, spec.workspaceId);
       // Exactly one peer is accepted, then the listener closes and its path is gone.
       assert.equal(existsSync(join(handle.scope.socketDir, 'rt.sock')), false);
+    } finally {
+      await handle.stop();
+    }
+    await assertClean();
+  });
+
+  test('authenticated runner rejects early hostile peers and remains healthy after local oversize rejection', async () => {
+    const spec = workspace();
+    let wrongUid!: ReturnType<typeof attack>;
+    let wrongCapability!: ReturnType<typeof attack>;
+    const handle = await driver({ transport: 'authenticated' }).startWithAdmission(spec, (spawnRuntime) => {
+      const dir = readdirSync(options.socketRoot).find((d) =>
+        existsSync(join(options.socketRoot, d, 'rt.sock')),
+      );
+      assert.ok(dir);
+      const path = join(options.socketRoot, dir, 'rt.sock');
+      wrongUid = attack('self', path, 'forge');
+      wrongCapability = attack('runner', path, 'forge');
+      spawnRuntime();
+    });
+    try {
+      await Promise.all([wrongUid.done, wrongCapability.done]);
+      const closed = (peer: ReturnType<typeof attack>) => peer.lines().find((line) => line.closed);
+      assert.equal(closed(wrongUid).received, 0, 'wrong UID receives no bytes');
+      assert.ok(
+        closed(wrongCapability).received > 0 && closed(wrongCapability).received < 256,
+        'same-UID peer receives only a bounded random challenge, never workload data',
+      );
+      const before = await handle.health();
+      assert.equal(before.ok, true);
+      await assert.rejects(
+        handle.call('connect', {
+          baseUrl: 'https://synthetic.invalid/v1',
+          model: 'synthetic',
+          token: 'x'.repeat(2 * 1024 * 1024),
+        }),
+        /RUNTIME_FRAME_TOO_LARGE/,
+      );
+      const after = await handle.health();
+      assert.equal(after.ok, true);
+      assert.equal(after.pid, before.pid);
+      assert.deepEqual(await handle.call('conversations', {}), []);
     } finally {
       await handle.stop();
     }

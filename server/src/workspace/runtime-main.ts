@@ -58,9 +58,11 @@ if (channel) {
     process.exit(0);
   });
 }
-const send = unix ? unix.send : channel
-  ? (message: RuntimeReply) => void channel.write(encodeFrame(message))
-  : process.send?.bind(process);
+const send = unix
+  ? unix.send
+  : channel
+    ? (message: RuntimeReply) => void channel.write(encodeFrame(message))
+    : process.send?.bind(process);
 
 if (!send || !workspaceId || !dir || process.cwd() !== join(dir, 'files')) process.exit(2);
 await access(dir, constants.R_OK | constants.W_OK);
@@ -209,7 +211,10 @@ const answer = async ({ nonce, method, params }: RuntimeRequest) => {
 closeEngine = () => engine.close();
 if (unix) {
   unix.onMessage(answer);
-  process.on('disconnect', () => { engine.close(); process.exit(0); });
+  process.on('disconnect', () => {
+    engine.close();
+    process.exit(0);
+  });
 } else if (channel) {
   const push = frameReader(
     DEFAULT_MAX_FRAME_BYTES,

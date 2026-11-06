@@ -1,5 +1,42 @@
 # Progress
 
+## Runtime/runner assembly on integration 3c5a2db (synthetic only)
+
+- New worktree `/home/itsara/projects/step-runtime-runner-assembly`, branch `work/runtime-runner-assembly`;
+  integration checkout remains unchanged. Integrated runner commits through `5164f81`, retained cleanup/resource
+  tests through `c3c6e68`, and Unix transport/result recovery through `a89ef14`. Preserved the integration's newer
+  quota helper proposal. Reviewed shared process-driver/runtime-entry changes before resolving protocol conflicts.
+- Added optional `createSyntheticAssembly`: real Gateway/RunService + RuntimeManager + real pinned engine,
+  max ten runtimes, explicit injected authenticator, quota policy and synthetic-only purpose. Namespace and
+  step-runner variants both force authenticated Unix transport and the in-sandbox synthetic provider.
+  Runner fixture preparation is explicit and outside synchronous spawn admission; no production provisioning
+  or permission-widening behavior is hidden in the factory. Production gateway refusal remains unchanged.
+- Shared role-separated mutual challenge/HMAC handshake, inherited-stdin capability bootstrap, bounded frames
+  and output queues; runner keeps its pre-read kernel peer-UID check, pending/refusal bounds and kill/prove
+  cleanup. Legacy nonce-only transport is retained for standalone backward-compatible fixtures, not selected
+  by assembly. Authenticated runner outbound enqueue failure cleans pending RPC state immediately.
+- Red/green: runner launch-selection regression failed with absent transport flag before implementation;
+  assembly test failed on the missing module before implementation. Corrected test expectations against existing
+  HTTP contracts (create is 200; run status omits answer, which is read through conversation messages).
+- Actual host runner assembly passed: ten distinct synthetic gateway identities, ten concurrently live real
+  account-switched runtimes, authenticated transport, concurrent asks, cross-owner HTTP denial, stop/resume and
+  retained four-message histories. Reused existing sudo/bwrap permission, disposable fixture setup and cleanup;
+  no accounts, sudoers, packages, home permissions, production data or remote systems changed.
+- Same-account namespace assembly independently passed ten HTTP RunService jobs and persistence/denial checks.
+  Full ungated engine suite **241/241**, app tests **118/118**, database tests **29/29**, build and engine-pin check
+  passed on Node 26.12.1. `npm run check` passed after formatting the merged progress document. Relevant
+  Cloud Workspace Playwright checks: **2 passed, 2 pre-existing mobile skips** (scripted UI runtime, not runner
+  browser acceptance). Host driver suite excluding the three bounded CPU/memory/task pressure cases:
+  **21/21 passed**, including authenticated early wrong-UID/wrong-capability peers, same-PID recovery after
+  local outbound oversize rejection, cleanup fault retries and the ten-user runner assembly. The separate
+  initial runner assembly run also passed. Resource pressure tests are retained, not claimed rerun here.
+- Initial local dependency symlink broke restricted sandbox module resolution; replaced by an untracked local
+  copy and initialized the existing pinned Harness submodule. No dependency or engine pin changed.
+- See [assembly architecture, reproduction and exact release gates](runtime-runner-assembly.md). This is not
+  real-data readiness or completed Desktop parity: exclusive launcher policy, least-privilege provisioning,
+  socket/procfs hardening, disk/inode enforcement, orphan reconciliation, real Google/provider/proxy acceptance,
+  final deployed ten-user load/recovery, offsite restore and feature acceptance remain release gates.
+
 ## #57 · fail-closed cleanup observation (test-only increment on 2db3a503)
 
 - New worktree `/home/itsara/projects/step-runner-cleanup-observation`, branch
@@ -182,6 +219,7 @@
   workspace disk quota (XFS project quota helper), memory/pids exhaustion behaviour and recovery of scopes left by
   a crashed gateway (startup sweep of `step-rt-*`) are open; peer-credential check depends on `/usr/bin/python3`;
   all sandboxes share uid 995, so separation between workspaces rests on bwrap mount/PID/IPC/network namespaces.
+
 ## #57 · optional authenticated Unix transport (not account-switch acceptance)
 
 - Added opt-in `processDriver({ transport: 'unix', isolated: true })` at the existing

@@ -30,6 +30,7 @@ import {
   type RuntimeSpec,
 } from './contract.ts';
 import { DEFAULT_MAX_FRAME_BYTES, encodeFrame, frameReader } from './frames.ts';
+import { authenticateRuntimePeer } from './unix-channel.ts';
 import {
   REPO_ROOT,
   runtimeEnv,
@@ -54,6 +55,8 @@ export const MAX_REJECTED_PEERS = 32;
 const MAX_FIRST_FRAME_BYTES = 4096;
 
 export type StepRunnerOptions = {
+  /** Explicit compatibility mode for older nonce-only fixtures; synthetic assembly uses authenticated. */
+  transport?: 'nonce' | 'authenticated';
   /** World-readable copy of the app (node_modules, harness, server/src, package.json files); never under /home. */
   appRoot: string;
   /** Node binary the runtime runs with; its directory is bound read-only. */
@@ -112,6 +115,9 @@ const absolute = (path: unknown) =>
 
 function validate(options: StepRunnerOptions) {
   const o = options ?? invalid();
+  if (o.transport !== undefined && !['nonce', 'authenticated'].includes(o.transport)) invalid();
+  if (o.transport === 'authenticated' && o.maxFrameBytes !== undefined && o.maxFrameBytes !== 1024 * 1024)
+    invalid();
   if (!absolute(o.appRoot) || !absolute(o.nodePath) || !absolute(o.socketRoot)) invalid();
   if (!intIn(o.runnerUid, 1, 2 ** 31 - 2) || o.runnerUid === process.getuid?.()) invalid();
   if (o.runnerUser !== undefined && !/^[a-z_][a-z0-9_-]{0,31}$/.test(o.runnerUser)) invalid();
@@ -160,7 +166,9 @@ export function stepRunnerCommand(spec: RuntimeSpec, o: StepRunnerOptions, launc
   const env = {
     ...runtimeEnv(spec),
     STEP_SYNTHETIC_PROVIDER: '1',
-    STEP_RUNTIME_SOCKET: `${SANDBOX_SOCKET_DIR}/${SOCKET_NAME}`,
+    ...(o.transport === 'authenticated'
+      ? { STEP_RUNTIME_TRANSPORT: 'unix' }
+      : { STEP_RUNTIME_SOCKET: `${SANDBOX_SOCKET_DIR}/${SOCKET_NAME}` }),
   };
   return [
     'systemd-run',
@@ -295,7 +303,11 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
         child = spawn(argv[0]!, argv.slice(1), { env: hostEnv, stdio: ['pipe', 'ignore', 'inherit'] });
         // sudo-rs passes stdin straight through (no pty): the nonce reaches only the runtime.
         child.stdin!.on('error', () => {});
-        child.stdin!.end(launchNonce + '\n');
+        child.stdin!.end(
+          o.transport === 'authenticated'
+            ? JSON.stringify({ path: `${SANDBOX_SOCKET_DIR}/${SOCKET_NAME}`, key: launchNonce }) + '\n'
+            : launchNonce + '\n',
+        );
       });
     } catch (error) {
       if (!child) {
@@ -328,6 +340,7 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
       });
     });
     let socket: net.Socket | undefined;
+    let authenticatedWrite: ((value: unknown) => void) | undefined;
     let ready = false;
     let channelOpen = false;
     let stopping = false;
@@ -444,6 +457,22 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
         (cred) => {
           if (!candidates.has(peer)) return;
           if (cred.uid !== o.runnerUid) return refuse(peer, 'PEER_REJECTED');
+          if (o.transport === 'authenticated') {
+            const write = authenticateRuntimePeer(
+              peer,
+              launchNonce,
+              (message) => {
+                if (socket === peer) return onFrame(message);
+                if (!candidates.has(peer) || socket || message.type !== 'ready')
+                  return refuse(peer, 'PROTOCOL_VIOLATION');
+                authenticatedWrite = write;
+                accept(peer, Buffer.alloc(0));
+              },
+              () => refuse(peer, 'AUTHENTICATION_FAILED'),
+            );
+            peer.resume();
+            return;
+          }
           const parts: Buffer[] = [];
           let size = 0;
           let trusted: ((chunk: Buffer) => void) | undefined;
@@ -588,7 +617,15 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
             fail(e);
           },
         });
-        socket.write(encodeFrame({ type: 'call', nonce: id, method, params } satisfies RuntimeRequest));
+        try {
+          const message = { type: 'call', nonce: id, method, params } satisfies RuntimeRequest;
+          if (authenticatedWrite) authenticatedWrite(message);
+          else socket.write(encodeFrame(message));
+        } catch (error) {
+          pending.delete(id);
+          clearTimeout(timer);
+          fail(error as Error);
+        }
       });
 
     const stopWithAdmission = async (admitStop: (signal: () => void) => void, force = false) => {
