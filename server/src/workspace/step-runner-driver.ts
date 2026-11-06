@@ -349,8 +349,9 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
     let nonce = 0;
     const pending = new Map<number, { done: (v: unknown) => void; fail: (e: Error) => void }>();
     const eventListeners = new Set<(event: RuntimeEvent) => void>();
-    const exitListeners: ((code: number | null) => void)[] = [];
+    const exitListeners: ((code: number | null, cleanupError?: WorkspaceError) => void)[] = [];
     let exitCode: number | null | undefined;
+    let exitCleanupError: WorkspaceError | undefined;
     let rejectReady!: (error: Error) => void;
     let resolveReady!: () => void;
     const readyPromise = new Promise<void>((done, fail) => {
@@ -563,35 +564,43 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
       scope.unitCleanupFailures = collected ? undefined : failures;
     };
 
+    // Preserve incarnation-scoped proof: this cgroup is never reused for another runtime launch.
+    let processesGone = false;
     let tearing: Promise<void> | undefined;
     const teardown = (force: boolean) =>
       (tearing ??= (async () => {
         stopping = true;
         if (!force && channelOpen)
           await Promise.race([Promise.all([channelLost, childExited]), sleep(stopTimeoutMs)]);
-        let where: string | 'gone';
-        try {
-          where = scope.cgroupPath || (await discover(Date.now() + stopTimeoutMs));
-        } catch {
-          throw stopFailed('SCOPE_UNKNOWN');
-        }
-        if (where !== 'gone') {
-          const deadline = Date.now() + stopTimeoutMs;
-          let empty = false;
-          while (!(empty = await provenEmpty(where)) && Date.now() < deadline) {
-            killScope(where);
-            await sleep(25);
+        if (!processesGone) {
+          let where: string | 'gone';
+          try {
+            where = scope.cgroupPath || (await discover(Date.now() + stopTimeoutMs));
+          } catch {
+            throw stopFailed('SCOPE_UNKNOWN');
           }
-          if (!empty) throw stopFailed('NOT_PROVEN_EMPTY');
+          if (where !== 'gone') {
+            const deadline = Date.now() + stopTimeoutMs;
+            let empty = false;
+            while (!(empty = await provenEmpty(where)) && Date.now() < deadline) {
+              killScope(where);
+              await sleep(25);
+            }
+            if (!empty) throw stopFailed('NOT_PROVEN_EMPTY');
+          }
+          processesGone = true;
         }
         await cleanupUnit();
         removeSocket();
         lose('STOPPED');
         await Promise.race([childExited, sleep(2_000)]);
         exitCode = childExit ?? null;
-        for (const listener of exitListeners.splice(0)) listener(exitCode);
+        exitCleanupError =
+          scope.unitCleanup === 'done' ? undefined : new WorkspaceError('RUNTIME_CLEANUP_FAILED');
+        for (const listener of exitListeners.splice(0)) listener(exitCode, exitCleanupError);
+        if (exitCleanupError) throw exitCleanupError;
       })().catch((error) => {
-        // Not proven: keep everything (handle, onExit listeners) so a later stop() retries from the start.
+        // Keep the handle retryable on either process uncertainty or required unit cleanup failure.
         tearing = undefined;
         throw error instanceof WorkspaceError ? error : stopFailed('TEARDOWN_FAILED');
       }));
@@ -635,6 +644,7 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
           if (signalled) return;
           signalled = true;
           stopping = true;
+          if (processesGone) return; // Retry only the outstanding non-process cleanup.
           if (force || !channelOpen) {
             // A failing kill here is retried, and reported as RUNTIME_STOP_FAILED, by the teardown below.
             try {
@@ -648,15 +658,13 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
       }
       if (!signalled) throw new Error('RUNTIME_STOP_ADMISSION_SKIPPED');
       await teardown(force);
-      // The runtime is proven gone; only a unit removal that failed earlier is retried.
-      if (scope.unitCleanup === 'failed') await cleanupUnit();
     };
 
     const handle: StepRunnerHandle = {
       pid: proc.pid,
       scope,
       onExit: (listener) => {
-        if (exitCode !== undefined) queueMicrotask(() => listener(exitCode!));
+        if (exitCode !== undefined) queueMicrotask(() => listener(exitCode!, exitCleanupError));
         else exitListeners.push(listener);
       },
       onEvent: (listener) => void eventListeners.add(listener),

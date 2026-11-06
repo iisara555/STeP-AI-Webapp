@@ -252,9 +252,13 @@ export class RuntimeManager {
             })
           : await this.driver.start(spec);
         entry.handle = handle;
-        handle.onExit(() => {
+        handle.onExit((_code, cleanupError) => {
           if (this.live.get(key) !== entry || entry.handle !== handle) return;
-          Object.assign(entry, { state: 'failed', handle: undefined, error: 'RUNTIME_EXITED' });
+          Object.assign(entry, {
+            state: 'failed',
+            handle: cleanupError ? handle : undefined,
+            error: cleanupError?.code ?? 'RUNTIME_EXITED',
+          });
         });
         const provider = await this.grant(record.ownerId, record.id);
         if (provider) {
@@ -305,9 +309,13 @@ export class RuntimeManager {
         if (error instanceof RuntimeStartCleanupError) {
           entry.handle = error.handle;
           entry.startupCleanupFailed = true;
-          error.handle.onExit(() => {
+          error.handle.onExit((_code, cleanupError) => {
             if (this.live.get(key) !== entry || entry.handle !== error.handle) return;
-            Object.assign(entry, { state: 'failed', handle: undefined, error: 'RUNTIME_EXITED' });
+            Object.assign(entry, {
+              state: 'failed',
+              handle: cleanupError ? error.handle : undefined,
+              error: cleanupError?.code ?? 'RUNTIME_EXITED',
+            });
           });
         }
         if (entry.handle) {
@@ -657,7 +665,11 @@ export class RuntimeManager {
       } catch (error) {
         if (this.live.get(key) === entry && entry.state === 'stopping') {
           entry.state = attempt.signalMayHaveOccurred ? 'failed' : previousState;
-          if (attempt.signalMayHaveOccurred) entry.error = 'RUNTIME_STOP_FAILED';
+          if (attempt.signalMayHaveOccurred)
+            entry.error =
+              error instanceof WorkspaceError && error.code === 'RUNTIME_CLEANUP_FAILED'
+                ? error.code
+                : 'RUNTIME_STOP_FAILED';
         }
         if (entry.startupCleanupFailed && attempt.signalMayHaveOccurred)
           throw new WorkspaceError('RUNTIME_STOP_FAILED');

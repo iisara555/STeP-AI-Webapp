@@ -106,6 +106,42 @@ jobs through HTTP RunService; the runner test uses HTTP identity/start/denial an
   real-data deployment and near-Desktop parity remain explicitly incomplete. The permissive disposable runner
   fixture is a known test limitation, not an approved production access policy.
 
+## Review fix semantics
+
+The review fixes start at `03d277db14c03e4c2199984a5573225487842628` on the same assembly branch.
+
+- `stop()`/`stopWithAdmission()` succeed only after both process-absence proof and required systemd unit
+  cleanup confirmation. A failed stop/reset command is harmless only when the subsequent successful query
+  confirms `LoadState=not-found` or `ActiveState=inactive`; failed/unknown queries never establish cleanup.
+- `RUNTIME_STOP_FAILED` still means process cleanup was not confirmed. `RUNTIME_CLEANUP_FAILED` means
+  processes **were proven absent**, but required unit metadata cleanup is unconfirmed. It does not assert
+  that a process survived. The latter rejects stop/shutdown and accompanies the driver's one-shot `onExit`
+  notification as its optional second argument, so even autonomous crash cleanup retains the manager handle,
+  failed state and conservative capacity reservation. No replacement start can bypass that reservation.
+- A retry redoes outstanding unit cleanup, not cgroup signalling/proof. Once it succeeds the manager removes
+  the reservation and reports stopped. Gateway assembly close already delegates to retryable manager shutdown;
+  no production entry or host policy was opened by this change. Manager state is not durable across a crash
+  of the supervisor; orphan reconciliation remains a separate release gate.
+- Unix process-driver synchronous send rejection invokes the same finalizer used by replies, exit and timeout:
+  RPC message/exit listeners and any timer are removed before rejection. No listener-limit increase or socket
+  teardown hides the leak. Sixteen oversized local calls reject without MaxListeners warnings or listener/timer
+  growth, followed by same-PID health and successful small RPC. Existing Node loader deprecation warnings remain.
+- Red/green evidence: all three real-manager stop/shutdown/crash cases failed before the cleanup fix; a further
+  metadata-retry fault test failed when cgroup re-observation incorrectly changed a known process-absence result
+  to `RUNTIME_STOP_FAILED`. The Unix test emitted both exit/message MaxListeners warnings before the send fix.
+
+Verification on the review-fix worktree (Node 26.12.1): `npm run check`, build, engine-pin and
+`git diff --check` pass; application **118/118**, database **29/29**, ungated engine **242/242**.
+The opt-in runner command excluding `bounded (memory|task|CPU)` passes **24/24**, including the three
+real-manager fault tests, retry without renewed cgroup access, post-retry capacity release and ten-runtime
+assembly. Three pressure cases were deliberately excluded, not rerun. Relevant Cloud Workspace Playwright:
+**2 desktop passed, 2 existing mobile skips**; this remains a scripted UI fixture, not browser-to-runner auth
+acceptance. Final independent read-only inventory: `pgrep` exit 1 with empty streams, `systemctl` exit 0 with
+empty streams, no runner scope cgroups or `step-driver-test-*` fixture/socket folders. Existing 17 upstream
+engine diagnostics, Node loader deprecations and Vite chunk warning remain. Local standards/spec review found
+no additional blocking defect in this scope; independent parent review is still required before integration
+(this focused subagent cannot spawn the two independent reviewers). No merge, deployment or host policy change.
+
 ## Remaining release gates (do not remove the production refusal yet)
 
 1. Enforced exclusive launcher/broker: the existing sudo rule still permits alternate bwrap invocations as

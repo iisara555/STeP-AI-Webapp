@@ -196,7 +196,12 @@ export function processDriver({
         };
         child.on('message', onMessage);
         child.once('exit', onExit);
-        child.send({ type: 'call', nonce: id, method, params } satisfies RuntimeRequest);
+        try {
+          child.send({ type: 'call', nonce: id, method, params } satisfies RuntimeRequest);
+        } catch (error) {
+          // Unix enqueue can reject locally without closing the healthy channel.
+          finish(error as Error);
+        }
       });
     const eventListeners = new Set<(event: RuntimeEvent) => void>();
     child.on('message', (message: RuntimeReply) => {

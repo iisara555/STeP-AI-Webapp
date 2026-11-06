@@ -28,6 +28,7 @@ import {
   type RuntimeSpec,
 } from '../src/workspace/contract.ts';
 import { workspacePaths } from '../src/workspace/storage.ts';
+import { RuntimeManager } from '../src/workspace/manager.ts';
 import { createSyntheticAssembly } from '../src/gateway/synthetic-assembly.ts';
 import { provisionTestQuota } from './support/quota.ts';
 import type { AddressInfo } from 'node:net';
@@ -1140,6 +1141,103 @@ setTimeout(() => (out({ timeout: true, received }), process.exit(0)), 30000);
     await assertClean();
   });
 
+  for (const action of ['stop', 'close', 'crash'] as const)
+    test(`RuntimeManager ${action}: unknown unit cleanup retains reservation and retries after proven process exit`, async () => {
+      const dataRoot = join(root, `manager-cleanup-${action}`);
+      mkdirSync(dataRoot);
+      let failCleanup = false;
+      let cleanupQueries = 0;
+      const realDriver = driver(
+        { transport: 'authenticated' },
+        {
+          // Once processes were proven absent, metadata-only retries must not need cgroup access again.
+          readCgroupFile: (path) =>
+            cleanupQueries && failCleanup
+              ? Promise.resolve('populated 1\nfrozen 0\n')
+              : readFile(path, 'utf8'),
+          writeCgroupFile: (path, data) => {
+            assert.ok(!cleanupQueries || !failCleanup, 'metadata-only retry must not signal processes');
+            writeFileSync(path, data);
+          },
+          systemctl: (args, real) => {
+            if (failCleanup && (args[0] !== 'show' || args.includes('LoadState'))) {
+              if (args.includes('LoadState')) cleanupQueries++;
+              return Promise.resolve({ code: 1, stdout: '' });
+            }
+            return real(args);
+          },
+        },
+      );
+      let handle!: StepRunnerHandle;
+      const manager = new RuntimeManager({
+        dataRoot: provisionTestQuota(dataRoot, 2),
+        workspacesPerUser: 2,
+        maxRunning: 1,
+        driver: {
+          start: async (spec) => {
+            specs.push(spec);
+            for (let dir = spec.filesDir; dir !== root; dir = dirname(dir)) chmodSync(dir, 0o755);
+            chmodSync(spec.dir, 0o777);
+            chmodSync(spec.filesDir, 0o777);
+            return (handle = await realDriver.start(spec));
+          },
+        },
+      });
+      const ws = await manager.create('alice', { name: 'Cleanup retry' });
+      const other = await manager.create('alice', { name: 'Capacity witness' });
+      try {
+        await manager.start('alice', ws.id);
+        failCleanup = true;
+        if (action === 'crash') {
+          const runtime = procs(handle.scope.cgroupPath).find(isRuntime)!;
+          signalAsRunner('KILL', runtime.pid);
+          for (let i = 0; i < 100 && !cleanupQueries; i++) await sleep(50);
+          // Wait for the public failure transition, not just the query being issued.
+          for (let i = 0; i < 100 && (await manager.get('alice', ws.id)).state === 'running'; i++)
+            await sleep(50);
+        } else {
+          await assert.rejects(action === 'stop' ? manager.stop('alice', ws.id) : manager.shutdown(), {
+            code: 'RUNTIME_CLEANUP_FAILED',
+          });
+        }
+        assert.equal(emptied(handle.scope.cgroupPath), true, 'process absence is independently proven');
+        assert.equal(handle.scope.unitCleanup, 'failed');
+        const state = await manager.get('alice', ws.id);
+        assert.equal(state.state, 'failed');
+        assert.equal(
+          state.error,
+          'RUNTIME_CLEANUP_FAILED',
+          'metadata uncertainty is not a surviving-process claim',
+        );
+        if (action !== 'close') {
+          await assert.rejects(manager.start('alice', ws.id), { code: 'RUNTIME_NOT_RUNNING' });
+          await assert.rejects(manager.start('alice', other.id), { code: 'RUNTIME_CAPACITY' });
+        }
+        const beforeRetry = cleanupQueries;
+        const retry = () =>
+          action === 'stop' ? manager.stop('alice', ws.id, (signal) => signal()) : manager.shutdown();
+        await assert.rejects(retry(), { code: 'RUNTIME_CLEANUP_FAILED' });
+        assert.ok(cleanupQueries > beforeRetry, 'retry uses the retained real driver handle');
+        failCleanup = false;
+        await retry();
+        assert.equal(handle.scope.unitCleanup, 'done');
+        assert.equal((await manager.get('alice', ws.id)).state, 'stopped');
+        if (action === 'stop') {
+          await manager.start('alice', other.id);
+          assert.equal(
+            (await manager.health('alice', other.id)).ok,
+            true,
+            'successful cleanup releases capacity',
+          );
+          await manager.stop('alice', other.id);
+        }
+        await assertClean();
+      } finally {
+        failCleanup = false;
+        await manager.shutdown();
+      }
+    });
+
   test('failed systemctl stop/reset-failed are surfaced on the scope; the runtime is still proven stopped', async () => {
     let fail = false;
     const handle = await driver(
@@ -1150,7 +1248,7 @@ setTimeout(() => (out({ timeout: true, received }), process.exit(0)), 30000);
     ).start(workspace());
     const exit = exited(handle);
     fail = true;
-    await handle.stop();
+    await assert.rejects(handle.stop(), { code: 'RUNTIME_CLEANUP_FAILED' });
     await exit;
     assert.equal(emptied(handle.scope.cgroupPath), true);
     assert.equal(handle.scope.unitCleanup, 'failed');

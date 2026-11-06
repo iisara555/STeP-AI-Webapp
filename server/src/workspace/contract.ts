@@ -121,8 +121,9 @@ export type RuntimeHandle = {
    * drivers without this guarantee must omit the method and gateway stops will fail closed.
    */
   stopWithAdmission?(admit: (signal: () => void) => void): Promise<void>;
-  /** Called once when the runtime ends for any reason, including stop(). */
-  onExit(listener: (code: number | null) => void): void;
+  /** Called once after process exit is proven, including stop(). A cleanup error means
+   * non-process resources remain unconfirmed: retain the handle and retry stop(). */
+  onExit(listener: (code: number | null, cleanupError?: WorkspaceError) => void): void;
   /** Progress events of runs inside this runtime. */
   onEvent?(listener: (event: RuntimeEvent) => void): void;
 };
@@ -138,7 +139,7 @@ export type RuntimeDriver = {
   startWithAdmission?(spec: RuntimeSpec, admit: (spawn: () => void) => void): Promise<RuntimeHandle>;
 };
 
-/** Startup failed with a process that has not been confirmed dead. */
+/** Startup failed with required process or non-process cleanup still unconfirmed. */
 export class RuntimeStartCleanupError extends Error {
   constructor(readonly handle: RuntimeHandle) {
     super('RUNTIME_START_CLEANUP_FAILED');
@@ -152,6 +153,8 @@ export type WorkspaceErrorCode =
   | 'RUNTIME_CAPACITY'
   | 'RUNTIME_START_FAILED'
   | 'RUNTIME_STOP_FAILED'
+  /** Processes are proven absent, but required non-process cleanup is unconfirmed. */
+  | 'RUNTIME_CLEANUP_FAILED'
   | 'RUNTIME_EXITED'
   | 'RUNTIME_NOT_RUNNING'
   | 'RUNTIME_CALL_FAILED'

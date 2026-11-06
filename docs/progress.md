@@ -1,5 +1,24 @@
 # Progress
 
+## Runtime/runner review fixes on 03d277db (synthetic only)
+
+- Test-first real RuntimeManager + authenticated account-switched driver fault injection reproduces stop,
+  shutdown and crash cleanup failures. Failed unit cleanup now rejects with `RUNTIME_CLEANUP_FAILED` after
+  processes are proven absent. `onExit` carries that separate cleanup error; the manager keeps the failed
+  workspace handle and capacity reservation, refuses replacement starts, and retries cleanup on stop/shutdown.
+  Successful retry releases the reservation. The saved process-absence proof survives metadata retries, which
+  neither signal nor require cgroup access again. Unknown process emptiness still uses `RUNTIME_STOP_FAILED`.
+- Unix process-driver now runs its existing RPC finalizer when synchronous send throws. A real runtime test
+  reproduces MaxListeners warnings before the fix with 16 local oversized sends; afterward listener and timer
+  counts stay at baseline, no MaxListeners warning is emitted, and small RPCs/health work on the same PID.
+- Verified: app **118/118**, database **29/29**, ungated engine **242/242**, opt-in non-pressure host **24/24**,
+  check/build/engine-pin/diff checks; relevant Playwright **2 passed / 2 existing mobile skips**. Three host
+  pressure cases deliberately excluded. Final inventory has no runner PIDs, units, cgroups or fixture/socket
+  folders; command failures were checked. Existing upstream diagnostics and loader/build warnings remain.
+- Verification uses Node 26.12.1, existing dependency copies and unchanged Harness pin. No host configuration,
+  merge/deploy, external provider calls or real data. Existing production blockers remain unchanged; see
+  [review fix semantics and verification](runtime-runner-assembly.md#review-fix-semantics).
+
 ## Runtime/runner assembly on integration 3c5a2db (synthetic only)
 
 - New worktree `/home/itsara/projects/step-runtime-runner-assembly`, branch `work/runtime-runner-assembly`;

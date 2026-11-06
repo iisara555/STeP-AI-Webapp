@@ -8,6 +8,64 @@ import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { runtimeEnv } from '../src/workspace/process-driver.ts';
+import { channel } from 'node:diagnostics_channel';
+import type { ChildProcess } from 'node:child_process';
+
+test('Unix outbound oversize rejects repeatedly without retaining RPC listeners; same PID stays healthy', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'step-outbound-size-'));
+  await mkdir(join(dir, 'files'));
+  let child: ChildProcess | undefined;
+  const spawned = channel('child_process');
+  const observe = (message: unknown) => {
+    child = (message as { process: ChildProcess }).process;
+  };
+  const warnings: Error[] = [];
+  const warning = (error: Error) => {
+    if (error.name === 'MaxListenersExceededWarning') warnings.push(error);
+  };
+  process.on('warning', warning);
+  spawned.subscribe(observe);
+  let handle;
+  try {
+    handle = await processDriver({ transport: 'unix', socketRoot: dir }).start({
+      workspaceId: 'ws_' + 'c'.repeat(32),
+      ownerId: 'synthetic',
+      dir,
+      filesDir: join(dir, 'files'),
+    });
+    spawned.unsubscribe(observe);
+    assert.ok(child);
+    const before = await handle.health();
+    const listeners = { message: child.listenerCount('message'), exit: child.listenerCount('exit') };
+    const timers = process.getActiveResourcesInfo().filter((resource) => resource === 'Timeout').length;
+    for (let i = 0; i < 16; i++)
+      await assert.rejects(
+        handle.call('connect', {
+          baseUrl: 'https://synthetic.invalid/v1',
+          model: 'synthetic',
+          token: 'x'.repeat(2 * 1024 * 1024),
+        }),
+        /RUNTIME_FRAME_TOO_LARGE/,
+      );
+    await new Promise<void>((done) => setImmediate(done));
+    assert.deepEqual(warnings, []);
+    assert.equal(child.listenerCount('message'), listeners.message, 'no retained result listeners');
+    assert.equal(child.listenerCount('exit'), listeners.exit, 'no retained exit listeners');
+    assert.equal(
+      process.getActiveResourcesInfo().filter((resource) => resource === 'Timeout').length,
+      timers,
+    );
+    const after = await handle.health();
+    assert.equal(after.ok, true);
+    assert.equal(after.pid, before.pid);
+    assert.deepEqual(await handle.call('conversations', {}), []);
+  } finally {
+    spawned.unsubscribe(observe);
+    process.off('warning', warning);
+    await handle?.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 for (const method of ['health', 'unknown'])
   test(`runtime handles closed-channel ${method} reply without an unhandled rejection`, async () => {
