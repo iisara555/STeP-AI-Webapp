@@ -204,6 +204,23 @@ test('a run can be cancelled from the chat, and missing features say so instead 
   });
 });
 
+test('Cloud document operations remain unavailable rather than falling back to Supabase', async () => {
+  await withGateway(async ({ host: make }) => {
+    const host = make();
+    const snapshot = await host.call<Snapshot>('snapshot');
+    assert.deepEqual(snapshot.documents, []);
+    for (const action of ['document.create', 'session.draft']) {
+      await assert.rejects(() => host.call(action, { id: 'synthetic', text: 'private draft' }), {
+        code: 'CLOUD_NOT_AVAILABLE',
+      });
+    }
+    await assert.rejects(() => host.download('synthetic/private.docx'), { code: 'CLOUD_NOT_AVAILABLE' });
+    await assert.rejects(() => host.upload('synthetic/private.docx', new File(['synthetic'], 'private.docx')), {
+      code: 'CLOUD_NOT_AVAILABLE',
+    });
+  });
+});
+
 test('a credential the Gateway refuses signs the tab out', async () => {
   await withGateway(async ({ host: make }) => {
     let signedOut = 0;
