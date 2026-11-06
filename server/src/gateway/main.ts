@@ -12,6 +12,14 @@ import { QuotaStore } from './quota-store.ts';
 import { DEFAULT_QUOTAS, RunService } from './runs.ts';
 import { gatewayShutdown } from './shutdown.ts';
 
+// No configuration or environment flag can make processDriver a host isolation boundary.
+// Remove this refusal only when #57's production isolation requirements are met and integrated.
+function refuseUnsafeGateway(): void {
+  console.error('Gateway startup refused: production workspace isolation is not implemented (#57).');
+  process.exit(1);
+}
+refuseUnsafeGateway();
+
 const env = (name: string, fallback?: string) => {
   const value = process.env[name] ?? fallback;
   if (value === undefined || value === '') {

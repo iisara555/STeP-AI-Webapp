@@ -127,6 +127,16 @@ atomic by the SQLite lock. Already-buffered bytes cannot be retracted. Authentic
 invitation email is sent. UI, expiry, per-target audit, live Google acceptance and production rollout
 remain open.
 
+**Production gateway startup is deliberately disabled.** `npm run gateway` always exits nonzero before
+reading configuration or opening data: its `processDriver()` does not provide host isolation, and #57 is
+not complete. No environment variable opts out. This also blocks an admin/dev pilot through this entry;
+do not use it with real or multi-user data. The separate synthetic-only identity trial below is unchanged,
+requires its own sandbox, and is not production isolation acceptance. Library callers and the development
+process driver are not protected by this entry-point refusal; they must not be used to bypass it.
+
+The following is the historical configuration, **not a runnable deployment instruction** until the isolation
+requirements are met and integrated:
+
 ```bash
 STEP_DATA_ROOT=/srv/step/data \
 STEP_QUOTA_WORKSPACES=10 \

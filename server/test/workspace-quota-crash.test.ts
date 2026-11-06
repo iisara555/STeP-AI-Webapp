@@ -38,7 +38,7 @@ const driver = {
   },
 };
 
-test('gateway refuses to start without an explicit workspace quota', async () => {
+test('gateway refuses startup even without workspace quota configuration', async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-quota-config-'));
   try {
     const env: NodeJS.ProcessEnv = {
@@ -53,7 +53,7 @@ test('gateway refuses to start without an explicit workspace quota', async () =>
         cwd: process.cwd(),
         env,
       }),
-      (error: any) => error.code === 2 && String(error.stderr).includes('STEP_QUOTA_WORKSPACES'),
+      (error: any) => error.code === 1 && String(error.stderr).includes('#57'),
     );
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
