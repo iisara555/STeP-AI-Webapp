@@ -618,6 +618,129 @@ setTimeout(() => (out({ timeout: true, received }), process.exit(0)), 30000);
     },
   );
 
+  test(
+    'bounded CPU enforcement: effective quota throttles one finite worker and the workspace recovers',
+    { timeout: 60_000 },
+    async (t) => {
+      // Explicit refusal, not a skip/pass, if this opt-in host is busy or short of headroom.
+      const preflight = async () => {
+        const mem = readFileSync('/proc/meminfo', 'utf8');
+        assert.ok(
+          Number(/^MemAvailable:\s+(\d+) kB$/m.exec(mem)?.[1]) >= 2 * 1024 * 1024,
+          'CPU acceptance requires 2 GiB available host memory',
+        );
+        assert.ok(
+          Number(readFileSync('/proc/loadavg', 'utf8').split(' ')[0]) < 1,
+          'CPU acceptance requires one-minute host load below 1',
+        );
+        const threads = readdirSync('/proc')
+          .filter((p) => /^\d+$/.test(p))
+          .reduce((sum, pid) => {
+            try {
+              return (
+                sum + Number(/^Threads:\s+(\d+)$/m.exec(readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1])
+              );
+            } catch (error) {
+              if (
+                (error as NodeJS.ErrnoException).code === 'ENOENT' ||
+                (error as NodeJS.ErrnoException).code === 'ESRCH'
+              )
+                return sum;
+              throw error;
+            }
+          }, 0);
+        assert.ok(Number.isSafeInteger(threads));
+        assert.ok(
+          Number(readFileSync('/proc/sys/kernel/threads-max', 'utf8')) - threads >= 256,
+          'CPU acceptance requires 256 spare host task slots',
+        );
+        const ticks = () => {
+          const values = readFileSync('/proc/stat', 'utf8')
+            .split('\n')[0]!
+            .trim()
+            .split(/\s+/)
+            .slice(1, 9)
+            .map(Number);
+          return { total: values.reduce((sum, n) => sum + n, 0), idle: values[3]! };
+        };
+        const a = ticks();
+        await sleep(500);
+        const b = ticks();
+        assert.ok(
+          b.total > a.total && (b.idle - a.idle) / (b.total - a.total) >= 0.8,
+          'CPU acceptance requires at least 80% sampled host CPU idle',
+        );
+      };
+      await preflight();
+      const spec = workspace();
+      const handle = await driver({
+        entry: 'server/src/test-entries/fake-resources.mjs',
+        memoryMaxBytes: 192 * 1024 * 1024,
+        tasksMax: 32,
+        cpuQuotaPercent: 25,
+        startTimeoutMs: 10_000,
+        stopTimeoutMs: 1_000,
+      }).start(spec);
+      const watchdog = setTimeout(() => void handle.stop().catch(() => {}), 10_000);
+      try {
+        const read = (name: string) => readFileSync(join(handle.scope.cgroupPath, name), 'utf8').trim();
+        assert.equal(read('memory.max'), '201326592');
+        assert.equal(read('memory.swap.max'), '0');
+        assert.equal(read('pids.max'), '32');
+        // Kernel state, not the requested CPUQuota property, authorizes arming the finite worker.
+        assert.equal(read('cpu.max'), '25000 100000');
+        await preflight();
+        const stat = () => {
+          const values = Object.fromEntries(
+            read('cpu.stat')
+              .split('\n')
+              .map((line) => line.split(/\s+/)),
+          );
+          const result = Object.fromEntries(
+            ['usage_usec', 'nr_periods', 'nr_throttled', 'throttled_usec'].map((key) => [
+              key,
+              Number(values[key]),
+            ]),
+          );
+          for (const value of Object.values(result)) assert.ok(Number.isSafeInteger(value) && value >= 0);
+          return result;
+        };
+        const before = stat();
+        const result = await handle.call('ask', { text: 'bounded-cpu-pressure' });
+        assert.deepEqual(result, { code: 0, signal: null });
+        const after = stat();
+        const delta = Object.fromEntries(Object.keys(before).map((key) => [key, after[key]! - before[key]!]));
+        t.diagnostic(
+          JSON.stringify({ cgroup: handle.scope.cgroupPath, cpuMax: read('cpu.max'), before, after, delta }),
+        );
+        assert.equal(read('cpu.max'), '25000 100000');
+        assert.ok(delta.usage_usec! >= 100_000, 'scope consumed actual CPU during the worker');
+        assert.ok(delta.nr_periods! >= 3, 'multiple quota periods elapsed');
+        assert.ok(delta.nr_throttled! >= 3, 'kernel throttled this exact scope in multiple periods');
+        assert.ok(delta.throttled_usec! > 0, 'kernel recorded throttled CPU time, not just wall time');
+        assert.equal((await handle.health()).ok, true, 'IPC survives CPU throttling');
+      } finally {
+        clearTimeout(watchdog);
+        await handle.stop();
+        assert.equal(emptied(handle.scope.cgroupPath), true);
+        await assertClean(); // Also prove cleanup when an enforcement assertion fails.
+      }
+      const recovered = await driver().start(spec);
+      try {
+        assert.notEqual(recovered.scope.unit, handle.scope.unit);
+        assert.equal((await recovered.health()).workspaceId, spec.workspaceId);
+        await recovered.call('connect', { baseUrl: 'https://provider.invalid/v1', model: 'synthetic' });
+        assert.equal(
+          (await recovered.call('ask', { text: 'synthetic recovery after CPU throttling' })).status,
+          'review',
+        );
+      } finally {
+        await recovered.stop();
+      }
+      await assertClean();
+    },
+  );
+
   test('a second workspace sandbox cannot see the first one’s socket or files', async () => {
     const a = workspace();
     const b = workspace();

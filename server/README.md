@@ -452,6 +452,40 @@ This closes bounded memory/task enforcement and recovery acceptance only. Worksp
 restart reconciliation of orphaned scopes, socket group/ACL hardening and production integration remain open.
 No host configuration changes, privileged installs, workspace disk filling or inode exhaustion are performed.
 
+### #57: bounded CPU enforcement acceptance (synthetic host test)
+
+The same explicit host gate enables `bounded CPU enforcement` through the existing driver/handle seams.
+This is **enforcement evidence**, separate from the earlier configuration-only `cpu.max` test:
+
+- Before startup and again before pressure, require 2 GiB available host memory, 256 spare kernel task
+  slots, one-minute load below 1, and at least 80% CPU idle sampled over 500 ms. A failed preflight fails
+  the test without arming pressure; it is not a successful skip. Do not weaken these checks on a busy host.
+- Before arming, read this random scope's effective `cpu.max=25000 100000` (25% of one CPU),
+  `memory.max=201326592`, `memory.swap.max=0` and `pids.max=32`.
+- Spawn one direct, single-threaded Python worker (`-I -S`, already provisioned), whose monotonic busy loop
+  ends after two seconds even without a quota. The fixture independently kills it after four seconds;
+  the host calls stop after ten seconds; the fixture exits after twenty seconds; the test has a sixty-second
+  deadline, `finally` stop and suite-wide tracked-handle teardown. The outer command below is also bounded.
+- Require successful worker exit **and** post-baseline increases in this exact scope's `cpu.stat`:
+  at least 100,000 usage microseconds, three quota periods, three throttled periods, and positive throttled
+  microseconds. Startup throttling before the baseline, wall time and requested `CPUQuota` cannot pass alone.
+  Diagnostics retain the exact cgroup path, effective quota, before/after counters and deltas.
+- Check IPC health, prove scope emptiness and process/unit/socket cleanup, then start the real synthetic
+  runtime on the same workspace and complete `health`, `connect` and `ask` before stopping it again.
+
+CPU-only command (does not run memory or task pressure):
+
+```bash
+STEP_STEP_RUNNER_TESTS=1 timeout --signal=TERM --kill-after=10s 90s \
+  node --import tsx --import ./server/src/register.mjs --test \
+  --test-name-pattern='bounded CPU enforcement' server/test/step-runner-driver.test.ts
+```
+
+Negative controls were exercised locally and reverted: removing the launch quota fails on `max 100000`
+**before** pressure; replacing the busy loop with an idle sleep fails with zero new throttled periods/time.
+No host settings or production code change. This does not close disk/inode quotas, orphan reconciliation,
+socket ACL provisioning, production integration or real-provider acceptance.
+
 ### #57: opt-in ขนาด `/tmp` ของ runtime สังเคราะห์
 
 เรียก `processDriver({ isolated: true, tmpfsBytes: 16 * 1024 * 1024 })` จากโค้ด

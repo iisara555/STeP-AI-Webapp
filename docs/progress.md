@@ -1,5 +1,40 @@
 # Progress
 
+## #57 · bounded CPU enforcement acceptance (test-only increment on 92b93d80)
+
+- Dedicated branch/worktree: `work/step-runner-cpu-acceptance` at
+  `/home/itsara/projects/step-runner-cpu-acceptance`. Reviewed the existing driver and resource fixtures first;
+  only test/docs changed. No production source, host settings, permissions, real data, merge or deployment.
+- The existing `STEP_STEP_RUNNER_TESTS=1` opt-in gate is required. The CPU test refuses pressure unless host
+  memory availability is at least 2 GiB, spare kernel task slots at least 256, one-minute load below 1, and
+  sampled CPU idle at least 80% over 500 ms. Checks run before launch and again before arming.
+- Reads effective scope `cpu.max=25000 100000`, `memory.max=201326592`, `memory.swap.max=0`, `pids.max=32`.
+  One direct single-threaded Python worker busy-loops to a two-second monotonic deadline, with a separate
+  four-second parent kill timer. Host stop watchdog is ten seconds, fixture lifetime twenty seconds,
+  test deadline sixty seconds, outer command ninety seconds. No unbounded allocation/forking/host stress.
+- Acceptance requires successful worker exit and post-baseline `cpu.stat` deltas: usage at least 100,000 usec,
+  at least three periods and three throttled periods, positive throttled usec. Diagnostics identify the exact
+  random cgroup and before/after counters. Requested CPUQuota/configuration or elapsed wall time alone is not proof.
+- Red/green: missing CPU fixture behavior failed on the reply assertion. Removing the launch quota temporarily
+  failed on effective `max 100000` before pressure. An idle-worker control failed (usage 23,171 usec,
+  zero additional throttled periods/time). Both mutations were reverted; production driver has no diff.
+- Three consecutive final CPU-only runs passed, each with **21 newly throttled periods**. Corresponding usage /
+  throttled-time deltas (usec): **535,183 / 1,546,651**, **535,722 / 1,543,970**, **535,166 / 1,544,138**.
+  Each run kept IPC healthy, proved cleanup and restarted the real synthetic runtime on the same workspace,
+  completing health/connect/ask. `finally` checks scope emptiness and process/unit/socket cleanup even on failure;
+  tracked-handle suite teardown is the fallback.
+- Checks passed: `npm run check` (existing 17 upstream engine diagnostics still delegated to Desktop CI),
+  `npm test` **118/118**, ungated `npm run test:engine` **221/221**, `npm run test:db` **29/29**,
+  `npm run build` (existing large-chunk warning), `npm run check:engine-pin`, and `git diff --check`.
+  No browser/UI behavior changed; Playwright was not rerun. Memory/task pressure tests were not rerun in
+  this CPU-only increment. Initial recovery/check failed because the new worktree's Harness submodule was
+  not initialized; initializing the existing pinned revision fixed it without changing the pin.
+- Independent final inventory: **0** step-runner PIDs, **0** `step-rt-*` units, **0** matching scope cgroups,
+  **0** `/mnt/step-work/step-driver-test-*` folders and **0** test socket directories. Command failures were
+  checked rather than treating an unsuccessful inventory query as empty.
+- Remaining production blockers are unchanged: disk/inode quota acceptance, orphan-scope reconciliation,
+  socket group/ACL provisioning, Gateway integration, and real-provider/secret acceptance. Gateway stays fail-closed.
+
 ## #57 · bounded host memory/task exhaustion acceptance (test-only increment on 5164f81)
 
 - Added two opt-in tests at the existing RuntimeDriver/RuntimeHandle seams, using a disposable synthetic

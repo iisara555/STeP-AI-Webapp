@@ -62,6 +62,33 @@ if (mode === 'fake-sleeper') {
             );
             child.once('error', (error) => reply({ error: error.code }));
             child.once('exit', (code, signal) => reply({ code, signal }));
+          } else if (request.method === 'ask' && request.params.text === 'bounded-cpu-pressure') {
+            // One direct single-threaded worker, at most 2s wall time even if quota is absent.
+            // Its monotonic deadline works inside the busy loop; a separate parent timer kills hangs.
+            const child = spawn(
+              '/usr/bin/python3',
+              [
+                '-I',
+                '-S',
+                '-c',
+                `
+import time
+end = time.monotonic() + 2
+while time.monotonic() < end:
+    pass
+`,
+              ],
+              { stdio: 'ignore' },
+            );
+            const deadline = setTimeout(() => child.kill('SIGKILL'), 4_000);
+            child.once('error', (error) => {
+              clearTimeout(deadline);
+              reply({ error: error.code });
+            });
+            child.once('close', (code, signal) => {
+              clearTimeout(deadline);
+              reply({ code, signal });
+            });
           } else if (request.method === 'ask' && request.params.text === 'bounded-task-pressure') {
             // Flat, sequential, finite list: at most 48 direct sleep children, never a fork tree.
             // Every child self-exits after 15s even if the test/IPC disappears.
