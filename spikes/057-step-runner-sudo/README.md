@@ -9,3 +9,7 @@ Host facts (ik-node-01): sudo is **sudo-rs 0.2.13**, with no `-C`/`closefrom_ove
 Before installation: 2/8 pass (only the two "refused" checks), as expected.
 
 Not established: workspace-to-workspace separation when all share one account (relies on bwrap mount/PID namespaces), resource limits, descendant cleanup, and the runtime itself running this way. Remove the rule with `sudo rm /etc/sudoers.d/step-runner`.
+
+## Result after installation (2026-11-06)
+
+Owner installed the rule as `/etc/sudoers.d/step-runner` (root:root 0440); `sudo -l -u step-runner` lists only `/usr/bin/bwrap`. Probe: **8/8 passed**. **fd 3 does not survive sudo-rs**, so Node fork IPC cannot be used across the account switch; the runtime must use the per-sandbox Unix-socket protocol instead (see `spikes/57-synthetic-ipc`, which also showed that a same-UID peer can forge `ready`, so each sandbox needs its own socket directory bound only into it, plus peer-credential and nonce checks).
