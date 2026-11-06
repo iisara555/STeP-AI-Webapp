@@ -168,6 +168,20 @@ test('closing the browser leaves the run working; coming back resumes it, and a 
       return current.status === 'running' ? undefined : current;
     });
     assert.deepEqual([cancelled.status, cancelled.code], ['cancelled', 'CANCELLED']);
+    const afterCancel = await readUntil(
+      await call(`${base}/events`, { headers: { 'last-event-id': String(replay.at(-1)!.id) } }),
+      (events) =>
+        events.some((e) => e.type === 'run' && e.data.id === second.id && e.data.status === 'cancelled'),
+    );
+    const cancelledEvent = afterCancel.find(
+      (e) => e.type === 'run' && e.data.id === second.id && e.data.status === 'cancelled',
+    )!.data;
+    assert.equal(
+      cancelledEvent.answer,
+      undefined,
+      'a cancelled question must not return the previous answer',
+    );
+    assert.deepEqual(cancelledEvent.sources, [], 'a cancelled question must not claim sources');
     const conversations = await (await call(`${base}/conversations`)).json();
     assert.equal(conversations.find((c: { id: string }) => c.id === run.sessionId).status, 'cancelled');
   } finally {

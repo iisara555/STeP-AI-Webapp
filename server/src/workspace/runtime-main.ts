@@ -124,13 +124,16 @@ const methods: Record<string, (params: unknown) => unknown> = {
       await writeIndex();
     }
     const done = engine.store.session(id);
-    const answer = done.messages.filter((m) => m.role === 'assistant').at(-1)?.text;
+    // A non-review outcome may leave the previous assistant message and context in the session.
+    // They are not an answer or sources for this unsuccessful run.
+    const completed = done.status === 'review';
+    const answer = completed ? done.messages.filter((m) => m.role === 'assistant').at(-1)?.text : undefined;
     return {
       sessionId: id,
       status: done.status,
       ...(answer ? { answer } : {}),
-      ...(done.status === 'review' ? {} : { code: done.runs?.at(-1)?.code || 'RUN_FAILED' }),
-      sources: done.loadedContext ?? [],
+      ...(completed ? {} : { code: done.runs?.at(-1)?.code || 'RUN_FAILED' }),
+      sources: completed ? (done.loadedContext ?? []) : [],
     };
   },
   async newConversation() {
