@@ -182,6 +182,27 @@
   workspace disk quota (XFS project quota helper), memory/pids exhaustion behaviour and recovery of scopes left by
   a crashed gateway (startup sweep of `step-rt-*`) are open; peer-credential check depends on `/usr/bin/python3`;
   all sandboxes share uid 995, so separation between workspaces rests on bwrap mount/PID/IPC/network namespaces.
+## #57 · optional authenticated Unix transport (not account-switch acceptance)
+
+- Added opt-in `processDriver({ transport: 'unix', isolated: true })` at the existing
+  RuntimeDriver seam; default fork transport, manager authority fences and production
+  Gateway refusal remain unchanged. The actual runtime/SQLite/engine endpoint now speaks
+  bounded Unix socket RPC, not the standalone synthetic protocol spike.
+- Per-start inherited stdin capability with mutual, role-separated HMAC challenges;
+  shared UID and socket permissions are explicitly not authentication. Only the
+  incarnation's socket directory is mounted. Authenticated disconnect runs engine cleanup;
+  stop waits for process exit and socket-directory cleanup.
+- Red-green covered the absent Unix endpoint, missing namespace socket bind, premature
+  stop cleanup and disconnect cleanup bypass. Added real engine + RuntimeManager
+  stop/resume/streaming/ownership tests, distinct same-UID forged-ready rejection, frame
+  bounds/UTF-8 and admission cleanup checks. See `runtime-unix-transport.md` for results.
+- **Still blocked:** this is not a step-runner launcher. Account-switched cgroup lifecycle,
+  descendant emptiness proof, root-owned runner-readable deployment, disk/inode helper
+  provisioning, resource exhaustion and crash recovery are separate unfinished acceptance
+  criteria. Never prefix this PID-signalling driver with sudo and call it isolated.
+- No privileged host changes, account switch, live provider, production data, deployment
+  or production activation. Browser acceptance remains blocked by missing Chromium
+  `libatk-1.0.so.0`; no privileged dependency installation was attempted.
 
 ## #57 · opt-in bounded private tmpfs (integration port)
 

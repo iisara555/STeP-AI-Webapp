@@ -20,6 +20,7 @@ import {
 } from './contract.ts';
 import { currentRunResult } from './current-run-result.ts';
 import type { RuntimeReply, RuntimeRequest } from './process-driver.ts';
+import { runtimeUnixChannel } from './unix-channel.ts';
 import { CONVERSATION_INDEX } from './storage.ts';
 import { DEFAULT_MAX_FRAME_BYTES, encodeFrame, frameReader } from './frames.ts';
 
@@ -30,7 +31,8 @@ const dir = process.env.STEP_WORKSPACE_DIR;
 const started = Date.now();
 // Two channels: Node fork IPC (process driver), or, where an account switch closes fd 3 (step-runner driver), the
 // per-sandbox Unix socket whose first frame must echo the launch nonce.
-const socketPath = process.env.STEP_RUNTIME_SOCKET;
+const unix = process.env.STEP_RUNTIME_TRANSPORT === 'unix' ? await runtimeUnixChannel() : undefined;
+const socketPath = unix ? undefined : process.env.STEP_RUNTIME_SOCKET;
 // The launch nonce arrives on stdin, never in argv or the environment.
 const launchNonce = socketPath ? await readNonce() : undefined;
 if (socketPath && !launchNonce) process.exit(2);
@@ -56,7 +58,7 @@ if (channel) {
     process.exit(0);
   });
 }
-const send = channel
+const send = unix ? unix.send : channel
   ? (message: RuntimeReply) => void channel.write(encodeFrame(message))
   : process.send?.bind(process);
 
@@ -198,7 +200,10 @@ const answer = async ({ nonce, method, params }: RuntimeRequest) => {
   }
 };
 closeEngine = () => engine.close();
-if (channel) {
+if (unix) {
+  unix.onMessage(answer);
+  process.on('disconnect', () => { engine.close(); process.exit(0); });
+} else if (channel) {
   const push = frameReader(
     DEFAULT_MAX_FRAME_BYTES,
     (frame) => {

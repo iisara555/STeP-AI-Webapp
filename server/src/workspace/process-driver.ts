@@ -1,6 +1,7 @@
 // Development driver: optionally runs the synthetic trial inside Linux namespaces with restricted mounts.
 // The default is unsandboxed for CLI tests; the gateway opts into the sandbox and never falls back.
 import { fork, type ChildProcess } from 'node:child_process';
+import { prepareUnixRuntime } from './unix-channel.ts';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
@@ -107,15 +108,20 @@ export function processDriver({
   isolated = false,
   stopTimeoutMs = 5_000,
   tmpfsBytes,
+  transport = 'fork',
+  socketRoot,
 }: {
   startTimeoutMs?: number;
   isolated?: boolean;
   stopTimeoutMs?: number;
   tmpfsBytes?: number;
+  transport?: 'fork' | 'unix';
+  socketRoot?: string;
 } = {}): RuntimeDriver {
   validateTmpfsBytes(tmpfsBytes);
   if (tmpfsBytes !== undefined && !isolated) throw new Error('TMPFS_REQUIRES_ISOLATION');
   const start: NonNullable<RuntimeDriver['startWithAdmission']> = async (spec, admit) => {
+    const unix = transport === 'unix' ? await prepareUnixRuntime(socketRoot) : undefined;
     let child!: ChildProcess;
     let admissionError: unknown;
     let admissionFailed = false;
@@ -123,29 +129,44 @@ export function processDriver({
     try {
       admit(() => {
         if (!admitting || child) throw new Error('RUNTIME_START_ADMISSION_REPEATED');
-        child = fork(ENTRY, [], {
-          cwd: spec.filesDir,
-          env: { ...runtimeEnv(spec), ...(isolated ? { STEP_SYNTHETIC_PROVIDER: '1' } : {}) },
-          ...(isolated ? { execPath: '/usr/bin/bwrap' } : {}),
-          execArgv: [
-            ...(isolated ? isolatedRuntimeArgs(spec, tmpfsBytes) : []),
-            '--import',
-            TSX,
-            '--import',
-            REGISTER,
-          ],
-          stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
-          serialization: 'json',
-        });
+        const env = {
+          ...runtimeEnv(spec),
+          ...(isolated ? { STEP_SYNTHETIC_PROVIDER: '1' } : {}),
+          ...(unix ? { STEP_RUNTIME_TRANSPORT: 'unix' } : {}),
+        };
+        const isolation = isolated ? isolatedRuntimeArgs(spec, tmpfsBytes) : [];
+        // The sandbox sees only its own endpoint, never the socketRoot or other workspaces.
+        if (isolated && unix)
+          isolation.splice(isolation.length - 2, 0, '--ro-bind', unix.directory, unix.directory);
+        const args = [...isolation, '--import', TSX, '--import', REGISTER];
+        child = unix
+          ? unix.spawn(isolated ? '/usr/bin/bwrap' : process.execPath, [...args, ENTRY], {
+              cwd: spec.filesDir,
+              env,
+            })
+          : fork(ENTRY, [], {
+              cwd: spec.filesDir,
+              env,
+              ...(isolated ? { execPath: '/usr/bin/bwrap' } : {}),
+              execArgv: args,
+              stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+              serialization: 'json',
+            });
       });
     } catch (error) {
-      if (!child) throw error;
+      if (!child) {
+        await unix?.dispose();
+        throw error;
+      }
       admissionError = error;
       admissionFailed = true;
     } finally {
       admitting = false;
     }
-    if (!child) throw new Error('RUNTIME_START_ADMISSION_SKIPPED');
+    if (!child) {
+      await unix?.dispose();
+      throw new Error('RUNTIME_START_ADMISSION_SKIPPED');
+    }
     let nonce = 0;
     const exited = new Promise<number | null>((done) => {
       child.once('exit', (code) => done(code));
@@ -215,6 +236,7 @@ export function processDriver({
       });
       try {
         await Promise.race([exited, failure]);
+        await unix?.dispose();
       } finally {
         clearTimeout(kill);
         clearTimeout(timeout);
