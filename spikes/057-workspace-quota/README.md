@@ -1,0 +1,7 @@
+# Per-workspace disk limit (#57): root helper, not yet installed
+
+Setting an XFS project quota needs root. `step-workspace-quota` is the only root operation proposed for this: it sets, clears or reports a quota on exactly one folder, `/mnt/step-work/step-ai/users/<owner>/workspaces/<workspace>`. It takes IDs, never paths, validates them with the same formats as `server/src/workspace/contract.ts`, refuses symlinks on any path component, and only uses project IDs 100000–199999, so it cannot touch other folders or the owner's earlier test project. It also refuses to run unless `/mnt/step-work` is a mounted XFS filesystem with `prjquota`.
+
+`test-validation.sh` runs every line of the helper except the root check, with `xfs_quota` replaced by `echo`: **17/17 pass** (valid set/clear/report; rejects traversal, slashes, malformed or missing workspaces, a workspace symlinked to `/etc`, out-of-range or non-numeric project IDs, shell characters, zero/oversized/leading-zero limits, extra arguments, unknown commands). A symlinked owner folder is also rejected.
+
+Proposed installation, after review: copy to `/usr/local/sbin/step-workspace-quota` as root:root 0755, and add `sudoers-step-workspace-quota` (validated with `visudo -c -f`). Not yet tested with real `xfs_quota` as root, and not wired into the gateway. Residual risk: a compromised `itsara` account could swap a folder between the check and `xfs_quota`; harm is limited to project IDs and limits on `/mnt/step-work`, an account that already controls that data.

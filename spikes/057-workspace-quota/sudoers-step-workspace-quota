@@ -1,0 +1,3 @@
+# Lets itsara run ONLY the root-owned quota helper as root. The helper accepts validated IDs only.
+# Remove with: sudo rm /etc/sudoers.d/step-workspace-quota
+itsara ALL=(root) NOPASSWD: /usr/local/sbin/step-workspace-quota
