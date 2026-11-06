@@ -215,9 +215,12 @@ test('Cloud document operations remain unavailable rather than falling back to S
       });
     }
     await assert.rejects(() => host.download('synthetic/private.docx'), { code: 'CLOUD_NOT_AVAILABLE' });
-    await assert.rejects(() => host.upload('synthetic/private.docx', new File(['synthetic'], 'private.docx')), {
-      code: 'CLOUD_NOT_AVAILABLE',
-    });
+    await assert.rejects(
+      () => host.upload('synthetic/private.docx', new File(['synthetic'], 'private.docx')),
+      {
+        code: 'CLOUD_NOT_AVAILABLE',
+      },
+    );
   });
 });
 
