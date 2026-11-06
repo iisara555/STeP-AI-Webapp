@@ -40,11 +40,11 @@ export function jsonChannel(socket: Socket, receive: (value: any) => void) {
   });
   return (value: unknown) => {
     const data = JSON.stringify(value) + '\n';
-    if (
-      socket.destroyed ||
-      Buffer.byteLength(data) > MAX_FRAME ||
-      socket.writableLength + Buffer.byteLength(data) > MAX_QUEUE
-    ) {
+    const bytes = Buffer.byteLength(data);
+    if (socket.destroyed) throw new Error('RUNTIME_CHANNEL_CLOSED');
+    // Local size rejection writes nothing: the healthy peer can still receive a small error reply.
+    if (bytes > MAX_FRAME) throw new Error('RUNTIME_FRAME_TOO_LARGE');
+    if (socket.writableLength + bytes > MAX_QUEUE) {
       socket.destroy();
       throw new Error('RUNTIME_CHANNEL_CLOSED');
     }

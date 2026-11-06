@@ -155,6 +155,8 @@ export type WorkspaceErrorCode =
   | 'RUNTIME_EXITED'
   | 'RUNTIME_NOT_RUNNING'
   | 'RUNTIME_CALL_FAILED'
+  /** The result exceeds the bounded transport frame; no partial result was returned. */
+  | 'RUNTIME_RESULT_TOO_LARGE'
   | 'INVALID_INPUT';
 
 export class WorkspaceError extends Error {

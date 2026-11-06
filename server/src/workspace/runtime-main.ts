@@ -193,10 +193,17 @@ const answer = async ({ nonce, method, params }: RuntimeRequest) => {
     const code =
       error instanceof z.ZodError
         ? 'INVALID_INPUT'
-        : error instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.message)
-          ? error.message
-          : 'RUNTIME_CALL_FAILED';
-    reply({ type: 'result', nonce, ok: false, code });
+        : error instanceof Error && error.message === 'RUNTIME_FRAME_TOO_LARGE'
+          ? 'RUNTIME_RESULT_TOO_LARGE'
+          : error instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.message)
+            ? error.message
+            : 'RUNTIME_CALL_FAILED';
+    try {
+      reply({ type: 'result', nonce, ok: false, code });
+    } catch {
+      // Disconnect/queue exhaustion may race the handler. There is no channel left to report on;
+      // its existing disconnect lifecycle closes the engine. Never reject the async listener.
+    }
   }
 };
 closeEngine = () => engine.close();
