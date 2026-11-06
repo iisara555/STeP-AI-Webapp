@@ -419,6 +419,39 @@ stop ที่พิสูจน์ไม่ได้ว่า scope ว่า�
 0777 เฉพาะการทดสอบ production ต้องใช้ group ร่วมที่ตั้งโดยขั้นตอน setup ของ root ยังไม่มี disk quota และ
 การเก็บกวาด scope ที่ค้างหลัง gateway crash
 
+### #57: bounded memory/task exhaustion acceptance (synthetic host tests)
+
+The existing `STEP_STEP_RUNNER_TESTS=1` gate also enables two resource-pressure tests through
+`RuntimeDriver.start` / `RuntimeHandle.call`, health and stop. No production driver or Gateway wiring changes.
+Before arming either fixture, tests read the **effective** cgroup limits: `memory.max=201326592` (192 MiB),
+`memory.swap.max=0`, `pids.max=32`. Both scopes also request `CPUQuota=50%`.
+
+- Memory: one child touches at most 384 MiB in 4 MiB chunks; no recursive allocation/process spawning.
+  Its own timer exits after 10 seconds. Acceptance requires a kernel journal record for this exact random
+  cgroup with `constraint=CONSTRAINT_MEMCG` and `oom_memcg=<this scope>`; a generic SIGKILL is not proof.
+  Read access to `journalctl --dmesg` is checked **before** pressure; do not grant new host permissions just
+  to run it. systemd may terminate the whole scope after the worker OOM, so either a killed-worker reply or
+  `RUNTIME_EXITED` is accepted, but only with that independent kernel evidence.
+- Tasks: sequentially attempt at most 48 direct `/bin/sleep 15` children, never a recursive fork tree.
+  Acceptance requires `EAGAIN`, an increased scope `pids.events:max`, and `pids.current <= 32`.
+  IPC must remain healthy; after killing/reaping the children, task usage returns to baseline and `/bin/true`
+  must spawn and exit successfully in the same runtime.
+- Both: a 15-second host watchdog calls stop, the fixture exits after 20 seconds, and each test has a
+  60-second timeout and `finally` teardown. The existing tracked-handle suite teardown remains a second
+  cleanup layer. After scope-empty/process/unit/socket checks, the real synthetic runtime starts again
+  on the same disposable workspace; memory recovery also completes `connect` / `ask`.
+
+Run only on an otherwise idle, provisioned test host with memory headroom (never real data):
+
+```bash
+STEP_STEP_RUNNER_TESTS=1 timeout --signal=TERM --kill-after=10s 180s \
+  node --import tsx --import ./server/src/register.mjs --test server/test/step-runner-driver.test.ts
+```
+
+This closes bounded memory/task enforcement and recovery acceptance only. Workspace disk/inode quota,
+restart reconciliation of orphaned scopes, socket group/ACL hardening and production integration remain open.
+No host configuration changes, privileged installs, workspace disk filling or inode exhaustion are performed.
+
 ### #57: opt-in ขนาด `/tmp` ของ runtime สังเคราะห์
 
 เรียก `processDriver({ isolated: true, tmpfsBytes: 16 * 1024 * 1024 })` จากโค้ด

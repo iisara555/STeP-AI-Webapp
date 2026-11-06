@@ -358,7 +358,7 @@ describe('step-runner host driver', host, () => {
     for (const part of ['node_modules', 'harness', 'server/src', 'server/package.json', 'package.json'])
       cpSync(join(REPO, part), join(app, part), { recursive: true, verbatimSymlinks: true });
     mkdirSync(join(app, 'server/src/test-entries'));
-    for (const name of ['fake-sleeper', 'fake-wrong-nonce', 'fake-flood', 'fake-stubborn'])
+    for (const name of ['fake-sleeper', 'fake-wrong-nonce', 'fake-flood', 'fake-stubborn', 'fake-resources'])
       cpSync(
         join(REPO, 'server/test/support/step-runner-entry.mjs'),
         join(app, `server/src/test-entries/${name}.mjs`),
@@ -479,6 +479,144 @@ setTimeout(() => (out({ timeout: true, received }), process.exit(0)), 30000);
     }
     await assertClean();
   });
+
+  test(
+    'bounded memory exhaustion: kernel enforces MemoryMax and the workspace recovers',
+    { timeout: 60_000 },
+    async () => {
+      const spec = workspace();
+      const handle = await driver({
+        entry: 'server/src/test-entries/fake-resources.mjs',
+        memoryMaxBytes: 192 * 1024 * 1024,
+        tasksMax: 32,
+        cpuQuotaPercent: 50,
+        startTimeoutMs: 10_000,
+        stopTimeoutMs: 1_000,
+      }).start(spec);
+      const watchdog = setTimeout(() => void handle.stop().catch(() => {}), 15_000);
+      try {
+        // Never arm pressure based on requested options alone: read the kernel's effective hard limits first.
+        const read = (name: string) => readFileSync(join(handle.scope.cgroupPath, name), 'utf8').trim();
+        assert.equal(read('memory.max'), '201326592');
+        assert.equal(read('memory.swap.max'), '0');
+        assert.equal(read('pids.max'), '32');
+        // Refuse to arm if this host cannot supply durable kernel evidence after systemd collects the scope.
+        const kernelLog = () =>
+          spawnSync(
+            'journalctl',
+            [
+              '--dmesg',
+              '--no-pager',
+              '--output=cat',
+              '--lines=1',
+              `--grep=oom_memcg=${handle.scope.cgroupPath.slice('/sys/fs/cgroup'.length)},`,
+            ],
+            { encoding: 'utf8', timeout: 2_000 },
+          );
+        assert.equal(
+          spawnSync('journalctl', ['--dmesg', '--no-pager', '--lines=1'], {
+            encoding: 'utf8',
+            timeout: 2_000,
+          }).status,
+          0,
+          'read access to the kernel journal is required',
+        );
+        // Both behaviors are valid: the worker alone dies, or systemd ends the scope after the kernel OOM.
+        const outcome = await handle.call('ask', { text: 'bounded-memory-pressure' }).then(
+          (result) => result,
+          (error: unknown) => {
+            assert.ok(error instanceof WorkspaceError);
+            assert.equal(error.code, 'RUNTIME_EXITED');
+            return 'scope-exited';
+          },
+        );
+        if (outcome !== 'scope-exited') assert.deepEqual(outcome, { code: null, signal: 'SIGKILL' });
+        let evidence = '';
+        for (let i = 0; i < 20; i++) {
+          const log = kernelLog();
+          assert.ok(log.status === 0 || (log.status === 1 && log.stderr === ''), log.stderr);
+          evidence = log.stdout;
+          if (evidence.includes('constraint=CONSTRAINT_MEMCG')) break;
+          await sleep(50);
+        }
+        assert.ok(
+          evidence.includes('constraint=CONSTRAINT_MEMCG'),
+          'kernel reports a cgroup OOM, not host OOM',
+        );
+        assert.ok(evidence.includes(`oom_memcg=${handle.scope.cgroupPath.slice('/sys/fs/cgroup'.length)},`));
+      } finally {
+        clearTimeout(watchdog);
+        await handle.stop();
+      }
+      assert.equal(emptied(handle.scope.cgroupPath), true);
+      await assertClean();
+      const recovered = await driver().start(spec);
+      try {
+        assert.notEqual(recovered.scope.unit, handle.scope.unit);
+        assert.equal((await recovered.health()).workspaceId, spec.workspaceId);
+        await recovered.call('connect', { baseUrl: 'https://provider.invalid/v1', model: 'synthetic' });
+        assert.equal(
+          (await recovered.call('ask', { text: 'synthetic recovery after OOM' })).status,
+          'review',
+        );
+      } finally {
+        await recovered.stop();
+      }
+      await assertClean();
+    },
+  );
+
+  test(
+    'bounded task exhaustion: TasksMax rejects spawning and capacity recovers',
+    { timeout: 60_000 },
+    async () => {
+      const spec = workspace();
+      const handle = await driver({
+        entry: 'server/src/test-entries/fake-resources.mjs',
+        memoryMaxBytes: 192 * 1024 * 1024,
+        tasksMax: 32,
+        cpuQuotaPercent: 50,
+        startTimeoutMs: 10_000,
+        stopTimeoutMs: 1_000,
+      }).start(spec);
+      const watchdog = setTimeout(() => void handle.stop().catch(() => {}), 15_000);
+      try {
+        const read = (name: string) => readFileSync(join(handle.scope.cgroupPath, name), 'utf8').trim();
+        assert.equal(read('memory.max'), '201326592');
+        assert.equal(read('memory.swap.max'), '0');
+        assert.equal(read('pids.max'), '32');
+        const counter = () => Number(/^max (\d+)$/m.exec(read('pids.events'))?.[1]);
+        const before = counter();
+        assert.ok(Number.isSafeInteger(before));
+        const baselineTasks = Number(read('pids.current'));
+        const result = await handle.call('ask', { text: 'bounded-task-pressure' });
+        assert.equal((result as unknown as { denied: string }).denied, 'EAGAIN');
+        assert.ok(counter() > before, 'kernel task denial counter increases in this scope');
+        const current = Number(read('pids.current'));
+        assert.ok(current > baselineTasks && current <= 32, `effective task usage ${current}`);
+        assert.equal((await handle.health()).ok, true, 'IPC survives task exhaustion');
+        await handle.call('conversations', {}); // Stop and reap the fixture's children through the RuntimeHandle seam.
+        assert.ok(Number(read('pids.current')) <= baselineTasks, 'task slots are released');
+        assert.deepEqual(await handle.call('ask', { text: 'bounded-task-recovery' }), {
+          code: 0,
+          signal: null,
+        });
+      } finally {
+        clearTimeout(watchdog);
+        await handle.stop();
+      }
+      assert.equal(emptied(handle.scope.cgroupPath), true);
+      await assertClean();
+      const recovered = await driver().start(spec);
+      try {
+        assert.notEqual(recovered.scope.unit, handle.scope.unit);
+        assert.equal((await recovered.health()).workspaceId, spec.workspaceId);
+      } finally {
+        await recovered.stop();
+      }
+      await assertClean();
+    },
+  );
 
   test('a second workspace sandbox cannot see the first one’s socket or files', async () => {
     const a = workspace();

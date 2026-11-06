@@ -21,6 +21,77 @@ if (mode === 'fake-sleeper') {
   socket.on('connect', () => {
     if (mode === 'fake-wrong-nonce') return write({ type: 'ready', launchNonce: '0'.repeat(64) });
     if (mode === 'fake-flood') return socket.write('x'.repeat(2 * 1024 * 1024));
+    if (mode === 'fake-resources') {
+      // Pressure is armed only by a host test AFTER it checks the effective cgroup limits.
+      setTimeout(() => process.exit(90), 20_000);
+      socket.on('end', () => process.exit(0));
+      let buffer = '';
+      let armed = false;
+      const children = [];
+      socket.on('data', async (chunk) => {
+        buffer += chunk;
+        for (let at = buffer.indexOf('\n'); at >= 0; at = buffer.indexOf('\n')) {
+          const request = JSON.parse(buffer.slice(0, at));
+          buffer = buffer.slice(at + 1);
+          const reply = (result) => write({ type: 'result', nonce: request.nonce, ok: true, result });
+          if (request.method === 'ask' && request.params.text.endsWith('-pressure')) {
+            if (armed) {
+              reply({ error: 'ALREADY_ARMED' });
+              continue;
+            }
+            armed = true;
+          }
+          if (request.method === 'ask' && request.params.text === 'bounded-memory-pressure') {
+            // One worker, no recursion, <=384 MiB touched even if the kernel limit regresses.
+            // The child has no loader imports; the independent timer also bounds the no-OOM case.
+            const child = spawn(
+              process.execPath,
+              [
+                '-e',
+                `
+              require('node:fs').writeFileSync('/proc/self/oom_score_adj', '1000');
+              const held = [];
+              const timer = setInterval(() => {
+                if (held.length === 96) return clearInterval(timer);
+                held.push(Buffer.alloc(4 * 1024 * 1024, 1));
+              }, 10);
+              setTimeout(() => process.exit(91), 10000);
+            `,
+              ],
+              { stdio: 'ignore' },
+            );
+            child.once('error', (error) => reply({ error: error.code }));
+            child.once('exit', (code, signal) => reply({ code, signal }));
+          } else if (request.method === 'ask' && request.params.text === 'bounded-task-pressure') {
+            // Flat, sequential, finite list: at most 48 direct sleep children, never a fork tree.
+            // Every child self-exits after 15s even if the test/IPC disappears.
+            let denied = null;
+            for (let i = 0; i < 48; i++) {
+              const child = spawn('/bin/sleep', ['15'], { stdio: 'ignore' });
+              const done = new Promise((resolve) => child.once('close', resolve));
+              denied = await new Promise((resolve) => {
+                child.once('error', (error) => resolve(error.code));
+                child.once('spawn', () => {
+                  children.push({ child, done });
+                  resolve(null);
+                });
+              });
+              if (denied) break;
+            }
+            reply({ denied, spawned: children.length });
+          } else if (request.method === 'conversations') {
+            for (const { child } of children) child.kill('SIGKILL');
+            await Promise.all(children.map(({ done }) => done));
+            reply([]);
+          } else if (request.method === 'ask' && request.params.text === 'bounded-task-recovery') {
+            const child = spawn('/bin/true', [], { stdio: 'ignore' });
+            child.once('error', (error) => reply({ error: error.code }));
+            child.once('exit', (code, signal) => reply({ code, signal }));
+          } else reply({ ok: true });
+        }
+      });
+      write({ type: 'ready', launchNonce });
+    }
     if (mode === 'fake-stubborn') {
       // A detached descendant in its own session that ignores SIGTERM, and a runtime that ignores shutdown.
       spawn('/bin/sh', ['-c', 'trap "" TERM; while :; do sleep 1; done'], {

@@ -1,5 +1,42 @@
 # Progress
 
+## #57 · bounded host memory/task exhaustion acceptance (test-only increment on 5164f81)
+
+- Added two opt-in tests at the existing RuntimeDriver/RuntimeHandle seams, using a disposable synthetic
+  `fake-resources` entry. No production source, RuntimeManager/Gateway wiring, host configuration or permissions
+  changed. `STEP_STEP_RUNNER_TESTS=1` remains mandatory; without it the entire host suite is explicitly skipped.
+- Both tests verify effective `memory.max=201326592` (192 MiB), `memory.swap.max=0`, `pids.max=32` **before**
+  sending the pressure request. Requested CPU quota is 50%. Test-host preflight showed 58,824 MiB available
+  memory and no pre-existing step-runner processes/scopes; no host-wide OOM or uncontrolled fork test was used.
+- Memory: one finite worker touches at most 384 MiB, exits within 10 seconds, and raises only its own
+  `oom_score_adj` to prefer itself as the victim. The kernel must report `constraint=CONSTRAINT_MEMCG` and the
+  exact random `oom_memcg` scope in its durable journal. Kernel-journal read access is checked before arming;
+  no permissions are installed or granted. A SIGKILL alone cannot pass. On this host systemd ends the scope after
+  the worker OOM (even though `memory.oom.group=0`), so the test accepts either the killed-worker reply or the
+  driver's `RUNTIME_EXITED`, always requiring independent kernel evidence. Polling `memory.events.local` alone
+  was insufficient because systemd can collect the cgroup before the next read; the journal avoids that race.
+- Tasks: at most 48 sequential direct `/bin/sleep 15` attempts (no recursive process tree) must produce EAGAIN,
+  increase this scope's `pids.events:max`, and remain at/below 32 tasks. IPC health survives; explicitly killing
+  and reaping the children returns usage to baseline and a new `/bin/true` exits successfully in the same runtime.
+- Safety/cleanup: 15-second host stop watchdog, 20-second fixture lifetime, 60-second test deadlines, `finally`
+  stop, and the existing suite-wide tracked-handle cleanup. Scope emptiness plus absence of runner pids, units and
+  socket directories is checked before starting the real synthetic runtime on the same workspace again. Memory
+  recovery also completes `connect` and `ask`. The documented command adds an outer 180-second timeout.
+- Red/green: memory and task assertions each failed against a non-pressure fixture, then passed with the bounded
+  workload. Initial local worktree dependency symlinking caused bind permission failures; replaced with an
+  untracked local dependency copy (no host permissions changed). No dependency or submodule pin changed.
+- Verified with Node 26.12.1: full gated engine suite **238/238**, 0 failed/cancelled/skipped; standalone driver
+  suite **21/21**; both pressure tests **2/2 in each of three consecutive repeat runs**; ungated standalone suite
+  **4/4** with the host suite explicitly skipped. `npm run check`, `npm run build`, and `npm run check:engine-pin`
+  passed; `npm test` **118/118**, database tests **29/29**. Existing server checker still reports 17 upstream
+  engine diagnostics delegated to Desktop CI; Vite retains its large-chunk warning. No browser/UI code changed,
+  so Playwright was not rerun for this test-only increment.
+- Final independent live leak inventory: **0** step-runner pids, **0** `step-rt-*` units, **0** scope cgroups,
+  **0** `/mnt/step-work/step-driver-test-*` folders (therefore no test socket directories left).
+- Still blocked for production: workspace disk/inode quota acceptance, restart reconciliation of orphan scopes,
+  socket group/ACL provisioning, production integration and real-provider/secret acceptance. No disk/inode
+  exhaustion or host setup was attempted. Production Gateway remains fail-closed.
+
 ## #57 · step-runner driver review fixes (hostile early peers, stop errors, unknown scope state)
 
 - Correction: the random socket folder name was described as secret. It is not: it appears in the command lines of
