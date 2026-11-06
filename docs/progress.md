@@ -1,5 +1,52 @@
 # Progress
 
+## #57 · step-runner driver: runtime as uid `step-runner`, own scope, socket channel, cgroup.kill stop
+
+- New `server/src/workspace/step-runner-driver.ts` (`stepRunnerDriver`), not wired into the Gateway entry, which
+  stays fail-closed. Each start: random never-reused unit `step-rt-<128-bit>.scope` via
+  `systemd-run --user --scope -p MemoryMax -p MemorySwapMax=0 -p TasksMax -p CPUQuota`, then
+  `sudo -n -u step-runner /usr/bin/bwrap --clearenv --setenv …` with the same mounts as isolated `processDriver`
+  plus `--cap-drop ALL`. Synthetic provider only (`STEP_SYNTHETIC_PROVIDER=1` is forced). `appRoot` and `nodePath`
+  are explicit options; nothing is derived from the gateway's own location.
+- Channel: a fresh random socket directory (0711) per launch under an owner-only, unlistable socket root (checked
+  before spawn: ours, no group/other read/write), bound read-only into that one sandbox at `/run/step-runtime`.
+  Exactly one connection is accepted, then the listener closes (Node unlinks the path). Node has no SO_PEERCRED
+  API, so a one-line `python3 -I -S` helper reads it from the accepted socket handed over as stdin; uid must equal
+  step-runner. The runtime must echo a 256-bit launch nonce in its first frame (`ready`), compared with
+  `timingSafeEqual`. The nonce goes over **stdin** (sudo-rs passes the pipe through, no pty), not argv/env, which
+  other local users can read via `/proc/<pid>/cmdline` and the unit description. Newline-delimited JSON frames with
+  a max size (default 8 MiB, `server/src/workspace/frames.ts`); oversize/invalid frames end the runtime.
+  `runtime-main.ts` speaks this transport when `STEP_RUNTIME_SOCKET` is set and keeps fork IPC otherwise.
+- Stop: graceful request = end the socket; after the grace period, `cgroup.kill` on the scope; resolved only after
+  proof (`populated 0` or the kernel removed this never-reused cgroup), then `systemctl --user stop` and
+  `reset-failed`. Exit of the systemd-run/sudo process is never taken as proof. No proof within the bound →
+  `RUNTIME_STOP_FAILED` (stop) / `RuntimeStartCleanupError` (start), and `onExit` is not fired. Crash/channel loss
+  fails calls in flight with `RUNTIME_EXITED`, then the same kill-and-prove runs before `onExit`.
+- Tests (`server/test/step-runner-driver.test.ts`): 4 always-run unit tests (frames, option validation, launch argv,
+  unsafe socket root) and 10 host tests gated by `STEP_STEP_RUNNER_TESTS=1` (explicit skip otherwise): runs as
+  uid 995 and answers `health`/`connect`/`ask`; limits in the scope (`memory.max`, `memory.swap.max`, `pids.max`,
+  `cpu.max`); a second sandbox cannot see the first one's workspace, socket folder, socket root or `/home`, cannot
+  connect to its socket, and neither running sandbox's mountinfo names the other; uid-1000 peer → `PEER_REJECTED`;
+  wrong nonce → `NONCE_MISMATCH`; oversized frame → `FRAME_TOO_LARGE`; a TERM-ignoring detached `setsid` descendant
+  of a runtime that ignores shutdown is killed by `cgroup.kill` with emptiness proven (and uid 1000 gets `EPERM`
+  signalling it); SIGSTOP+SIGKILL of the runtime → in-flight call `RUNTIME_EXITED`, scope emptied; skipped,
+  denied, and after-spawn-revoked start admission leave no process/unit/socket; denied stop keeps it healthy.
+  Every host test asserts afterwards: no new `pgrep -u step-runner` pid, no `step-rt-*` unit, empty socket root.
+- Host tests copy `node_modules`, `harness`, `server/src`, both `package.json` and the Node binary into
+  `mktemp -d /mnt/step-work/step-driver-test-XXXX` (step-runner cannot read `/home/itsara`); the synthetic
+  workspace folder is 0777 **for the disposable test only**. Production needs a root-run setup step: root-owned
+  world-readable app + Node (e.g. `/opt/step`), and workspace folders owned by a shared group of the service
+  account and step-runner instead of 0777. Runtime files are owned by uid 995, so the test removes them through a
+  step-runner bwrap before deleting its folder.
+- Results (Node 26.12.1, this host): `npm run check` ok; `npm test` 118/118; `npm run test:db` 29/29;
+  `npm run test:engine` 221/221 (host suite skipped explicitly); `STEP_STEP_RUNNER_TESTS=1 npm run test:engine`
+  231/231; step-runner suite alone 14/14 in three consecutive runs; afterwards no step-runner process, unit or test
+  folder remained.
+- Not done / gaps: not wired into Gateway or RuntimeManager config; real providers and secrets untested by design;
+  workspace disk quota (XFS project quota helper), memory/pids exhaustion behaviour and recovery of scopes left by
+  a crashed gateway (startup sweep of `step-rt-*`) are open; peer-credential check depends on `/usr/bin/python3`;
+  all sandboxes share uid 995, so separation between workspaces rests on bwrap mount/PID/IPC/network namespaces.
+
 ## #57 · opt-in bounded private tmpfs (integration port)
 
 - Port เฉพาะ `tmpfsBytes` validation, Bubblewrap `--size … --tmpfs /tmp`, opt-in

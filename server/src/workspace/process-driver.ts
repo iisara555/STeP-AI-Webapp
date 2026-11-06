@@ -36,7 +36,8 @@ export function runtimeEnv(spec: RuntimeSpec): Record<string, string> {
 /** The private channel between Manager and runtime: one request, one reply with the same nonce. */
 export type RuntimeRequest = { type: 'call'; nonce: number; method: string; params: unknown };
 export type RuntimeReply =
-  | { type: 'ready' }
+  /** `launchNonce` is required on the step-runner socket transport, where it must echo STEP_RUNTIME_NONCE. */
+  | { type: 'ready'; launchNonce?: string }
   | { type: 'event'; event: RuntimeEvent }
   | { type: 'result'; nonce: number; ok: true; result: unknown }
   | { type: 'result'; nonce: number; ok: false; code: string };
@@ -48,11 +49,24 @@ function validateTmpfsBytes(bytes: number | undefined) {
     throw new Error('INVALID_TMPFS_LIMIT');
 }
 
+/** Root of this checkout; other drivers may run the same files from a copy elsewhere. */
+export const REPO_ROOT = resolve(import.meta.dirname, '../../..');
+
 /** Namespace mounts for the synthetic-only sandbox. Missing prerequisites fail closed. */
 export function isolatedRuntimeArgs(spec: RuntimeSpec, tmpfsBytes?: number): string[] {
+  return [
+    ...sandboxMounts(spec, { appRoot: REPO_ROOT, nodeDir: dirname(process.execPath), tmpfsBytes }),
+    '--',
+    process.execPath,
+  ];
+}
+
+/** Every Bubblewrap option before the command: namespaces, read-only app and Node, the one writable workspace. */
+export function sandboxMounts(
+  spec: RuntimeSpec,
+  { appRoot, nodeDir, tmpfsBytes }: { appRoot: string; nodeDir: string; tmpfsBytes?: number },
+): string[] {
   validateTmpfsBytes(tmpfsBytes);
-  const appRoot = resolve(import.meta.dirname, '../../..');
-  const nodeDir = dirname(process.execPath);
   const binds = [
     '/usr',
     '/lib',
@@ -85,8 +99,6 @@ export function isolatedRuntimeArgs(spec: RuntimeSpec, tmpfsBytes?: number): str
     spec.dir,
     '--chdir',
     spec.filesDir,
-    '--',
-    process.execPath,
   ];
 }
 

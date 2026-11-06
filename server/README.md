@@ -391,6 +391,21 @@ Sandbox นี้ยังไม่มี cgroup CPU/RAM quota, การทด�
 บนดิสก์ไม่ได้เข้ารหัสโดยตัวทดลอง ต้องตรวจสิ่งเหล่านี้ก่อนเปิดให้พนักงานใช้ ห้ามใส่ข้อมูลจริงใน trial
 process driver แบบไม่ sandbox ยังใช้สำหรับ CLI/test เดิมเท่านั้น
 
+### #57: step-runner driver (ทดลอง, ยังไม่ต่อกับ Gateway)
+
+`stepRunnerDriver({ appRoot, nodePath, socketRoot, runnerUid, memoryMaxBytes, tasksMax, cpuQuotaPercent })`
+ใน `src/workspace/step-runner-driver.ts` เริ่ม runtime แต่ละตัวเป็นบัญชี `step-runner` ผ่าน
+`sudo -n -u step-runner /usr/bin/bwrap` (ต้องติดตั้ง sudo rule ของ `spikes/057-step-runner-sudo`) ภายใน
+systemd user scope ชื่อสุ่มที่มี MemoryMax/TasksMax/CPUQuota คุยผ่าน Unix socket ในโฟลเดอร์สุ่มที่ bind เข้า sandbox
+นั้นเท่านั้น (ตรวจ SO_PEERCRED ด้วย `python3` และ nonce ที่ส่งทาง stdin) และหยุดด้วย `cgroup.kill` แล้วพิสูจน์ว่า
+scope ว่างก่อนรายงานว่าหยุดแล้ว ใช้ provider จำลองเท่านั้น `appRoot`/`nodePath` ต้องอยู่ในที่ที่ step-runner อ่านได้
+(เช่น `/opt/step`) ไม่ใช่ `/home` และ `socketRoot` ต้องเป็นของ service account mode 0711
+
+ทดสอบบน host ที่มี sudo rule: `STEP_STEP_RUNNER_TESTS=1 npm run test:engine` (ไม่มี flag จะ skip ชุด host อย่างชัดเจน)
+ชุดทดสอบคัดลอกไฟล์ app และ Node ไปไว้ใต้ `/mnt/step-work/step-driver-test-*` ชั่วคราว โฟลเดอร์ workspace ทดสอบเป็น
+0777 เฉพาะการทดสอบ production ต้องใช้ group ร่วมที่ตั้งโดยขั้นตอน setup ของ root ยังไม่มี disk quota และ
+การเก็บกวาด scope ที่ค้างหลัง gateway crash
+
 ### #57: opt-in ขนาด `/tmp` ของ runtime สังเคราะห์
 
 เรียก `processDriver({ isolated: true, tmpfsBytes: 16 * 1024 * 1024 })` จากโค้ด

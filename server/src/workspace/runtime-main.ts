@@ -3,6 +3,7 @@
 // The provider token arrives by `connect` and stays in this process's memory only.
 import { access, constants, rename, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { CompatibleAdapter } from '../../../harness/desktop/electron/providers.ts';
@@ -20,13 +21,44 @@ import {
 import { currentRunResult } from './current-run-result.ts';
 import type { RuntimeReply, RuntimeRequest } from './process-driver.ts';
 import { CONVERSATION_INDEX } from './storage.ts';
+import { DEFAULT_MAX_FRAME_BYTES, encodeFrame, frameReader } from './frames.ts';
 
 // All new runtime files, including SQLite sidecars, are private to the service account.
 process.umask(0o077);
 const workspaceId = process.env.STEP_WORKSPACE_ID;
 const dir = process.env.STEP_WORKSPACE_DIR;
 const started = Date.now();
-const send = process.send?.bind(process);
+// Two channels: Node fork IPC (process driver), or, where an account switch closes fd 3 (step-runner driver), the
+// per-sandbox Unix socket whose first frame must echo the launch nonce.
+const socketPath = process.env.STEP_RUNTIME_SOCKET;
+// The launch nonce arrives on stdin, never in argv or the environment.
+const launchNonce = socketPath ? await readNonce() : undefined;
+if (socketPath && !launchNonce) process.exit(2);
+async function readNonce() {
+  let text = '';
+  for await (const chunk of process.stdin) {
+    text += chunk;
+    if (text.length > 200) break;
+  }
+  process.stdin.destroy();
+  return /^([0-9a-f]{64})\n$/.exec(text)?.[1];
+}
+let closeEngine = () => {};
+const channel = socketPath ? createConnection(socketPath) : undefined;
+if (channel) {
+  await new Promise<void>((done) => {
+    channel.once('connect', done);
+    channel.once('error', () => process.exit(2));
+  });
+  // The Manager going away is the same as a stop: no runtime outlives its supervisor.
+  channel.on('close', () => {
+    closeEngine();
+    process.exit(0);
+  });
+}
+const send = channel
+  ? (message: RuntimeReply) => void channel.write(encodeFrame(message))
+  : process.send?.bind(process);
 
 if (!send || !workspaceId || !dir || process.cwd() !== join(dir, 'files')) process.exit(2);
 await access(dir, constants.R_OK | constants.W_OK);
@@ -149,7 +181,7 @@ const methods: Record<string, (params: unknown) => unknown> = {
   conversations: listConversations,
 };
 
-process.on('message', async ({ nonce, method, params }: RuntimeRequest) => {
+const answer = async ({ nonce, method, params }: RuntimeRequest) => {
   const handler = Object.hasOwn(methods, method) ? methods[method] : undefined;
   try {
     if (!handler) throw new Error('UNKNOWN_METHOD');
@@ -164,11 +196,26 @@ process.on('message', async ({ nonce, method, params }: RuntimeRequest) => {
           : 'RUNTIME_CALL_FAILED';
     reply({ type: 'result', nonce, ok: false, code });
   }
-});
-// The Manager going away is the same as a stop: no runtime outlives its supervisor.
-process.on('disconnect', () => {
-  engine.close();
-  process.exit(0);
-});
+};
+closeEngine = () => engine.close();
+if (channel) {
+  const push = frameReader(
+    DEFAULT_MAX_FRAME_BYTES,
+    (frame) => {
+      const request = frame as RuntimeRequest;
+      if (request?.type === 'call' && typeof request.nonce === 'number' && typeof request.method === 'string')
+        void answer(request);
+    },
+    () => channel.destroy(),
+  );
+  channel.on('data', (chunk: Buffer) => push(chunk));
+} else {
+  process.on('message', answer);
+  // The Manager going away is the same as a stop: no runtime outlives its supervisor.
+  process.on('disconnect', () => {
+    engine.close();
+    process.exit(0);
+  });
+}
 await writeIndex();
-reply({ type: 'ready' });
+reply(launchNonce ? { type: 'ready', launchNonce } : { type: 'ready' });
