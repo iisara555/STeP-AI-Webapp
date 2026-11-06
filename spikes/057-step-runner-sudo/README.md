@@ -13,3 +13,11 @@ Not established: workspace-to-workspace separation when all share one account (r
 ## Result after installation (2026-11-06)
 
 Owner installed the rule as `/etc/sudoers.d/step-runner` (root:root 0440); `sudo -l -u step-runner` lists only `/usr/bin/bwrap`. Probe: **8/8 passed**. **fd 3 does not survive sudo-rs**, so Node fork IPC cannot be used across the account switch; the runtime must use the per-sandbox Unix-socket protocol instead (see `spikes/57-synthetic-ipc`, which also showed that a same-UID peer can forge `ready`, so each sandbox needs its own socket directory bound only into it, plus peer-credential and nonce checks).
+
+## Limits and stopping (`limits_probe.py`, synthetic sleepers)
+
+`systemd-run --user --scope -p MemoryMax=128M -p TasksMax=16 -p CPUQuota=50% sudo -n -u step-runner bwrap …` places the step-runner processes inside itsara's user scope, and all three limits are applied (`memory.max=134217728`, `pids.max=16`, `cpu.max=50000 100000`); cpu, memory and pids controllers are delegated to user@1000.
+
+**Finding: `systemctl --user stop` cannot stop them.** itsara's user manager has no permission to signal uid 995, so a stop returned at once and left a detached, TERM-ignoring step-runner descendant running. Writing `1` to the scope's `cgroup.kill` does work (kernel kill, no per-process signal permission needed): every process exits within ~0.05 s, the kernel removes the empty cgroup, and only then is the unit stopped. Because the kernel cannot remove a populated cgroup and unit names are random and never reused, the disappearance of that exact path, or `populated 0`, is accepted as proof of emptiness. Graceful shutdown therefore has to be requested over the runtime protocol, never by signal. Result: 9/9 in five consecutive runs, no stray step-runner processes.
+
+Not covered here: disk quota (needs a root-run XFS project-quota helper), memory/pids exhaustion behaviour, and crash recovery of the launcher.
