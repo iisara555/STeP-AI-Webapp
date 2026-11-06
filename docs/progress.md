@@ -1,5 +1,47 @@
 # Progress
 
+## #57 · step-runner driver review fixes (hostile early peers, stop errors, unknown scope state)
+
+- Correction: the random socket folder name was described as secret. It is not: it appears in the command lines of
+  `systemd-run`/`sudo`/`bwrap`, readable by every local user (`/proc/<pid>/cmdline`, no `hidepid`), and the root and
+  folder are 0711 with the socket 0666, so any local user can connect. Path visibility remains. Making the socket root
+  0700 plus a group or ACL for step-runner needs a host change (no `setfacl` installed; the service account is not in
+  group `step-runner`) and is pending.
+- Before, the driver accepted only the first connection, so any local process (uid 1000, or uid 995 outside a
+  sandbox) that connected first aborted the start (`PEER_REJECTED`/`NONCE_MISMATCH`). Now the listener stays open
+  until the start timeout. Every connection is checked as hostile: SO_PEERCRED must be uid step-runner before any
+  byte is read (`pauseOnConnect`), then the first frame (max 4 KiB until trusted) must be `ready` with the launch
+  nonce. A refused peer is destroyed without a reply and the driver keeps waiting. Bounds: at most 8 connections
+  pending a check (more are dropped unread) and 32 refusals per launch, after which the start fails closed with
+  `TOO_MANY_REJECTED_PEERS`. The first valid peer is accepted, the listener closes and the other pending
+  connections are dropped. A start that fails after refusals reports the last refusal as `cause` (e.g.
+  `NONCE_MISMATCH`, `FRAME_TOO_LARGE`). Remaining exposure until the host change: a local user can still abort one
+  start by flooding (bounded cost), and an out-of-sandbox uid-995 process (only the service account can create one,
+  through its sudo rule) could hold the 8 pending slots.
+- Stop errors: a failing `cgroup.kill` write (anything but ENOENT) is `WorkspaceError('RUNTIME_STOP_FAILED')` with a
+  `cause`, never a raw error, from `stop()` and forced `stopWithAdmission`; any teardown error is mapped the same way.
+  `tmpfsBytes` is validated at construction (`INVALID_STEP_RUNNER_OPTIONS`).
+- Unknown state: a non-zero `systemctl show` is unknown and retried until the deadline, never "gone"; if it stays
+  unknown, stop fails (`RUNTIME_STOP_FAILED`) and a start becomes `RuntimeStartCleanupError`. After the processes are
+  proven gone, `systemctl stop`/`reset-failed` run and the result is judged by asking systemd afterwards (both commands
+  fail harmlessly when systemd already collected the empty scope); the outcome is on `handle.scope.unitCleanup`
+  (`'done'`/`'failed'`, with `unitCleanupFailures`). `'failed'` never means the runtime may run; a later `stop()`
+  retries only the unit removal. A crash whose emptiness proof fails keeps the handle and does not fire `onExit`;
+  a later `stop()` retries kill and proof.
+- Fault injection for tests only: optional second argument `stepRunnerDriver(options, hooks)` replaces `systemctl`,
+  the `cgroup.kill` write and the `cgroup.events` read; it is not part of the options.
+- New tests (test-first; all 7 were red on 145c36e): `tmpfsBytes` options; host: a uid-1000 process and two
+  out-of-sandbox uid-995 processes (one wrong nonce, one silent) connect before the runtime is even spawned, receive
+  0 bytes and are closed, and the genuine start succeeds; 40 uid-1000 connections → `TOO_MANY_REJECTED_PEERS`;
+  `cgroup.kill` EACCES → `RUNTIME_STOP_FAILED` then a retry stops it; failing `show` → `RuntimeStartCleanupError`
+  then `handle.stop()` cleans up; failing `stop`/`reset-failed`/`show` → `unitCleanup: 'failed'` with the runtime
+  proven stopped, then `'done'` on retry; crash with a failing proof → no `onExit`, then `stop()` succeeds. The old
+  "uid-1000 peer → PEER_REJECTED" test is replaced by the hostile-peer test.
+- Results (Node 26.12.1, this host): `npm run check` ok; `npm test` 118/118; `npm run test:db` 29/29;
+  `npm run test:engine` 221/221 (host suite skipped explicitly); `STEP_STEP_RUNNER_TESTS=1 npm run test:engine`
+  236/236; step-runner suite alone 19/19 in five consecutive runs; afterwards `pgrep -u step-runner` empty, no
+  `step-rt-*` unit, no test folder.
+
 ## #57 · step-runner driver: runtime as uid `step-runner`, own scope, socket channel, cgroup.kill stop
 
 - New `server/src/workspace/step-runner-driver.ts` (`stepRunnerDriver`), not wired into the Gateway entry, which
@@ -8,9 +50,10 @@
   `sudo -n -u step-runner /usr/bin/bwrap --clearenv --setenv …` with the same mounts as isolated `processDriver`
   plus `--cap-drop ALL`. Synthetic provider only (`STEP_SYNTHETIC_PROVIDER=1` is forced). `appRoot` and `nodePath`
   are explicit options; nothing is derived from the gateway's own location.
-- Channel: a fresh random socket directory (0711) per launch under an owner-only, unlistable socket root (checked
-  before spawn: ours, no group/other read/write), bound read-only into that one sandbox at `/run/step-runtime`.
-  Exactly one connection is accepted, then the listener closes (Node unlinks the path). Node has no SO_PEERCRED
+- Channel: a fresh random socket directory (0711) per launch under a socket root checked before spawn (ours, no
+  group/other read/write), bound read-only into that one sandbox at `/run/step-runtime`. The folder name is **not**
+  secret (see the review fixes above: it is in `/proc/<pid>/cmdline`). Exactly one valid peer is accepted, then the
+  listener closes (Node unlinks the path). Node has no SO_PEERCRED
   API, so a one-line `python3 -I -S` helper reads it from the accepted socket handed over as stdin; uid must equal
   step-runner. The runtime must echo a 256-bit launch nonce in its first frame (`ready`), compared with
   `timingSafeEqual`. The nonce goes over **stdin** (sudo-rs passes the pipe through, no pty), not argv/env, which

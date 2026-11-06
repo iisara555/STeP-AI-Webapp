@@ -4,21 +4,29 @@
 // Synthetic data only: the runtime is forced onto its in-sandbox synthetic provider.
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
   chmodSync,
+  closeSync,
   cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
-import net from 'node:net';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { newWorkspaceId, type RuntimeSpec } from '../src/workspace/contract.ts';
+import {
+  newWorkspaceId,
+  RuntimeStartCleanupError,
+  WorkspaceError,
+  type RuntimeSpec,
+} from '../src/workspace/contract.ts';
 import { workspacePaths } from '../src/workspace/storage.ts';
 import { frameReader, encodeFrame } from '../src/workspace/frames.ts';
 import {
@@ -26,6 +34,7 @@ import {
   stepRunnerDriver,
   stepRunnerSandboxArgs,
   type StepRunnerHandle,
+  type StepRunnerHooks,
   type StepRunnerOptions,
 } from '../src/workspace/step-runner-driver.ts';
 
@@ -88,6 +97,11 @@ test('options fail closed: explicit absolute paths and bounded limits', () => {
     { maxFrameBytes: 10 },
     { entry: '../../etc/passwd' },
     { entry: '/abs.mjs' },
+    // tmpfsBytes is checked at construction, not first at start().
+    { tmpfsBytes: 1000 },
+    { tmpfsBytes: 0 },
+    { tmpfsBytes: -65536 },
+    { tmpfsBytes: 65536.5 },
   ])
     assert.throws(() => stepRunnerDriver({ ...pure, ...bad } as StepRunnerOptions), /INVALID_STEP_RUNNER/);
   assert.throws(
@@ -264,16 +278,76 @@ describe('step-runner host driver', host, () => {
   };
   const live: StepRunnerHandle[] = [];
   // Every handle is remembered so a failing assertion can never leak a sandbox past the suite.
-  const driver = (extra: Partial<StepRunnerOptions> = {}) => {
-    const d = stepRunnerDriver({ ...options, ...extra });
+  const driver = (extra: Partial<StepRunnerOptions> = {}, hooks?: StepRunnerHooks) => {
+    const d = stepRunnerDriver({ ...options, ...extra }, hooks);
     const track = (h: StepRunnerHandle) => (live.push(h), h);
     return {
-      start: (spec: RuntimeSpec) => d.start(spec).then(track),
+      start: (spec: RuntimeSpec) =>
+        d.start(spec).then(track, (error) => {
+          if (error instanceof RuntimeStartCleanupError) track(error.handle as StepRunnerHandle);
+          throw error;
+        }),
       startWithAdmission: (spec: RuntimeSpec, admit: (spawn: () => void) => void) =>
         d.startWithAdmission(spec, admit).then(track),
     };
   };
   const exited = (handle: StepRunnerHandle) => new Promise<number | null>((done) => handle.onExit(done));
+  const stopFailed = (error: unknown) =>
+    error instanceof WorkspaceError && error.code === 'RUNTIME_STOP_FAILED';
+
+  // Hostile local peers. Each runs as its own process and connects while the driver is blocked inside admission,
+  // i.e. before the runtime is even spawned: the kernel queues the connection, so it is accepted first.
+  const attackers: ChildProcess[] = [];
+  const attack = (as: 'self' | 'runner', socketPath: string, mode: 'forge' | 'idle' | 'flood') => {
+    const log = join(root, `attacker-${attackers.length}.log`);
+    const fd = openSync(log, 'w', 0o666);
+    chmodSync(log, 0o666);
+    const node = [options.nodePath, join(root, 'attacker.cjs'), socketPath, mode];
+    // "runner" is uid step-runner outside any sandbox: host filesystem and host /proc.
+    const argv =
+      as === 'self'
+        ? node
+        : [
+            'sudo',
+            '-n',
+            '-u',
+            'step-runner',
+            '/usr/bin/bwrap',
+            '--ro-bind',
+            '/',
+            '/',
+            '--proc',
+            '/proc',
+            '--dev',
+            '/dev',
+            '--',
+            ...node,
+          ];
+    const child = spawn(argv[0]!, argv.slice(1), { stdio: ['ignore', fd, fd] });
+    closeSync(fd);
+    attackers.push(child);
+    const done = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    // Synchronous on purpose: the event loop must not run (and accept) until the attacker is connected.
+    const waited = spawnSync(
+      '/bin/sh',
+      [
+        '-c',
+        'for i in $(seq 400); do grep -q "^connected" "$1" && exit 0; sleep 0.025; done; exit 1',
+        'sh',
+        log,
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(waited.status, 0, `attacker did not connect: ${readFileSync(log, 'utf8')}`);
+    return {
+      done,
+      lines: () =>
+        readFileSync(log, 'utf8')
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => (line === 'connected' ? line : JSON.parse(line))),
+    };
+  };
 
   before(() => {
     baseline = runnerPids();
@@ -295,6 +369,33 @@ describe('step-runner host driver', host, () => {
     execFileSync('chmod', ['-R', 'a+rX', root]);
     mkdirSync(join(root, 'sockets'), { mode: 0o711 });
     chmodSync(join(root, 'sockets'), 0o711);
+    writeFileSync(
+      join(root, 'attacker.cjs'),
+      `const net = require('node:net');
+const [path, mode] = process.argv.slice(2);
+const out = (v) => process.stdout.write((typeof v === 'string' ? v : JSON.stringify(v)) + '\\n');
+const forged = JSON.stringify({ type: 'ready', launchNonce: '0'.repeat(64) }) + '\\n';
+const count = mode === 'flood' ? 40 : 1;
+let connected = 0, closed = 0, received = 0;
+for (let i = 0; i < count; i++) {
+  const s = net.connect(path);
+  s.on('connect', () => {
+    if (mode !== 'idle') s.write(forged);
+    if (++connected === count) out('connected');
+  });
+  s.on('data', (c) => (received += c.length));
+  s.on('error', (e) => out({ error: e.code }));
+  s.on('close', () => {
+    if (++closed === count) {
+      out({ closed: true, received });
+      process.exit(0);
+    }
+  });
+}
+setTimeout(() => (out({ timeout: true, received }), process.exit(0)), 30000);
+`,
+      { mode: 0o644 },
+    );
     options = {
       appRoot: app,
       nodePath,
@@ -309,6 +410,7 @@ describe('step-runner host driver', host, () => {
   });
 
   after(async () => {
+    for (const child of attackers) child.kill('SIGKILL');
     await Promise.allSettled(live.map((h) => h.stop()));
     // Runtime files belong to step-runner; only that account can remove them from the shared test folders.
     for (const spec of specs)
@@ -429,24 +531,54 @@ describe('step-runner host driver', host, () => {
     await assertClean();
   });
 
-  test('a ready from an unexpected peer is rejected and the sandbox is killed', async () => {
-    const before = new Set(readdirSync(options.socketRoot));
-    const start = driver({ entry: 'server/src/test-entries/fake-sleeper.mjs' }).start(workspace());
-    const outcome = assert.rejects(start, { code: 'RUNTIME_START_FAILED', cause: 'PEER_REJECTED' });
-    let dir: string | undefined;
-    for (let i = 0; i < 200 && !dir; i++) {
-      dir = readdirSync(options.socketRoot).find(
-        (d) => !before.has(d) && existsSync(join(options.socketRoot, d, 'rt.sock')),
+  test('hostile peers that connect first (uid 1000, out-of-sandbox step-runner) get nothing; the start succeeds', async () => {
+    const spec = workspace();
+    let hostile: ReturnType<typeof attack>[] = [];
+    const handle = await driver().startWithAdmission(spec, (spawnRuntime) => {
+      const dir = readdirSync(options.socketRoot).find((d) =>
+        existsSync(join(options.socketRoot, d, 'rt.sock')),
       );
-      if (!dir) await sleep(25);
+      assert.ok(dir, 'socket is listening before the spawn');
+      const socketPath = join(options.socketRoot, dir, 'rt.sock');
+      hostile = [
+        // This test process's uid: refused by SO_PEERCRED before a single byte is read.
+        attack('self', socketPath, 'forge'),
+        // uid step-runner outside the sandbox (it can read the path from /proc): passes the uid check, has no nonce.
+        attack('runner', socketPath, 'forge'),
+        // ... and one that never sends a frame: it must not block the genuine runtime.
+        attack('runner', socketPath, 'idle'),
+      ];
+      spawnRuntime();
+    });
+    try {
+      await Promise.all(hostile.map((h) => h.done));
+      // Dropped unread, so the kernel may report a reset: that is fine, a reply is not.
+      for (const h of hostile)
+        assert.deepEqual(
+          h.lines().filter((l) => !['ECONNRESET', 'EPIPE'].includes(l.error)),
+          ['connected', { closed: true, received: 0 }],
+        );
+      assert.equal(handle.scope.peerUid, runnerUid);
+      const health = await handle.health();
+      assert.equal(health.ok, true);
+      assert.equal(health.workspaceId, spec.workspaceId);
+      // Exactly one peer is accepted, then the listener closes and its path is gone.
+      assert.equal(existsSync(join(handle.scope.socketDir, 'rt.sock')), false);
+    } finally {
+      await handle.stop();
     }
-    assert.ok(dir, 'socket directory appeared');
-    // This test process is uid 1000, not step-runner: peer credentials must refuse it whatever it sends.
-    const forger = net.connect(join(options.socketRoot, dir, 'rt.sock'));
-    forger.on('error', () => {});
-    forger.write(encodeFrame({ type: 'ready', launchNonce: 'f'.repeat(64) }));
-    await outcome;
-    forger.destroy();
+    await assertClean();
+  });
+
+  test('a flood of rejected peers is bounded: the start fails closed instead of checking forever', async () => {
+    const start = driver().startWithAdmission(workspace(), (spawnRuntime) => {
+      const dir = readdirSync(options.socketRoot).find((d) =>
+        existsSync(join(options.socketRoot, d, 'rt.sock')),
+      );
+      attack('self', join(options.socketRoot, dir!, 'rt.sock'), 'flood');
+      spawnRuntime();
+    });
+    await assert.rejects(start, { code: 'RUNTIME_START_FAILED', cause: 'TOO_MANY_REJECTED_PEERS' });
     await assertClean();
   });
 
@@ -558,6 +690,104 @@ describe('step-runner host driver', host, () => {
     assert.equal(inside, true);
     assert.equal(emptied(handle.scope.cgroupPath), true);
     await exit;
+    await assertClean();
+  });
+
+  test('a failing cgroup.kill is RUNTIME_STOP_FAILED (never a raw error) and a later stop retries', async () => {
+    let deny = true;
+    const handle = await driver(
+      { entry: 'server/src/test-entries/fake-stubborn.mjs', stopTimeoutMs: 500 },
+      {
+        writeCgroupFile: (path, data) => {
+          if (deny) throw Object.assign(new Error('synthetic EACCES'), { code: 'EACCES' });
+          writeFileSync(path, data);
+        },
+      },
+    ).start(workspace());
+    let fired = false;
+    handle.onExit(() => (fired = true));
+    await assert.rejects(handle.stop(), stopFailed);
+    // The channel is gone now, so this stop writes cgroup.kill inside the admission callback itself.
+    await assert.rejects(
+      handle.stopWithAdmission!((signal) => signal()),
+      stopFailed,
+    );
+    assert.equal(emptied(handle.scope.cgroupPath), false);
+    assert.equal(fired, false, 'no exit is reported without proof');
+    deny = false;
+    await handle.stop();
+    assert.equal(emptied(handle.scope.cgroupPath), true);
+    assert.equal(fired, true);
+    await assertClean();
+  });
+
+  test('a failing `systemctl show` is unknown, never "gone": the start reports a cleanup failure', async () => {
+    let failShow = true;
+    const error = await driver(
+      { entry: 'server/src/test-entries/fake-wrong-nonce.mjs', stopTimeoutMs: 1_000 },
+      {
+        systemctl: (args, real) =>
+          failShow && args[0] === 'show' ? Promise.resolve({ code: 1, stdout: '' }) : real(args),
+      },
+    )
+      .start(workspace())
+      .then(
+        () => assert.fail('start must fail'),
+        (e: unknown) => e,
+      );
+    assert.ok(error instanceof RuntimeStartCleanupError, String(error));
+    failShow = false;
+    await (error.handle as StepRunnerHandle).stop();
+    await assertClean();
+  });
+
+  test('failed systemctl stop/reset-failed are surfaced on the scope; the runtime is still proven stopped', async () => {
+    let fail = false;
+    const handle = await driver(
+      {},
+      {
+        systemctl: (args, real) => (fail ? Promise.resolve({ code: 1, stdout: '' }) : real(args)),
+      },
+    ).start(workspace());
+    const exit = exited(handle);
+    fail = true;
+    await handle.stop();
+    await exit;
+    assert.equal(emptied(handle.scope.cgroupPath), true);
+    assert.equal(handle.scope.unitCleanup, 'failed');
+    assert.ok(handle.scope.unitCleanupFailures?.some((f) => f.startsWith('stop')));
+    assert.ok(handle.scope.unitCleanupFailures?.some((f) => f.startsWith('reset-failed')));
+    fail = false;
+    await handle.stop();
+    assert.equal(handle.scope.unitCleanup, 'done');
+    await assertClean();
+  });
+
+  test('a crash whose emptiness proof fails keeps the handle: onExit waits and a later stop retries', async () => {
+    let blind = false;
+    const handle = await driver(
+      { stopTimeoutMs: 500 },
+      {
+        readCgroupFile: (path) =>
+          blind ? Promise.resolve('populated 1\nfrozen 0\n') : readFile(path, 'utf8'),
+      },
+    ).start(workspace());
+    const runtime = procs(handle.scope.cgroupPath).find((p) => isRuntime(p))!;
+    let fired = false;
+    handle.onExit(() => (fired = true));
+    blind = true;
+    signalAsRunner('STOP', runtime.pid);
+    const pending = handle.call('conversations', {});
+    await sleep(100);
+    signalAsRunner('KILL', runtime.pid);
+    await assert.rejects(pending, { code: 'RUNTIME_EXITED' });
+    await sleep(1_500);
+    assert.equal(fired, false, 'no exit is reported without proof');
+    await assert.rejects(handle.call('conversations', {}), { code: 'RUNTIME_NOT_RUNNING' });
+    blind = false;
+    await handle.stop();
+    assert.equal(fired, true);
+    assert.equal(emptied(handle.scope.cgroupPath), true);
     await assertClean();
   });
 });

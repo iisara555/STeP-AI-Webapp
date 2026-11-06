@@ -44,7 +44,7 @@ export type RuntimeReply =
 
 // Limit only the private /tmp mount, not workspace disk, inode usage or total runtime memory.
 // Page-aligned sizes avoid kernel rounding above the requested bound (Linux pages <= 64 KiB).
-function validateTmpfsBytes(bytes: number | undefined) {
+export function validateTmpfsBytes(bytes: number | undefined) {
   if (bytes !== undefined && (!Number.isSafeInteger(bytes) || bytes < 65536 || bytes % 65536 !== 0))
     throw new Error('INVALID_TMPFS_LIMIT');
 }

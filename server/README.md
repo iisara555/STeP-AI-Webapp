@@ -401,6 +401,19 @@ systemd user scope ชื่อสุ่มที่มี MemoryMax/TasksMax/CP
 scope ว่างก่อนรายงานว่าหยุดแล้ว ใช้ provider จำลองเท่านั้น `appRoot`/`nodePath` ต้องอยู่ในที่ที่ step-runner อ่านได้
 (เช่น `/opt/step`) ไม่ใช่ `/home` และ `socketRoot` ต้องเป็นของ service account mode 0711
 
+ชื่อโฟลเดอร์ socket แบบสุ่ม **ไม่ใช่ความลับ**: ผู้ใช้ทุกคนบนเครื่องอ่านได้จาก `/proc/<pid>/cmdline` ของ
+`systemd-run`/`sudo`/`bwrap` และ socket เป็น 0666 จึงต่อเข้ามาได้ driver จึงถือว่าทุก connection อาจเป็นผู้โจมตี:
+ตรวจ SO_PEERCRED ว่าเป็น uid step-runner ก่อนอ่านข้อมูลใดๆ และ frame แรกต้องมี nonce ที่ถูกต้อง ถ้าไม่ผ่านจะตัดทิ้ง
+โดยไม่ตอบอะไรแล้วรอ runtime ตัวจริงต่อจนหมดเวลา start รับ peer ที่ถูกต้องเพียงตัวเดียวแล้วปิด listener จำกัด
+connection ที่รอตรวจพร้อมกันไม่เกิน 8 และปฏิเสธได้ไม่เกิน 32 ครั้งต่อการ start (เกินแล้ว start ล้มเหลวด้วย
+`TOO_MANY_REJECTED_PEERS`) การซ่อน path ด้วย socket root 0700 + group หรือ ACL ของ step-runner ยังรอการแก้ host
+(ยังไม่มี `setfacl` และ service account ไม่อยู่ใน group `step-runner`) จนกว่าจะแก้ ผู้ใช้บนเครื่องยังทำให้ start
+หนึ่งครั้งล้มเหลวได้ด้วยการ flood (ต้นทุนมีขอบเขต)
+
+stop ที่พิสูจน์ไม่ได้ว่า scope ว่าง (รวม `cgroup.kill` เขียนไม่ได้ หรือ `systemctl show` ล้มเหลว ซึ่งถือว่า "ไม่ทราบ"
+ไม่ใช่ "ไม่มีแล้ว") ได้ `RUNTIME_STOP_FAILED` และเรียก `stop()` ซ้ำได้ ส่วนการลบ unit หลังพิสูจน์แล้วดูได้ที่
+`handle.scope.unitCleanup` (`'done'`/`'failed'`) ซึ่ง `'failed'` ไม่ได้แปลว่า runtime ยังทำงาน
+
 ทดสอบบน host ที่มี sudo rule: `STEP_STEP_RUNNER_TESTS=1 npm run test:engine` (ไม่มี flag จะ skip ชุด host อย่างชัดเจน)
 ชุดทดสอบคัดลอกไฟล์ app และ Node ไปไว้ใต้ `/mnt/step-work/step-driver-test-*` ชั่วคราว โฟลเดอร์ workspace ทดสอบเป็น
 0777 เฉพาะการทดสอบ production ต้องใช้ group ร่วมที่ตั้งโดยขั้นตอน setup ของ root ยังไม่มี disk quota และ
