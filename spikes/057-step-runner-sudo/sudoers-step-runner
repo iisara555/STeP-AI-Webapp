@@ -1,0 +1,4 @@
+# Lets itsara start ONLY /usr/bin/bwrap as the unprivileged step-runner account, without a password.
+# This only ever lowers privilege: step-runner can do less than itsara. Remove with:
+#   sudo rm /etc/sudoers.d/step-runner
+itsara ALL=(step-runner) NOPASSWD: /usr/bin/bwrap
