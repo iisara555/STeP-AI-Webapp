@@ -17,13 +17,26 @@ import { processDriver } from '../src/workspace/process-driver.ts';
 
 async function heldProvider() {
   let requests = 0;
+  let mode: 'success' | 'failure' | 'partial' = 'success';
   let release: () => void = () => {};
   let held = new Promise<void>((done) => (release = done));
   const server = createServer(async (req, res) => {
     for await (const _ of req);
     requests++;
+    const requestMode = mode;
+    if (requestMode === 'failure') {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'synthetic failure' } }));
+      return;
+    }
+    if (requestMode === 'partial') {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write(
+        `data: ${JSON.stringify({ choices: [{ delta: { content: 'partial synthetic answer' } }] })}\n\n`,
+      );
+    }
     await held;
-    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    if (requestMode !== 'partial') res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'ติดต่อฝ่ายบุคคล' } }] })}\n\n`);
     res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'ผ่านระบบ HR' } }] })}\n\n`);
     res.end('data: [DONE]\n\n');
@@ -32,6 +45,9 @@ async function heldProvider() {
   return {
     baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
     requests: () => requests,
+    setMode(value: 'success' | 'failure' | 'partial') {
+      mode = value;
+    },
     release: () => release(),
     hold() {
       held = new Promise<void>((done) => (release = done));
@@ -152,7 +168,53 @@ test('closing the browser leaves the run working; coming back resumes it, and a 
       ['user', 'assistant'],
     );
 
-    // A second question in the same conversation, cancelled while the AI is working.
+    // An unrelated, ungrounded question must not inherit the prior HR document.
+    const ungrounded = await (
+      await call(`${base}/runs`, {
+        method: 'POST',
+        body: JSON.stringify({ text: 'Say hello in one sentence', sessionId: run.sessionId }),
+      })
+    ).json();
+    await until(async () => {
+      const current = await (await call(`${base}/runs/${ungrounded.id}`)).json();
+      return current.status === 'running' ? undefined : current;
+    });
+    const followupEvents = await readUntil(
+      await call(`${base}/events`, { headers: { 'last-event-id': String(replay.at(-1)!.id) } }),
+      (events) =>
+        events.some((e) => e.type === 'run' && e.data.id === ungrounded.id && e.data.status !== 'running'),
+    );
+    const followup = followupEvents.find(
+      (e) => e.type === 'run' && e.data.id === ungrounded.id && e.data.status !== 'running',
+    )!.data;
+    assert.equal(followup.status, 'done');
+    assert.deepEqual(followup.sources, [], 'an unrelated answer must not inherit HR sources');
+
+    provider.setMode('failure');
+    const failed = await (
+      await call(`${base}/runs`, {
+        method: 'POST',
+        body: JSON.stringify({ text: 'Say hello again', sessionId: run.sessionId }),
+      })
+    ).json();
+    const failedResult = await until(async () => {
+      const current = await (await call(`${base}/runs/${failed.id}`)).json();
+      return current.status === 'running' ? undefined : current;
+    });
+    assert.equal(failedResult.status, 'failed');
+    const failedEvents = await readUntil(
+      await call(`${base}/events`, { headers: { 'last-event-id': String(followupEvents.at(-1)!.id) } }),
+      (events) =>
+        events.some((e) => e.type === 'run' && e.data.id === failed.id && e.data.status !== 'running'),
+    );
+    const failedEvent = failedEvents.find(
+      (e) => e.type === 'run' && e.data.id === failed.id && e.data.status !== 'running',
+    )!.data;
+    assert.equal(failedEvent.answer, undefined);
+    assert.deepEqual(failedEvent.sources, []);
+
+    // A later question is cancelled after a partial provider response.
+    provider.setMode('partial');
     provider.hold();
     const before = provider.requests();
     const second = await (
@@ -162,6 +224,24 @@ test('closing the browser leaves the run working; coming back resumes it, and a 
       })
     ).json();
     await until(async () => (provider.requests() > before ? true : undefined));
+    const partial = await readUntil(
+      await call(`${base}/events`, { headers: { 'last-event-id': String(failedEvents.at(-1)!.id) } }),
+      (events) =>
+        events.some(
+          (e) =>
+            e.type === 'delta' &&
+            e.data.runId === second.id &&
+            e.data.text.includes('partial synthetic answer'),
+        ),
+    );
+    assert.ok(
+      partial.some(
+        (e) =>
+          e.type === 'delta' &&
+          e.data.runId === second.id &&
+          e.data.text.includes('partial synthetic answer'),
+      ),
+    );
     assert.equal((await call(`${base}/runs/${second.id}/cancel`, { method: 'POST' })).status, 200);
     const cancelled = await until(async () => {
       const current = await (await call(`${base}/runs/${second.id}`)).json();
@@ -182,6 +262,8 @@ test('closing the browser leaves the run working; coming back resumes it, and a 
       'a cancelled question must not return the previous answer',
     );
     assert.deepEqual(cancelledEvent.sources, [], 'a cancelled question must not claim sources');
+    provider.release();
+    provider.setMode('success');
     const conversations = await (await call(`${base}/conversations`)).json();
     assert.equal(conversations.find((c: { id: string }) => c.id === run.sessionId).status, 'cancelled');
   } finally {

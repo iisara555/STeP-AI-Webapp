@@ -1392,3 +1392,7 @@
   confirm generated Word files in the organization's editor; complete offsite backup/restore acceptance.
 - Automated capacity alarms/database-size admission, binary Drive export and automated Desktop
   personal-history migration remain follow-up work; native execution stays in Desktop.
+
+### Current-run result isolation: authority integration gap
+
+Synthetic snapshot tests cover mapping an early return that leaves a prior review and trace untouched. The real gateway tests cover a grounded answer, an ungrounded follow-up, provider failure, and cancellation after a partial response. They do **not** exercise an early authority denial: the workspace runtime uses `serverPolicy()` with the Desktop default authority checks disabled and offers no supported override. These tests do not establish production authority enforcement; integration coverage requires a separately supported policy path. No authority policy was changed.

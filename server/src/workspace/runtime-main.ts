@@ -17,6 +17,7 @@ import {
   type ConversationSummary,
   type RuntimeEvent,
 } from './contract.ts';
+import { currentRunResult } from './current-run-result.ts';
 import type { RuntimeReply, RuntimeRequest } from './process-driver.ts';
 import { CONVERSATION_INDEX } from './storage.ts';
 
@@ -118,23 +119,13 @@ const methods: Record<string, (params: unknown) => unknown> = {
     const { text, sessionId } = AskInput.parse(params);
     const id = sessionId ?? engine.store.create('central', 'cc').id;
     if (!engine.store.get('session', id)) throw new Error('CONVERSATION_NOT_FOUND');
+    const before = engine.store.session(id);
     try {
       await engine.work.run(id, text, '', true, undefined, 'chat');
     } finally {
       await writeIndex();
     }
-    const done = engine.store.session(id);
-    // A non-review outcome may leave the previous assistant message and context in the session.
-    // They are not an answer or sources for this unsuccessful run.
-    const completed = done.status === 'review';
-    const answer = completed ? done.messages.filter((m) => m.role === 'assistant').at(-1)?.text : undefined;
-    return {
-      sessionId: id,
-      status: done.status,
-      ...(answer ? { answer } : {}),
-      ...(completed ? {} : { code: done.runs?.at(-1)?.code || 'RUN_FAILED' }),
-      sources: completed ? (done.loadedContext ?? []) : [],
-    };
+    return currentRunResult(id, before, engine.store.session(id));
   },
   async newConversation() {
     const sessionId = engine.store.create('central', 'cc').id;
