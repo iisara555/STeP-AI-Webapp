@@ -36,7 +36,7 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(result['input_count'], len(rows))
         self.assertEqual(sum(result['counts'].values()), len(rows))
         self.assertEqual(len(result['dispositions']), len(rows))
-        self.assertEqual(result['dispositions'], ['candidate_only', 'candidate_only', 'document_import_unsupported', 'shared_or_ambiguous_visibility', 'invalid_or_unknown_fields', 'unmapped_or_ambiguous_identity', 'invalid_or_unknown_fields', 'unsupported_type'])
+        self.assertEqual(result['dispositions'], ['candidate_only', 'candidate_only', 'document_import_unsupported', 'deferred_shared', 'invalid_or_unknown_fields', 'unmapped_or_ambiguous_identity', 'invalid_or_unknown_fields', 'unsupported_type'])
 
     def test_mapping_conflicts_fail_closed(self):
         for mappings in [[], MAP + MAP, MAP + [{'auth_user_id':'user-1', 'google_sub':'sub-2'}], MAP + [{'auth_user_id':'user-2', 'google_sub':'sub-1'}], MAP + [{'auth_user_id':'user-2', 'google_sub':'sub-2', 'token':'secret'}], [{'auth_user_id':'real-user', 'google_sub':'sub-1'}]]:
@@ -62,8 +62,18 @@ class PreviewTests(unittest.TestCase):
             self.assertEqual(preview([BASE], MAP)['dispositions'], ['candidate_only'])
 
     def test_visibility_fail_closed(self):
-        for visibility, workspace in [('private', 'workspace-1'), ('workspace', None), (None, None), ('other', None)]:
+        for visibility, workspace in [('private', 'workspace-1'), ('workspace', None), (None, None), ('other', None), ('workspace', 'not-synthetic')]:
             self.assertEqual(preview([dict(BASE, visibility=visibility, workspace_id=workspace)], MAP)['dispositions'], ['shared_or_ambiguous_visibility'])
+
+    def test_valid_shared_records_are_deferred_not_dropped(self):
+        # Owner decision: shared data stays in Supabase until the destination supports sharing.
+        shared = dict(BASE, id='record-2', visibility='workspace', workspace_id='workspace-1')
+        for mappings in (MAP, []):
+            with self.subTest(mapped=bool(mappings)):
+                result = preview([shared, BASE], mappings)
+                self.assertEqual(result['dispositions'][0], 'deferred_shared')
+                self.assertEqual(result['counts']['deferred_shared'], 1)
+                self.assertEqual(result['input_count'], 2)
 
 if __name__ == '__main__':
     unittest.main()

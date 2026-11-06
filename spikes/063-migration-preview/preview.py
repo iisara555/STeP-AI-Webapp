@@ -42,6 +42,10 @@ def preview(records, mappings):
             reason = 'invalid_metadata'
         elif id_counts[row['id']] > 1:
             reason = 'duplicate_record_id'
+        elif row['visibility'] == 'workspace' and synthetic(row['workspace_id'], 'workspace'):
+            # Owner decision: shared data stays in Supabase until the destination supports
+            # sharing. Report it as deferred; never drop it or convert it to a private copy.
+            reason = 'deferred_shared'
         elif row['visibility'] != 'private' or row['workspace_id'] is not None:
             reason = 'shared_or_ambiguous_visibility'
         elif invalid or row['owner_id'] not in identities:

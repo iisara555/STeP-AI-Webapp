@@ -10,7 +10,8 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(result['blocked_count'], 3)
         self.assertEqual(result['unsupported_field_count'], 4)
         self.assertEqual(result['unsupported_category_count'], 1)
-        self.assertEqual(result['ambiguous_ownership_count'], 2)
+        # A validly shared row is deferred by owner decision, not counted as ambiguous ownership.
+        self.assertEqual(result['ambiguous_ownership_count'], 1)
         self.assertEqual(result, adapt(records, []))
         self.assertEqual(row['title'], 'synthetic')
 
