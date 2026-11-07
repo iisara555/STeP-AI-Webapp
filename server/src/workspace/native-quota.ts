@@ -110,8 +110,7 @@ export function nativeQuotaBoundary(
     throw Error('NATIVE_QUOTA_UNSAFE_PATH');
   if (!driver.startWithAdmission) throw Error('RUNTIME_START_ADMISSION_UNSUPPORTED');
   // A pathname bind re-resolves p<ID> at spawn: a rename+substitute after verification would be launched into.
-  const pinned = driver.startPinnedWithAdmission?.bind(driver);
-  if (!pinned) throw Error('RUNTIME_PINNED_LAUNCH_UNSUPPORTED');
+  if (!driver.startPinnedWithAdmission) throw Error('RUNTIME_PINNED_LAUNCH_UNSUPPORTED');
   const metadata = workspaceStorage(dataRoot);
   // Pair the storage and driver halves: arbitrary or copied paths are never accepted.
   // This is a one-use internal consistency marker, NOT authorization (admit is still required).
@@ -184,7 +183,16 @@ export function nativeQuotaBoundary(
       conversations: async (record) =>
         readConversationIndexAt((await prepare(record.ownerId, record.id)).spec.dir),
     },
-    driver: {
+    driver: boundaryDriver(driver),
+  };
+
+  /** The paired driver half. The inner driver's orphan recovery (#62) is kept: the manager journals every launch
+   * through the journaled inner driver, wrapped again so pinned launch stays the only way in. */
+  function boundaryDriver(inner: RuntimeDriver): RuntimeDriver {
+    const pinned = inner.startPinnedWithAdmission?.bind(inner);
+    if (!pinned) throw Error('RUNTIME_PINNED_LAUNCH_UNSUPPORTED');
+    const recovery = inner.recovery;
+    return {
       async start() {
         throw Error('NATIVE_QUOTA_ADMISSION_REQUIRED');
       },
@@ -196,6 +204,15 @@ export function nativeQuotaBoundary(
         // A failed pin throws inside the spawn callback, so admission fails and nothing is spawned.
         return pinned(spec, () => pin(spec.dir, identity), admit);
       },
-    },
-  };
+      ...(recovery
+        ? {
+            recovery: {
+              kind: recovery.kind,
+              journaled: (journal) => boundaryDriver(recovery.journaled(journal)),
+              reap: recovery.reap,
+            },
+          }
+        : {}),
+    };
+  }
 }

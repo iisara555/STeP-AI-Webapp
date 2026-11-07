@@ -41,11 +41,23 @@ export function createSyntheticAssembly(options: SyntheticAssemblyOptions) {
       entry: 'server/src/workspace/runtime-main.ts',
       maxFrameBytes: 1024 * 1024,
     });
-    const start: NonNullable<RuntimeDriver['startWithAdmission']> = async (spec, admit) => {
-      await runtime.prepareWorkspace(spec);
-      return runner.startWithAdmission(spec, admit);
+    // Keep the runner's orphan recovery (#62): the manager journals through the wrapped driver it gets back.
+    const wrap = (inner: typeof runner): RuntimeDriver => {
+      const start: NonNullable<RuntimeDriver['startWithAdmission']> = async (spec, admit) => {
+        await runtime.prepareWorkspace(spec);
+        return inner.startWithAdmission(spec, admit);
+      };
+      return {
+        start: (spec) => start(spec, (spawn) => spawn()),
+        startWithAdmission: start,
+        recovery: {
+          kind: inner.recovery.kind,
+          journaled: (journal) => wrap(inner.recovery.journaled(journal)),
+          reap: inner.recovery.reap,
+        },
+      };
     };
-    driver = { start: (spec) => start(spec, (spawn) => spawn()), startWithAdmission: start };
+    driver = wrap(runner);
   } else {
     driver = processDriver({ isolated: true, transport: 'unix', socketRoot: runtime.socketRoot });
   }

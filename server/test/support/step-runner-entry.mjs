@@ -2,6 +2,7 @@
 // disposable app root under several names; the name picks the behaviour. No app code, no engine, no real data.
 import net from 'node:net';
 import { spawn } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
 const mode = basename(import.meta.filename, '.mjs');
@@ -119,7 +120,15 @@ while time.monotonic() < end:
       });
       write({ type: 'ready', launchNonce });
     }
-    if (mode === 'fake-stubborn') {
+    if (mode === 'fake-stubborn' || mode === 'fake-orphan-writer') {
+      if (mode === 'fake-orphan-writer') {
+        // Survives losing its manager, and keeps writing into its workspace files (cwd): the orphan of #62.
+        setInterval(() => {
+          try {
+            appendFileSync('orphan.log', `${process.pid} ${Date.now()}\n`);
+          } catch {}
+        }, 50);
+      }
       // A detached descendant in its own session that ignores SIGTERM, and a runtime that ignores shutdown.
       spawn('/bin/sh', ['-c', 'trap "" TERM; while :; do sleep 1; done'], {
         detached: true,

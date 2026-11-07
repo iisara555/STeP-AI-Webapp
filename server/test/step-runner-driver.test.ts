@@ -406,7 +406,14 @@ describe('step-runner host driver', host, () => {
     for (const part of ['node_modules', 'harness', 'server/src', 'server/package.json', 'package.json'])
       cpSync(join(REPO, part), join(app, part), { recursive: true, verbatimSymlinks: true });
     mkdirSync(join(app, 'server/src/test-entries'));
-    for (const name of ['fake-sleeper', 'fake-wrong-nonce', 'fake-flood', 'fake-stubborn', 'fake-resources'])
+    for (const name of [
+      'fake-sleeper',
+      'fake-wrong-nonce',
+      'fake-flood',
+      'fake-stubborn',
+      'fake-resources',
+      'fake-orphan-writer',
+    ])
       cpSync(
         join(REPO, 'server/test/support/step-runner-entry.mjs'),
         join(app, `server/src/test-entries/${name}.mjs`),
@@ -1368,4 +1375,129 @@ setTimeout(() => (out({ timeout: true, received }), process.exit(0)), 30000);
     assert.equal(emptied(handle.scope.cgroupPath), true);
     await assertClean();
   });
+
+  test(
+    'orphan reap (#62): a SIGKILLed manager leaves its runtime writing; the successor reaps it before any start',
+    { timeout: 120_000 },
+    async () => {
+      const dataRoot = join(root, 'orphan-data');
+      mkdirSync(dataRoot);
+      provisionTestQuota(dataRoot, 2);
+      const writer = { ...options, entry: 'server/src/test-entries/fake-orphan-writer.mjs' };
+      // The first holder: a real RuntimeManager in its own process, with a running step-runner runtime.
+      const script = `
+        import { chmodSync } from 'node:fs';
+        import { dirname } from 'node:path';
+        import { RuntimeManager } from './server/src/workspace/manager.ts';
+        import { stepRunnerDriver } from './server/src/workspace/step-runner-driver.ts';
+        import { workspacePaths } from './server/src/workspace/storage.ts';
+        const [dataRoot, options, stopAt] = process.argv.slice(1);
+        const manager = new RuntimeManager({ dataRoot, workspacesPerUser: 2, driver: stepRunnerDriver(JSON.parse(options)) });
+        const ws = await manager.create('alice', { name: 'orphan' });
+        const spec = workspacePaths(dataRoot, 'alice', ws.id);
+        // Disposable test only, as workspace() above.
+        for (let dir = spec.filesDir; dir !== stopAt; dir = dirname(dir)) chmodSync(dir, 0o755);
+        chmodSync(spec.dir, 0o777);
+        chmodSync(spec.filesDir, 0o777);
+        await manager.start('alice', ws.id);
+        console.log('RUNNING ' + ws.id);
+        setInterval(() => {}, 1000);
+      `;
+      const holder = spawn(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          '--import',
+          './server/src/register.mjs',
+          '--input-type=module',
+          '-e',
+          script,
+          dataRoot,
+          JSON.stringify(writer),
+          root,
+        ],
+        { cwd: REPO, stdio: ['ignore', 'pipe', 'inherit'] },
+      );
+      const holderExit = new Promise<string | null>((done) =>
+        holder.once('exit', (_c, signal) => done(signal)),
+      );
+      let orphanCgroup = '';
+      let successor: RuntimeManager | undefined;
+      try {
+        const id = await new Promise<string>((done, fail) => {
+          let out = '';
+          holder.stdout!.on('data', (chunk) => {
+            out += chunk;
+            const match = /^RUNNING (ws_[0-9a-f]{32})$/m.exec(out);
+            if (match) done(match[1]!);
+          });
+          void holderExit.then(() => fail(new Error(`holder exited: ${out}`)));
+          setTimeout(() => fail(new Error('holder did not start')), 60_000);
+        });
+        const spec = workspacePaths(dataRoot, 'alice', id);
+        specs.push(spec);
+        const journal = join(dataRoot, 'runtime-launches');
+        const open = readdirSync(journal);
+        assert.equal(open.length, 1, 'the running launch is journalled');
+        const unit = /^step-runner~(step-rt-[0-9a-f]{32}\.scope)$/.exec(open[0]!)![1]!;
+        orphanCgroup =
+          '/sys/fs/cgroup' +
+          execFileSync('systemctl', ['--user', 'show', unit, '-p', 'ControlGroup', '--value'], {
+            encoding: 'utf8',
+          }).trim();
+        assert.ok(
+          procs(orphanCgroup).some((p) => p.uid === runnerUid),
+          'the runtime runs as step-runner',
+        );
+        const log = join(spec.filesDir, 'orphan.log');
+        const size = () => (existsSync(log) ? readFileSync(log).length : 0);
+        for (let i = 0; i < 100 && !size(); i++) await sleep(50);
+        assert.ok(size() > 0, 'the runtime writes its workspace files');
+
+        holder.kill('SIGKILL');
+        assert.equal(await holderExit, 'SIGKILL');
+        // The gap: the manager is gone (its fence is free) but its runtime is not, and it keeps writing.
+        const before = size();
+        await sleep(500);
+        assert.equal(emptied(orphanCgroup), false, 'the runtime outlives its SIGKILLed manager');
+        assert.ok(size() > before, 'the orphan still writes p<ID>/files');
+
+        // The successor takes the fence and must prove the orphan gone before anything is admitted.
+        successor = new RuntimeManager({ dataRoot, workspacesPerUser: 2, driver: stepRunnerDriver(options) });
+        const atAdmission: boolean[] = [];
+        const started = await successor.start('alice', id, (spawnIt) => {
+          atAdmission.push(emptied(orphanCgroup) && !units().includes(unit));
+          spawnIt();
+        });
+        assert.equal(started.state, 'running');
+        assert.ok(
+          atAdmission.length > 0 && atAdmission.every(Boolean),
+          'orphan proven gone at every admission',
+        );
+        const stable = size();
+        await sleep(500);
+        assert.equal(size(), stable, 'no write after recovery');
+        const now = readdirSync(journal);
+        assert.equal(now.length, 1);
+        assert.notEqual(now[0], open[0], 'only the successor launch is open');
+        assert.equal((await successor.health('alice', id)).ok, true);
+        await successor.stop('alice', id);
+        assert.deepEqual(readdirSync(journal), [], 'a proven stop resolves the entry');
+        await successor.shutdown();
+        successor = undefined;
+      } finally {
+        holder.kill('SIGKILL');
+        await holderExit;
+        await successor?.shutdown().catch(() => {});
+        // Never leak the orphan past a failed assertion.
+        if (orphanCgroup && !emptied(orphanCgroup)) {
+          try {
+            writeFileSync(join(orphanCgroup, 'cgroup.kill'), '1');
+          } catch {}
+        }
+      }
+      await assertClean();
+    },
+  );
 });

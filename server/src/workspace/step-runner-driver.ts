@@ -13,9 +13,9 @@
 // `systemctl --user stop` cannot signal step-runner, so a stop is: graceful request over the socket, then
 // cgroup.kill on the scope, then proof that the scope is empty.
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, closeSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import net from 'node:net';
 import { dirname, isAbsolute, join, normalize, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -27,6 +27,7 @@ import {
   type RuntimeEvent,
   type RuntimeHandle,
   type RuntimeHealth,
+  type RuntimeLaunchJournal,
   type RuntimeSpec,
 } from './contract.ts';
 import { DEFAULT_MAX_FRAME_BYTES, encodeFrame, frameReader } from './frames.ts';
@@ -97,9 +98,20 @@ export type StepRunnerHooks = {
   systemctl?: (args: string[], real: (args: string[]) => Promise<CommandResult>) => Promise<CommandResult>;
   writeCgroupFile?: (path: string, data: string) => void;
   readCgroupFile?: (path: string) => Promise<string>;
+  /** Processes visible in /proc: real uid and argv. */
+  listProcesses?: () => Promise<{ pid: number; uid: number; argv: string[] }[]>;
+  killProcess?: (pid: number) => void;
+  /** Every cgroup directory named `unit` under this user's systemd manager. */
+  listScopeCgroups?: (unit: string) => Promise<string[]>;
 };
 export type StepRunnerHandle = RuntimeHandle & { scope: StepRunnerScope };
 export type StepRunnerDriver = {
+  /** Orphan recovery (#62): journal every launch before its spawn; reap launches of a crashed manager. */
+  recovery: {
+    kind: 'step-runner';
+    journaled(journal: RuntimeLaunchJournal): StepRunnerDriver;
+    reap(unit: string): Promise<void>;
+  };
   start(spec: RuntimeSpec): Promise<StepRunnerHandle>;
   startWithAdmission(spec: RuntimeSpec, admit: (spawn: () => void) => void): Promise<StepRunnerHandle>;
   startPinnedWithAdmission(
@@ -246,6 +258,46 @@ const run = (file: string, args: string[], env: NodeJS.ProcessEnv) =>
     ),
   );
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+/** Unit names this driver generates: 128 random bits, never reused by it (see reap). */
+const UNIT_NAME = /^step-rt-[0-9a-f]{32}\.scope$/;
+const CGROUP_ROOT = '/sys/fs/cgroup';
+
+async function listProcesses() {
+  const found: { pid: number; uid: number; argv: string[] }[] = [];
+  for (const name of await readdir('/proc')) {
+    if (!/^[1-9]\d*$/.test(name)) continue;
+    try {
+      const status = await readFile(`/proc/${name}/status`, 'utf8');
+      const argv = (await readFile(`/proc/${name}/cmdline`, 'utf8')).split('\0');
+      found.push({ pid: Number(name), uid: Number(/^Uid:\s+(\d+)/m.exec(status)?.[1]), argv });
+    } catch {
+      // Exited meanwhile, or not ours to read: a process this user cannot read cannot be one it launched.
+    }
+  }
+  return found;
+}
+
+/** Every directory named `unit` below `top`; the top must exist, races below it are tolerated. */
+async function findCgroups(top: string, unit: string) {
+  const found: string[] = [];
+  const walk = async (dir: string, depth: number, required: boolean) => {
+    let children;
+    try {
+      children = await readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      if (!required && (error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    for (const child of children) {
+      if (!child.isDirectory()) continue;
+      const path = join(dir, child.name);
+      if (child.name === unit) found.push(path);
+      else if (depth < 12) await walk(path, depth + 1, false);
+    }
+  };
+  await walk(top, 0, true);
+  return found;
+}
 
 export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHooks = {}): StepRunnerDriver {
   validate(options);
@@ -268,15 +320,111 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
   const writeCgroupFile =
     hooks.writeCgroupFile ?? ((path: string, data: string) => writeFileSync(path, data));
   const readCgroupFile = hooks.readCgroupFile ?? ((path: string) => readFile(path, 'utf8'));
+  const userManagerCgroup = `${CGROUP_ROOT}/user.slice/user-${uid}.slice/user@${uid}.service`;
+  const scopeCgroups = hooks.listScopeCgroups ?? ((unit: string) => findCgroups(userManagerCgroup, unit));
+  const processes = hooks.listProcesses ?? listProcesses;
+  const killProcess = hooks.killProcess ?? ((pid: number) => process.kill(pid, 'SIGKILL'));
+  // The scope's cgroup, from the user manager: only this user's own manager subtree is ever accepted.
+  const cgroupPatternFor = (unit: string) =>
+    new RegExp(
+      `^/user\\.slice/user-${uid}\\.slice/user@${uid}\\.service/(?:[A-Za-z0-9@._-]+/)*${unit.replaceAll('.', '\\.')}$`,
+    );
+  const stopFailed = (cause: string) => Object.assign(new WorkspaceError('RUNTIME_STOP_FAILED'), { cause });
+  const killCgroup = (cgroup: string) => {
+    try {
+      writeCgroupFile(join(cgroup, 'cgroup.kill'), '1');
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') throw stopFailed(`CGROUP_KILL_${code ?? 'FAILED'}`);
+    }
+  };
+  /** Proof of emptiness: `populated 0`, or the kernel removed the cgroup. */
+  const cgroupEmpty = async (cgroup: string) => {
+    try {
+      return (await readCgroupFile(join(cgroup, 'cgroup.events'))).includes('populated 0');
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ENOENT';
+    }
+  };
+
+  /**
+   * Reaps one launch recorded by a manager that is no longer alive (its writer fence was free), and proves it gone.
+   * Order matters. (1) Launchers: until `systemd-run --scope` has created the scope and exec'd sudo, the launch is a
+   * process of this user whose argv names the unit; it is SIGKILLed and proven exited, after which nothing can create
+   * that scope any more (only a manager launches, and the previous one is dead). (2) Scope: every cgroup the user
+   * manager reports for the unit, and every cgroup directory of that name in the manager's subtree (covering a scope
+   * systemd has forgotten), is cgroup.kill'ed until `populated 0` or removed. Absence in both is proof only because the
+   * runtime cannot leave its scope (step-runner owns no cgroup it could migrate to) and the name is never reused:
+   * 128 random bits per launch, and this driver never starts a recorded name again.
+   */
+  const reap = async (unit: string): Promise<void> => {
+    if (typeof unit !== 'string' || !UNIT_NAME.test(unit)) throw stopFailed('UNIT_INVALID');
+    const deadline = Date.now() + stopTimeoutMs;
+    const flag = `--unit=${unit}`;
+    for (;;) {
+      let launchers;
+      try {
+        launchers = (await processes()).filter((p) => p.uid === uid && p.argv.includes(flag));
+      } catch {
+        throw stopFailed('PROCESSES_UNKNOWN');
+      }
+      if (!launchers.length) break;
+      if (Date.now() > deadline) throw stopFailed('LAUNCHER_ALIVE');
+      for (const { pid } of launchers) {
+        try {
+          killProcess(pid);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw stopFailed('LAUNCHER_KILL_FAILED');
+        }
+      }
+      await sleep(25);
+    }
+    const shown = await systemctl('show', unit, '-p', 'ControlGroup', '--value');
+    // A failed query says nothing: never conclude 'gone' from it.
+    if (shown.code !== 0) throw stopFailed('SCOPE_UNKNOWN');
+    const cgroups = new Set<string>();
+    const reported = shown.stdout.trim();
+    if (reported) {
+      if (!cgroupPatternFor(unit).test(reported)) throw stopFailed('SCOPE_UNEXPECTED');
+      cgroups.add(CGROUP_ROOT + reported);
+    }
+    try {
+      for (const path of await scopeCgroups(unit)) cgroups.add(path);
+    } catch {
+      throw stopFailed('CGROUPS_UNKNOWN');
+    }
+    for (const cgroup of cgroups) {
+      let empty = false;
+      while (!(empty = await cgroupEmpty(cgroup)) && Date.now() < deadline) {
+        killCgroup(cgroup);
+        await sleep(25);
+      }
+      if (!empty) throw stopFailed('NOT_PROVEN_EMPTY');
+    }
+    // Processes are proven gone; removing the unit and the socket folder is housekeeping, never part of the proof.
+    for (const verb of ['stop', 'reset-failed']) await systemctl(verb, unit).catch(() => undefined);
+    try {
+      rmSync(join(o.socketRoot, unit.slice('step-rt-'.length, -'.scope'.length)), {
+        recursive: true,
+        force: true,
+      });
+    } catch {
+      // A leftover empty socket folder is not a running runtime.
+    }
+  };
 
   const start = async (
     spec: RuntimeSpec,
     admit: (spawn: () => void) => void,
-    pin?: () => number,
+    pin: (() => number) | undefined,
+    journal: RuntimeLaunchJournal | undefined,
   ): Promise<StepRunnerHandle> => {
+    // One random launch id names both the scope and its socket folder (both are visible in /proc anyway), so a
+    // successor that reaps a journalled unit can also remove the socket folder it left behind.
+    const launchId = randomBytes(16).toString('hex');
     const launch: Launch = {
-      unit: `step-rt-${randomBytes(16).toString('hex')}.scope`,
-      socketDir: join(o.socketRoot, randomBytes(16).toString('hex')),
+      unit: `step-rt-${launchId}.scope`,
+      socketDir: join(o.socketRoot, launchId),
       pinned: pin !== undefined,
     };
     const launchNonce = randomBytes(32).toString('hex');
@@ -313,6 +461,31 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
       throw new WorkspaceError('RUNTIME_START_FAILED');
     }
 
+    // Journal before admission (#62): once this returns the launch is durable, so a successor that finds the root
+    // unfenced reaps it even if this process dies before, during or after the spawn.
+    let launchRecord: { resolve(): void } | undefined;
+    try {
+      launchRecord = journal?.record({
+        kind: 'step-runner',
+        unit: launch.unit,
+        workspaceId: spec.workspaceId,
+        nonceHash: createHash('sha256').update(launchNonce).digest('hex'),
+      });
+    } catch {
+      removeSocket();
+      throw Object.assign(new WorkspaceError('RUNTIME_START_FAILED'), { cause: 'LAUNCH_JOURNAL_FAILED' });
+    }
+    /** Only after the processes are proven gone, or nothing was spawned. A failed resolve is left for recovery. */
+    const resolveLaunch = () => {
+      const record = launchRecord;
+      launchRecord = undefined;
+      try {
+        record?.resolve();
+      } catch {
+        // The entry stays open; the next holder of the data root reaps (and proves) it again.
+      }
+    };
+
     let child = undefined as ChildProcess | undefined;
     let admissionError: unknown;
     let admissionFailed = false;
@@ -343,6 +516,7 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
     } catch (error) {
       if (!child) {
         removeSocket();
+        resolveLaunch();
         throw error;
       }
       admissionError = error;
@@ -352,6 +526,7 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
     }
     if (!child) {
       removeSocket();
+      resolveLaunch();
       throw new Error('RUNTIME_START_ADMISSION_SKIPPED');
     }
     const proc = child;
@@ -530,9 +705,7 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
     });
 
     // The scope's cgroup, from the user manager. Unit names are random and never reused.
-    const cgroupPattern = new RegExp(
-      `^/user\\.slice/user-${uid}\\.slice/user@${uid}\\.service/(?:[A-Za-z0-9@._-]+/)*${launch.unit.replaceAll('.', '\\.')}$`,
-    );
+    const cgroupPattern = cgroupPatternFor(launch.unit);
     const discover = async (deadline: number): Promise<string | 'gone'> => {
       for (;;) {
         const exitedBefore = childExit !== undefined;
@@ -554,23 +727,9 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
     const discovered = discover(Date.now() + startTimeoutMs);
     void discovered.catch(() => {});
 
-    const stopFailed = (cause: string) => Object.assign(new WorkspaceError('RUNTIME_STOP_FAILED'), { cause });
-    const killScope = (cgroup: string) => {
-      try {
-        writeCgroupFile(join(cgroup, 'cgroup.kill'), '1');
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'ENOENT') throw stopFailed(`CGROUP_KILL_${code ?? 'FAILED'}`);
-      }
-    };
+    const killScope = killCgroup;
     /** Proof of emptiness: `populated 0`, or the kernel removed the (never reused) cgroup. */
-    const provenEmpty = async (cgroup: string) => {
-      try {
-        return (await readCgroupFile(join(cgroup, 'cgroup.events'))).includes('populated 0');
-      } catch (error) {
-        return (error as NodeJS.ErrnoException).code === 'ENOENT';
-      }
-    };
+    const provenEmpty = cgroupEmpty;
 
     // After the processes are proven gone: remove the unit. `stop`/`reset-failed` fail harmlessly when systemd has
     // already collected the empty scope, so the outcome is judged by asking afterwards, and recorded on the scope.
@@ -620,6 +779,7 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
             if (!empty) throw stopFailed('NOT_PROVEN_EMPTY');
           }
           processesGone = true;
+          resolveLaunch();
         }
         await cleanupUnit();
         removeSocket();
@@ -742,11 +902,13 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
     }
     return handle;
   };
-  return {
-    start: (spec) => start(spec, (spawn) => spawn()),
-    startWithAdmission: (spec, admit) => start(spec, admit),
-    startPinnedWithAdmission: (spec, pin, admit) => start(spec, admit, pin),
-  };
+  const make = (journal?: RuntimeLaunchJournal): StepRunnerDriver => ({
+    recovery: { kind: 'step-runner', journaled: (next) => make(next), reap },
+    start: (spec) => start(spec, (spawn) => spawn(), undefined, journal),
+    startWithAdmission: (spec, admit) => start(spec, admit, undefined, journal),
+    startPinnedWithAdmission: (spec, pin, admit) => start(spec, admit, pin, journal),
+  });
+  return make();
 }
 
 /** Typed as the generic contract for callers that do not need the scope details. */

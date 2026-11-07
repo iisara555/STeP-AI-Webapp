@@ -656,3 +656,38 @@ test('production mode, unsupported admission, and overlapping roots refuse compo
     await f.close();
   }
 });
+
+test('the boundary keeps the inner driver orphan recovery (#62), still pinned-only after journalling', async () => {
+  const f = await fixture();
+  try {
+    const journals: unknown[] = [];
+    const reaped: string[] = [];
+    const inner = (journal?: unknown): RuntimeDriver => ({
+      ...f.driver,
+      recovery: {
+        kind: 'fake-runner',
+        journaled: (next) => (journals.push(next), inner(next)),
+        reap: async (unit) => void reaped.push(unit),
+      },
+    });
+    const boundary = nativeQuotaBoundary(f.options, inner()).driver;
+    assert.equal(boundary.recovery?.kind, 'fake-runner');
+    const journal = { record: () => ({ resolve: () => {} }) };
+    const journaled = boundary.recovery!.journaled(journal);
+    assert.deepEqual(journals, [journal]);
+    assert.equal(journaled.recovery?.kind, 'fake-runner');
+    await assert.rejects(journaled.start(f.specs[0]!), /NATIVE_QUOTA_ADMISSION_REQUIRED/);
+    await assert.rejects(
+      journaled.startWithAdmission!(
+        { ownerId: 'alice', workspaceId: 'x', dir: '/', filesDir: '/' },
+        () => {},
+      ),
+      /NATIVE_QUOTA_UNSAFE_SPEC/,
+    );
+    await boundary.recovery!.reap('step-rt-x.scope');
+    assert.deepEqual(reaped, ['step-rt-x.scope']);
+    assert.equal(nativeQuotaBoundary(f.options, f.driver).driver.recovery, undefined);
+  } finally {
+    await f.close();
+  }
+});

@@ -18,6 +18,7 @@ import {
   type RuntimeEvent,
   type RuntimeHandle,
   type RuntimeHealth,
+  type RuntimeRecovery,
   type RuntimeState,
   type Workspace,
   type WorkspaceRecord,
@@ -25,6 +26,7 @@ import {
 import { workspaceStorage, type WorkspaceStorage } from './storage.ts';
 import { WorkspaceQuotaStore } from './quota-store.ts';
 import { WriterFence } from './writer-fence.ts';
+import { LaunchJournal } from './launch-journal.ts';
 
 /** Observe before returning to a fence whose COMMIT can throw after IPC enqueue.
  * Keep the original Promise so admitted callers still receive the runtime result/error.
@@ -106,6 +108,12 @@ export class RuntimeManager {
   private readonly grant: NonNullable<RuntimeManagerOptions['grant']>;
   /** Exactly one live manager writes a data root (#62); held from construction until a clean shutdown. */
   private readonly writerFence: WriterFence;
+  /** Every launch of this holder, recorded before its spawn; entries left by a previous holder are reaped first. */
+  private readonly launches: LaunchJournal;
+  private readonly recovery?: RuntimeRecovery;
+  /** Set once every launch of every previous holder is proven gone; until then no start is admitted. */
+  private orphansReaped = false;
+  private recovering?: Promise<void>;
 
   constructor({
     dataRoot,
@@ -120,7 +128,6 @@ export class RuntimeManager {
   }: RuntimeManagerOptions) {
     this.storage = storage;
     this.workspaceQuota = new WorkspaceQuotaStore(dataRoot, workspacesPerUser);
-    this.driver = driver;
     this.maxRunning = maxRunning;
     this.idleMs = idleMs;
     if (!Number.isFinite(connectTimeoutMs) || connectTimeoutMs <= 0)
@@ -128,8 +135,19 @@ export class RuntimeManager {
     this.connectTimeoutMs = connectTimeoutMs;
     this.now = now;
     this.grant = grant;
-    // Last, so nothing after acquisition can throw and strand the fence; startup fails closed without it.
+    // Startup fails closed without the fence; nothing after acquisition may strand it.
     this.writerFence = WriterFence.acquire(dataRoot);
+    try {
+      // Inside the fence: only this holder appends; entries already present belong to previous holders.
+      this.launches = LaunchJournal.open(dataRoot);
+      this.recovery = driver.recovery;
+      this.driver = driver.recovery ? driver.recovery.journaled(this.launches) : driver;
+    } catch (error) {
+      this.writerFence.release();
+      throw error;
+    }
+    // Eager, so orphans stop writing as soon as possible; start() awaits (and retries) it.
+    void this.reapOrphans().catch(() => {});
   }
 
   async create(
@@ -194,6 +212,9 @@ export class RuntimeManager {
     admit?: (spawn: () => void) => void,
     authorize?: () => Promise<void>,
   ): Promise<Workspace> {
+    if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
+    // Before reading or admitting anything: a previous holder's runtime may still be writing this root.
+    await this.reapOrphans();
     if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
     const record = await this.storage.read(actor, workspaceId);
     if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
@@ -529,6 +550,8 @@ export class RuntimeManager {
     this.shuttingDown = true;
     if (this.shutdownAttempt) return this.shutdownAttempt;
     const attempt = (async () => {
+      // A reap in flight finishes (or fails) before the root can pass on; unproven entries stay for the next holder.
+      await this.recovering?.catch(() => {});
       const outcomes = await Promise.allSettled([...this.live.keys()].map((key) => this.stopKey(key)));
       const errors = outcomes.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : []));
       if (errors.length === 1) throw errors[0];
@@ -542,6 +565,40 @@ export class RuntimeManager {
     } finally {
       if (this.shutdownAttempt === attempt) this.shutdownAttempt = undefined;
     }
+  }
+
+  /**
+   * Reaps every launch a previous holder of this data root left open (it crashed, or a resolve failed) and proves
+   * each gone through the driver that launched it. Fails closed with RUNTIME_RECOVERY_PENDING while any entry is
+   * unproven, unreadable, or of a kind no configured driver can reap; the next start retries.
+   */
+  private reapOrphans(): Promise<void> {
+    if (this.orphansReaped) return Promise.resolve();
+    if (this.recovering) return this.recovering;
+    const attempt = (async () => {
+      try {
+        const open = this.launches.pending();
+        const outcomes = await Promise.allSettled(
+          open.map(async (launch) => {
+            if (this.recovery?.kind !== launch.kind) throw new Error('RUNTIME_RECOVERY_UNSUPPORTED');
+            await this.recovery.reap(launch.unit);
+            this.launches.resolve(launch);
+          }),
+        );
+        const failures = outcomes.flatMap((o) => (o.status === 'rejected' ? [o.reason] : []));
+        if (failures.length) throw new AggregateError(failures, 'RUNTIME_RECOVERY_FAILED');
+        this.orphansReaped = true;
+      } catch (cause) {
+        throw Object.assign(new WorkspaceError('RUNTIME_RECOVERY_PENDING'), { cause });
+      }
+    })();
+    this.recovering = attempt;
+    // A failed attempt is forgotten so the next start retries it; success is remembered by orphansReaped.
+    void attempt.then(
+      () => this.recovering === attempt && (this.recovering = undefined),
+      () => this.recovering === attempt && (this.recovering = undefined),
+    );
+    return attempt;
   }
 
   private async call<T>(

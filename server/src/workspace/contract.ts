@@ -131,8 +131,32 @@ export type RuntimeHandle = {
   onEvent?(listener: (event: RuntimeEvent) => void): void;
 };
 
+/** Identity of one launch, enough for a later manager of the same data root to find exactly that runtime (#62). */
+export type RuntimeLaunchRecord = { kind: string; unit: string };
+
+/** Durable record of runtime launches under the data root, written inside the writer fence. */
+export type RuntimeLaunchJournal = {
+  /** Records an intended launch durably (fsync) before returning; throws if it cannot, and the launch must then not
+   * happen. Call before admission, so the synchronous admission/spawn section stays unchanged. resolve() only once
+   * the launch's processes are proven gone or were never spawned; a failed resolve leaves the entry for recovery. */
+  record(launch: RuntimeLaunchRecord & { workspaceId: string; nonceHash?: string }): { resolve(): void };
+};
+
+/** Crash recovery for drivers whose runtimes can outlive the manager process. */
+export type RuntimeRecovery = {
+  /** Journal entries of this kind are reaped by this driver; any other kind blocks starts. */
+  kind: string;
+  /** The same driver, recording every launch in `journal` before spawning it. */
+  journaled(journal: RuntimeLaunchJournal): RuntimeDriver;
+  /** Kills whatever remains of a recorded launch and proves it gone; rejects unless proven. Idempotent. */
+  reap(unit: string): Promise<void>;
+};
+
 /** Docker, Podman or a systemd sandbox can replace the process driver without changing the contract. */
 export type RuntimeDriver = {
+  /** Drivers whose runtimes survive a manager crash must provide this; the manager then journals every launch and
+   * admits no start until all launches of previous holders of the data root are proven gone. */
+  recovery?: RuntimeRecovery;
   start(spec: RuntimeSpec): Promise<RuntimeHandle>;
   /** Invoke admit exactly once synchronously around the actual spawn, not around asynchronous preparation.
    * The spawn callback must run before admit returns; readiness must be awaited after admission returns.
@@ -174,6 +198,8 @@ export type WorkspaceErrorCode =
   | 'RUNTIME_CALL_FAILED'
   /** The result exceeds the bounded transport frame; no partial result was returned. */
   | 'RUNTIME_RESULT_TOO_LARGE'
+  /** Runtimes launched by a previous manager of this data root are not yet proven gone; no start is admitted. */
+  | 'RUNTIME_RECOVERY_PENDING'
   | 'INVALID_INPUT';
 
 export class WorkspaceError extends Error {
