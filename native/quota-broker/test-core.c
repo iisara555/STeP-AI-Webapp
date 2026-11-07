@@ -56,7 +56,11 @@ static int mock_observe(void *context, int mount_fd, int fd, uint32_t project,
     assert(fstat(fd, &s) == 0 && fstat(mount_fd, &root) == 0 && s.st_dev == root.st_dev);
     assert(project >= 100000 && project < 100000 + QB_MAX_GRANTS);
     unsigned int index = project - 100000;
+    struct stat parent;
     if (m->slots[index].inode == (uint64_t)s.st_ino) *out = m->slots[index].value;
+    /* XFS PROJINHERIT model: a directory created inside a project directory inherits it. */
+    else if (m->slots[index].inode && fstatat(fd, "..", &parent, 0) == 0 &&
+             (uint64_t)parent.st_ino == m->slots[index].inode) *out = m->slots[index].value;
     else memset(out, 0, sizeof(*out));
     if (m->corrupt == 1) out->inodes_hard++;
     if (m->corrupt == 2) out->bytes_hard++;
@@ -452,6 +456,133 @@ static void revoke_fences_mutation(void) {
     assert(qb_revoke(f.broker, f.policy.grants[0].workspace) == 0);
     cleanup(&f);
 }
+static int workspace_as(struct fixture *f, unsigned int user, const char *ws, uid_t peer,
+                        struct qb_workspace_receipt *out) {
+    char frame[96];
+    int n = snprintf(frame, sizeof(frame), "WORKSPACE/1 %s %s\n", f->policy.grants[user].workspace, ws);
+    assert(n == 86);
+    return qb_workspace(f->broker, peer, frame, 86, out);
+}
+static int usage_of(struct fixture *f, unsigned int user, struct qb_usage *out) {
+    char frame[64];
+    int n = snprintf(frame, sizeof(frame), "USAGE/1 %s\n", f->policy.grants[user].workspace);
+    assert(n == 45);
+    return qb_usage(f->broker, geteuid(), frame, 45, out);
+}
+static void expect_dir(int parent, const char *name, uint64_t uid, uint64_t gid, mode_t mode) {
+    struct stat c; assert(fstatat(parent, name, &c, AT_SYMLINK_NOFOLLOW) == 0);
+    assert(S_ISDIR(c.st_mode) && c.st_uid == uid && c.st_gid == gid && (c.st_mode & 07777) == mode);
+}
+static const char *ws_a = "aaaaaaaa-0000-4000-8000-000000000001";
+static const char *ws_b = "bbbbbbbb-0000-4000-8000-000000000002";
+static void shared_layout(void) {
+    struct fixture f; fixture_init(&f);
+    f.policy.layout = QB_LAYOUT_SHARED;
+    f.policy.access_gid = (uint32_t)getegid(); f.policy.content_uid = (uint32_t)geteuid();
+    struct qb_policy bad = f.policy; bad.layout = 2; assert(qb_bootstrap(f.state, &bad) < 0);
+    bad = f.policy; bad.access_gid = 0; assert(qb_bootstrap(f.state, &bad) < 0);
+    bad = f.policy; bad.content_uid = 0; assert(qb_bootstrap(f.state, &bad) < 0);
+    bad = f.policy; bad.layout = QB_LAYOUT_PRIVATE; assert(qb_bootstrap(f.state, &bad) < 0);
+    bad = f.policy; bad.reserved = 1; assert(qb_bootstrap(f.state, &bad) < 0);
+    assert(qb_bootstrap(f.state, &f.policy) == 0);
+    /* The shared layout's root is traverse-only for the access group, never 0700/0711. */
+    struct qb *b = NULL;
+    assert(qb_open(f.root, f.state, &f.policy, &f.adapter, &b) < 0 && errno == EPERM && !b);
+    assert(fchmod(f.root, 0711) == 0);
+    assert(qb_open(f.root, f.state, &f.policy, &f.adapter, &b) < 0 && errno == EPERM && !b);
+    assert(fchmod(f.root, 0710) == 0); start(&f);
+    uint64_t me = geteuid(), gid = getegid();
+    /* User project directory: broker-owned, access group read-only, never workload-writable. */
+    struct qb_receipt r;
+    assert(ensure(&f, 0, &r) == 0 && r.project == 100000);
+    assert(!memcmp(r.mount_uuid, f.policy.mount_uuid, 16));
+    expect_dir(f.root, "p100000", me, gid, 0750);
+    struct stat s; assert(fstatat(r.directory_fd, "files", &s, 0) < 0 && errno == ENOENT);
+    uint64_t user_inode = r.inode; close(r.directory_fd);
+    /* Workspaces are subdirectories of the user's pool, inheriting its project. */
+    struct qb_workspace_receipt w, w2;
+    assert(workspace_as(&f, 0, ws_a, geteuid(), &w) == 0);
+    assert(w.project == 100000 && w.user_inode == user_inode && w.bytes_hard == 1048576);
+    assert(!memcmp(w.mount_uuid, f.policy.mount_uuid, 16));
+    assert(fstat(w.directory_fd, &s) == 0 && (uint64_t)s.st_ino == w.inode && (uint64_t)s.st_dev == w.device);
+    expect_dir(r.directory_fd = openat(f.root, "p100000", O_RDONLY | O_DIRECTORY), ws_a, me, gid, 02750);
+    expect_dir(w.directory_fd, "files", me, gid, 02750);
+    expect_dir(w.directory_fd, "snapshots", me, gid, 02750);
+    close(r.directory_fd);
+    uint64_t inode_a = w.inode; close(w.directory_fd);
+    assert(workspace_as(&f, 0, ws_a, geteuid(), &w) == 0 && w.inode == inode_a); close(w.directory_fd);
+    assert(workspace_as(&f, 0, ws_b, geteuid(), &w2) == 0 && w2.project == 100000 && w2.inode != inode_a);
+    close(w2.directory_fd);
+    assert(f.model.configure_calls == 1); /* one quota per user, not per workspace */
+    /* Workload content inside a workspace may change freely. */
+    char path[96]; snprintf(path, sizeof(path), "p100000/%s/conversations.json", ws_a);
+    int fd = openat(f.root, path, O_WRONLY | O_CREAT | O_EXCL, 0640); assert(fd >= 0); close(fd);
+    assert(workspace_as(&f, 0, ws_a, geteuid(), &w) == 0); close(w.directory_fd);
+    qb_close(f.broker); f.broker = NULL; start(&f);
+    assert(workspace_as(&f, 0, ws_a, geteuid(), &w) == 0 && w.inode == inode_a); close(w.directory_fd);
+    /* Strict frames, grants and peers. */
+    char frame[96];
+    snprintf(frame, sizeof(frame), "WORKSPACE/1 %s %s\n", f.policy.grants[0].workspace, ws_a);
+    assert(qb_workspace(f.broker, geteuid(), frame, 85, &w) < 0 && errno == EPROTO && w.directory_fd == -1);
+    frame[50] = 'A'; assert(qb_workspace(f.broker, geteuid(), frame, 86, &w) < 0 && errno == EPROTO);
+    snprintf(frame, sizeof(frame), "WORKSPACE/1 %s ../../../../../../../../etc/passwd\n", f.policy.grants[0].workspace);
+    assert(qb_workspace(f.broker, geteuid(), frame, strlen(frame), &w) < 0 && errno == EPROTO);
+    assert(workspace_as(&f, 0, ws_a, (uid_t)(geteuid() + 1), &w) < 0 && errno == EACCES);
+    snprintf(frame, sizeof(frame), "WORKSPACE/1 12345678-1234-4234-8234-999999999999 %s\n", ws_a);
+    assert(qb_workspace(f.broker, geteuid(), frame, 86, &w) < 0 && errno == EACCES);
+    /* Changed or interrupted hand-overs are denied, never adopted or repaired. */
+    snprintf(path, sizeof(path), "p100000/%s", ws_a);
+    mode_t modes[] = {02770, 0700, 02755};
+    for (unsigned int i = 0; i < 3; i++) {
+        assert(fchmodat(f.root, path, modes[i], 0) == 0);
+        assert(workspace_as(&f, 0, ws_a, geteuid(), &w) < 0 && errno == EPERM && w.directory_fd == -1);
+    }
+    assert(fchmodat(f.root, path, 02750, 0) == 0);
+    assert(workspace_as(&f, 0, ws_a, geteuid(), &w) == 0); close(w.directory_fd);
+    const char *ws_c = "cccccccc-0000-4000-8000-000000000003";
+    snprintf(path, sizeof(path), "p100000/%s", ws_c);
+    assert(mkdirat(f.root, path, 0700) == 0); /* left half-created */
+    assert(workspace_as(&f, 0, ws_c, geteuid(), &w) < 0 && errno == EPERM);
+    assert(fchmodat(f.root, "p100000", 0755, 0) == 0);
+    assert(ensure(&f, 0, &r) < 0 && errno == EPERM);
+    assert(workspace_as(&f, 0, ws_a, geteuid(), &w) < 0 && errno == EPERM);
+    assert(fchmodat(f.root, "p100000", 0750, 0) == 0);
+    assert(fchmod(f.root, 0750) == 0 && ensure(&f, 0, &r) < 0 && errno == EPERM);
+    assert(fchmod(f.root, 0710) == 0);
+    /* Usage: read-only, never allocates, reports the pool's usage against its hard limits. */
+    struct qb_usage u;
+    assert(usage_of(&f, 1, &u) < 0 && errno == ENOENT && f.model.configure_calls == 1);
+    f.model.slots[0].value.bytes_used = 838861; f.model.slots[0].value.inodes_used = 81;
+    assert(usage_of(&f, 0, &u) == 0 && u.project == 100000 && u.bytes_used == 838861 &&
+           u.bytes_hard == 1048576 && u.inodes_used == 81 && u.inodes_hard == 100);
+    snprintf(frame, sizeof(frame), "USAGE/1 %s\n", f.policy.grants[0].workspace);
+    assert(qb_usage(f.broker, (uid_t)(geteuid() + 1), frame, 45, &u) < 0 && errno == EACCES);
+    assert(qb_usage(f.broker, geteuid(), frame, 44, &u) < 0 && errno == EPROTO);
+    f.model.corrupt = 2; assert(usage_of(&f, 0, &u) < 0 && errno == EDQUOT); f.model.corrupt = 0;
+    assert(ensure(&f, 1, &r) == 0 && r.project == 100001); close(r.directory_fd);
+    assert(usage_of(&f, 1, &u) == 0 && u.project == 100001 && u.bytes_used == 0);
+    /* Revoking the user denies every workspace and usage request. */
+    assert(qb_revoke(f.broker, f.policy.grants[0].workspace) == 0);
+    assert(workspace_as(&f, 0, ws_a, geteuid(), &w) < 0 && errno == EACCES);
+    assert(usage_of(&f, 0, &u) < 0 && errno == EACCES);
+    assert(f.model.configure_calls == 2);
+    /* A manifest bound to the shared layout cannot be reopened with other access values. */
+    qb_close(f.broker); f.broker = NULL;
+    bad = f.policy; bad.access_gid++;
+    assert(qb_open(f.root, f.state, &bad, &f.adapter, &b) < 0 && !b);
+    cleanup(&f);
+}
+static void private_layout_receipt(void) {
+    struct fixture f; fixture_init(&f); bootstrap(&f);
+    struct qb_receipt r; assert(ensure(&f, 0, &r) == 0);
+    assert(!memcmp(r.mount_uuid, f.policy.mount_uuid, 16));
+    struct stat s; assert(fstat(r.directory_fd, &s) == 0 && (s.st_mode & 07777) == 0700);
+    assert(fstatat(r.directory_fd, "files", &s, AT_SYMLINK_NOFOLLOW) < 0 && errno == ENOENT);
+    close(r.directory_fd);
+    struct qb_workspace_receipt w;
+    assert(workspace_as(&f, 0, ws_a, geteuid(), &w) < 0 && errno == ENOTSUP && w.directory_fd == -1);
+    cleanup(&f);
+}
 int main(void) {
     assert(geteuid() != 0); /* This harness refuses root, even accidentally. */
     umask(0077);
@@ -459,14 +590,15 @@ int main(void) {
         substitutions, mount_and_evidence, failure_and_capacity, interrupted, corrupt_state,
         uncertain_commit, truncated_live_state, substitution_during_adapter, exclusive_process_authority,
         concurrent_ten, revoke_fences_mutation, cached_revoke_truncated_journal,
-        cached_revoke_idempotency_and_mount_health};
+        cached_revoke_idempotency_and_mount_health, shared_layout, private_layout_receipt};
     const char *names[] = {"strict bounded protocol", "explicit protected policy/bootstrap",
         "allocation/retry/restart", "never adopt foreign tree", "substitution/symlink/retained FD",
         "mount/evidence fail closed", "unknown outcome/capacity", "interrupted provision/restart",
         "torn journal rejected", "uncertain commit prevents mutation", "live state truncation denied",
         "mid-adapter substitution denied", "exclusive cross-process authority", "ten concurrent unique reservations",
         "durable revocation mutation fence", "cached revoke rejects lost durable state",
-        "cached revoke idempotency/restart/mount health"};
+        "cached revoke idempotency/restart/mount health", "per-user pool: user dir, workspace subdirs, usage",
+        "private layout unchanged, receipt carries mount UUID"};
     _Static_assert(sizeof(tests)/sizeof(tests[0]) == sizeof(names)/sizeof(names[0]), "test names mismatch");
     for (size_t i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) { tests[i](); printf("ok %zu - %s\n", i+1, names[i]); }
     printf("%zu unprivileged core tests passed; ZERO real XFS quota tests executed\n", sizeof(tests)/sizeof(tests[0]));

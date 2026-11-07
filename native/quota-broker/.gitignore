@@ -5,3 +5,8 @@
 /*.a
 /xfs-acceptance
 /xfs-acceptance-san
+/test-policy
+/test-broker
+/step-quota-broker
+/step-quota-broker-fake
+/step-quota-broker-san

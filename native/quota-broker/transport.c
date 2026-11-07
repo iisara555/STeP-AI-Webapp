@@ -4,13 +4,14 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 
-struct client { int fd; uid_t peer_uid; size_t used; int64_t deadline; unsigned char bytes[47]; };
+struct client { int fd; uid_t peer_uid; size_t used; int64_t deadline; unsigned char bytes[QB_TRANSPORT_FRAME_MAX + 1]; };
 static int64_t now_ms(void) {
     struct timespec t;
     if (clock_gettime(CLOCK_MONOTONIC, &t) < 0) return -1;
@@ -20,12 +21,73 @@ static void drop(struct client *c) {
     if (c->fd >= 0) close(c->fd);
     memset(c, 0, sizeof(*c)); c->fd = -1;
 }
-/* Fixed tiny best-effort nonblocking response. Never leak errno, policy,
- * identities, paths, project IDs, limits or FDs. Partial send is not success. */
-static void finish(struct client *c, int ok) {
-    const char *reply = ok ? "OK/1\n" : "DENIED/1\n";
-    (void)send(c->fd, reply, strlen(reply), MSG_NOSIGNAL|MSG_DONTWAIT);
+/* Fixed tiny best-effort nonblocking responses; a partial send is not success.
+ * Denial carries nothing (no errno, policy or identity). Success replies carry
+ * ONLY values the core just verified under its authority for the authenticated
+ * peer's own granted user subject, as fixed-format decimal/UUID text:
+ *   ENSURE/1    -> OK/2 <project> <device> <inode> <bytes_hard> <inodes_hard> <mount-uuid>\n
+ *   WORKSPACE/1 -> OK/3 <project> <device> <user-inode> <workspace-inode> <bytes_hard>
+ *                       <inodes_hard> <mount-uuid>\n            (one line)
+ *   USAGE/1     -> USAGE/1 <project> <bytes_used> <bytes_hard> <inodes_used> <inodes_hard>\n
+ * No path (directories are the fixed p<project>[/<workspace-uuid>] names under the
+ * fixed root), errno, other subject, FD or SCM_RIGHTS is ever sent. */
+static int uuid_text(const uint8_t *u, char out[37]) {
+    return snprintf(out, 37, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                    u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11],
+                    u[12], u[13], u[14], u[15]) == 36 ? 0 : -1;
+}
+static int fit(int n, size_t size) {
+    if (n < 0 || (size_t)n >= size) { errno = EOVERFLOW; return -1; }
+    return n;
+}
+int qb_transport_format_ok(const struct qb_receipt *r, char *out, size_t size) {
+    char u[37];
+    if (uuid_text(r->mount_uuid, u) < 0) return -1;
+    return fit(snprintf(out, size, "OK/2 %u %llu %llu %llu %llu %s\n", r->project,
+                        (unsigned long long)r->device, (unsigned long long)r->inode,
+                        (unsigned long long)r->bytes_hard, (unsigned long long)r->inodes_hard, u), size);
+}
+int qb_transport_format_workspace(const struct qb_workspace_receipt *r, char *out, size_t size) {
+    char u[37];
+    if (uuid_text(r->mount_uuid, u) < 0) return -1;
+    return fit(snprintf(out, size, "OK/3 %u %llu %llu %llu %llu %llu %s\n", r->project,
+                        (unsigned long long)r->device, (unsigned long long)r->user_inode,
+                        (unsigned long long)r->inode, (unsigned long long)r->bytes_hard,
+                        (unsigned long long)r->inodes_hard, u), size);
+}
+int qb_transport_format_usage(const struct qb_usage *u, char *out, size_t size) {
+    return fit(snprintf(out, size, "USAGE/1 %u %llu %llu %llu %llu\n", u->project,
+                        (unsigned long long)u->bytes_used, (unsigned long long)u->bytes_hard,
+                        (unsigned long long)u->inodes_used, (unsigned long long)u->inodes_hard), size);
+}
+static void reply(struct client *c, const char *text, int n) {
+    if (n < 0) { text = "DENIED/1\n"; n = 9; }
+    (void)send(c->fd, text, (size_t)n, MSG_NOSIGNAL|MSG_DONTWAIT);
     drop(c);
+}
+static void finish(struct client *c, const void *unused) { (void)unused; reply(c, NULL, -1); }
+/* One complete frame (write EOF seen). The core revalidates the exact frame. */
+static void serve(struct qb *broker, struct client *c) {
+    char text[QB_TRANSPORT_REPLY_MAX];
+    int n = -1;
+    if (c->used == 46 && !memcmp(c->bytes, "ENSURE/1 ", 9)) {
+        struct qb_receipt r;
+        if (qb_ensure(broker, c->peer_uid, c->bytes, c->used, &r) == 0) {
+            close(r.directory_fd); /* NEVER transmit a launch FD. */
+            n = qb_transport_format_ok(&r, text, sizeof(text));
+        }
+    } else if (c->used == 86 && !memcmp(c->bytes, "WORKSPACE/1 ", 12)) {
+        struct qb_workspace_receipt r;
+        if (qb_workspace(broker, c->peer_uid, c->bytes, c->used, &r) == 0) {
+            close(r.directory_fd);
+            n = qb_transport_format_workspace(&r, text, sizeof(text));
+        }
+    } else if (c->used == 45 && !memcmp(c->bytes, "USAGE/1 ", 8)) {
+        struct qb_usage u;
+        if (qb_usage(broker, c->peer_uid, c->bytes, c->used, &u) == 0)
+            n = qb_transport_format_usage(&u, text, sizeof(text));
+    }
+    reply(c, text, n);
 }
 int qb_transport_run(struct qb *broker, int listener, int stop_fd, uid_t allow_uid) {
     struct sockaddr_un address;
@@ -80,7 +142,7 @@ int qb_transport_run(struct qb *broker, int listener, int stop_fd, uid_t allow_u
             /* A previous synchronous core call may have taken time. Never use a
              * stale pre-mutation timestamp to admit a different expired client. */
             now = now_ms(); if (now < 0) goto done;
-            if (now >= c->deadline) { finish(c, 0); continue; }
+            if (now >= c->deadline) { finish(c, NULL); continue; }
             if (p[i+2].revents & (POLLERR|POLLNVAL)) { drop(c); continue; }
             if (!(p[i+2].revents & (POLLIN|POLLHUP))) continue;
             struct iovec input = {c->bytes+c->used, sizeof(c->bytes)-c->used};
@@ -92,16 +154,13 @@ int qb_transport_run(struct qb *broker, int listener, int stop_fd, uid_t allow_u
                 if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) drop(c);
                 continue;
             }
-            if (message.msg_flags & MSG_CTRUNC) { finish(c, 0); continue; }
+            if (message.msg_flags & MSG_CTRUNC) { finish(c, NULL); continue; }
             c->used += (size_t)got;
-            if (c->used > 46) { finish(c, 0); continue; }
+            if (c->used > QB_TRANSPORT_FRAME_MAX) { finish(c, NULL); continue; }
             if (got != 0) continue; /* Require write EOF: no pipelining/trailing data. */
             /* Core revalidates exact protocol + workspace grant under authority.
              * Credentials were checked before any read, not derived from bytes. */
-            struct qb_receipt receipt;
-            int ok = qb_ensure(broker, c->peer_uid, c->bytes, c->used, &receipt) == 0;
-            if (ok) close(receipt.directory_fd); /* NEVER transmit a launch FD. */
-            finish(c, ok);
+            serve(broker, c);
         }
         if (p[1].revents & POLLIN) {
             /* Bounded accept batch prevents a connection flood starving stop/deadlines. */

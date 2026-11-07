@@ -139,6 +139,10 @@ static int observe(void *v, int root, int dir, uint32_t project, struct qb_obser
     out->inherit = !!(a.fsx_xflags & FS_XFLAG_PROJINHERIT);
     out->bytes_hard = q.d_blk_hardlimit * 512;
     out->inodes_hard = q.d_ino_hardlimit;
+    /* Usage for reporting only (d_bcount is in 512-byte basic blocks). */
+    if (q.d_bcount > UINT64_MAX / 512) return deny(EUCLEAN);
+    out->bytes_used = q.d_bcount * 512;
+    out->inodes_used = q.d_icount;
     return 0;
 }
 static int configure(void *v, int root, int dir, uint32_t project, uint64_t bytes, uint64_t inodes) {

@@ -1,0 +1,390 @@
+/* step-quota-broker: the installable native quota broker service.
+ *
+ *   step-quota-broker --check      validate policy, directories, mount and state; no mutation
+ *   step-quota-broker --bootstrap  ONE-TIME: create the state journal (refuses unless state AND
+ *                                  root are empty and the live mount matches the policy)
+ *   step-quota-broker --serve      serve the fixed ENSURE protocol on the fixed socket
+ *
+ * Production build: fixed absolute paths, euid 0 required, real XFS adapter. No path, ID, limit,
+ * principal or option comes from the environment or the command line; the only input is the
+ * root-owned policy file. --serve never bootstraps (a lost/empty state directory must never
+ * silently restart allocation; that needs an owner re-install with a fresh quota census).
+ *
+ * Testing build (-DQB_BROKER_TESTING): refuses root, takes the five directories as arguments,
+ * expects them owned by the invoking user, and uses an in-file FAKE quota adapter. It performs no
+ * quota/attribute ioctl or quotactl at all; it exists only to test startup and the socket client.
+ */
+#define _GNU_SOURCE
+#include "core.h"
+#include "policy.h"
+#include "transport.h"
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <linux/openat2.h>
+#include <signal.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/prctl.h>
+#include <sys/signalfd.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/un.h>
+#include <unistd.h>
+#ifndef QB_BROKER_TESTING
+#include "xfs.h"
+#endif
+
+#define POLICY_NAME "policy"
+#define SOCKET_NAME "broker.sock"
+#ifndef QB_BROKER_TESTING
+#define POLICY_DIR "/etc/step-quota-broker"
+#define BROKER_DIR "/mnt/step-work/step-ai-broker"
+#define SOCKET_DIR "/run/step-quota-broker"
+#endif
+enum { EXIT_RUNTIME = 1, EXIT_REFUSED = 2 };
+enum command { CHECK, BOOTSTRAP, SERVE };
+
+static void say(const char *what) { fprintf(stderr, "step-quota-broker: %s\n", what); }
+static int refuse(const char *what) {
+    int saved = errno;
+    fprintf(stderr, "step-quota-broker: REFUSED: %s%s%s\n", what, saved ? ": " : "",
+            saved ? strerror(saved) : "");
+    return EXIT_REFUSED;
+}
+static int deny(int error) { errno = error; return -1; }
+
+static int beneath(int parent, const char *name, int flags) {
+    struct open_how how = {
+        .flags = (uint64_t)(unsigned int)(flags | O_CLOEXEC | O_NOFOLLOW),
+        .mode = (flags & O_CREAT) ? 0600 : 0,
+        .resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_XDEV,
+    };
+    return (int)syscall(SYS_openat2, parent, name, &how, sizeof(how));
+}
+/* Directory owned by one of the allowed owners and not group/other-writable. */
+static int trusted(int fd, uid_t a, uid_t b) {
+    struct stat s;
+    if (fstat(fd, &s) < 0) return -1;
+    if (!S_ISDIR(s.st_mode) || (s.st_uid != a && s.st_uid != b) || (s.st_mode & 022)) return deny(EPERM);
+    return 0;
+}
+/* Walk an absolute path component by component from `base` without following any symlink,
+ * requiring every directory on the way (including base) to be trusted(a, b); the final
+ * directory must be owned by `final_owner`. Returns an O_RDONLY|O_DIRECTORY descriptor. */
+static int open_chain(int base, const char *path, uid_t a, uid_t b, uid_t final_owner) {
+    char copy[4096];
+    if (!path || path[0] != '/' || strlen(path) >= sizeof(copy)) return deny(EINVAL);
+    strcpy(copy, path);
+    int fd = fcntl(base, F_DUPFD_CLOEXEC, 3);
+    if (fd < 0) return -1;
+    if (trusted(fd, a, b) < 0) goto fail;
+    char *save = NULL;
+    for (char *c = strtok_r(copy, "/", &save); c; c = strtok_r(NULL, "/", &save)) {
+        if (!strcmp(c, ".") || !strcmp(c, "..")) { errno = EINVAL; goto fail; }
+        int next = openat(fd, c, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        int saved = errno; close(fd); errno = saved; fd = next;
+        if (fd < 0 || trusted(fd, a, b) < 0) goto fail;
+    }
+    struct stat s;
+    if (fstat(fd, &s) < 0) goto fail;
+    if (s.st_uid != final_owner) { errno = EPERM; goto fail; }
+    return fd;
+fail: {
+    int saved = errno; if (fd >= 0) close(fd); errno = saved; return -1;
+}}
+static int empty(int fd) {
+    int copy = beneath(fd, ".", O_RDONLY | O_DIRECTORY);
+    if (copy < 0) return -1;
+    DIR *d = fdopendir(copy);
+    if (!d) { close(copy); return -1; }
+    struct dirent *e; int result = 0;
+    errno = 0;
+    while ((e = readdir(d)))
+        if (strcmp(e->d_name, ".") && strcmp(e->d_name, "..")) { result = -1; errno = ENOTEMPTY; break; }
+    if (!e && errno) result = -1;
+    int saved = errno; closedir(d); errno = saved;
+    return result;
+}
+
+#ifdef QB_BROKER_TESTING
+/* FAKE quota adapter: per-directory "attributes" and per-project "quota" are small files in a
+ * separate test-only directory, so a restarted fake broker observes what it configured. */
+struct fake { int dir; uint8_t uuid[16]; };
+static ssize_t fake_read(int dir, const char *name, char *buffer, size_t size) {
+    int fd = beneath(dir, name, O_RDONLY);
+    if (fd < 0) return -1;
+    ssize_t n = read(fd, buffer, size - 1);
+    int saved = errno; close(fd); errno = saved;
+    if (n >= 0) buffer[n] = 0;
+    return n;
+}
+static int fake_write(int dir, const char *name, const char *text) {
+    int fd = beneath(dir, name, O_WRONLY | O_CREAT | O_TRUNC);
+    if (fd < 0) return -1;
+    size_t n = strlen(text);
+    int ok = write(fd, text, n) == (ssize_t)n && fsync(fd) == 0 ? 0 : -1;
+    int saved = errno; close(fd); errno = saved;
+    return ok;
+}
+static int nibble(char c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+}
+static int fake_mount(void *v, int fd, uint8_t uuid[16], int *enforced) {
+    struct fake *f = v;
+    struct stat s;
+    if (fstat(fd, &s) < 0 || !S_ISDIR(s.st_mode)) return deny(EBADF);
+    memcpy(uuid, f->uuid, 16);
+    char text[64];
+    if (fake_read(f->dir, "mount-uuid", text, sizeof(text)) >= 32) { /* test override */
+        for (size_t i = 0, j = 0; text[i] && j < 16; i++) {
+            if (text[i] == '-') continue;
+            int hi = nibble(text[i]), lo = nibble(text[i + 1]);
+            if (hi < 0 || lo < 0) return deny(EINVAL);
+            uuid[j++] = (uint8_t)(hi << 4 | lo); i++;
+        }
+    }
+    *enforced = faccessat(f->dir, "not-enforced", F_OK, AT_SYMLINK_NOFOLLOW) == 0 ? 0 : 1;
+    return 0;
+}
+static int fake_observe(void *v, int root, int dir, uint32_t project, struct qb_observation *out) {
+    struct fake *f = v; (void)root;
+    memset(out, 0, sizeof(*out));
+    struct stat s;
+    if (fstat(dir, &s) < 0) return -1;
+    char name[64], text[64];
+    snprintf(name, sizeof(name), "d%llu", (unsigned long long)s.st_ino);
+    ssize_t got = fake_read(f->dir, name, text, sizeof(text));
+    if (got < 0 && errno == ENOENT) {
+        /* XFS PROJINHERIT model: a directory made inside a project directory inherits it. */
+        struct stat parent;
+        if (fstatat(dir, "..", &parent, 0) < 0) return -1;
+        snprintf(name, sizeof(name), "d%llu", (unsigned long long)parent.st_ino);
+        got = fake_read(f->dir, name, text, sizeof(text));
+    }
+    if (got > 0) {
+        out->project = (uint32_t)strtoul(text, NULL, 10); out->inherit = 1;
+    } else if (errno != ENOENT) return -1;
+    snprintf(name, sizeof(name), "q%u", project);
+    if (fake_read(f->dir, name, text, sizeof(text)) > 0) {
+        unsigned long long bytes = 0, inodes = 0;
+        if (sscanf(text, "%llu %llu", &bytes, &inodes) != 2) return deny(EUCLEAN);
+        out->bytes_hard = bytes; out->inodes_hard = inodes;
+    } else if (errno != ENOENT) return -1;
+    snprintf(name, sizeof(name), "u%u", project); /* test-written usage: "<bytes> <inodes>" */
+    if (fake_read(f->dir, name, text, sizeof(text)) > 0) {
+        unsigned long long bytes = 0, inodes = 0;
+        if (sscanf(text, "%llu %llu", &bytes, &inodes) != 2) return deny(EUCLEAN);
+        out->bytes_used = bytes; out->inodes_used = inodes;
+    } else if (errno != ENOENT) return -1;
+    return 0;
+}
+static int fake_configure(void *v, int root, int dir, uint32_t project, uint64_t bytes, uint64_t inodes) {
+    struct fake *f = v;
+    struct qb_observation o;
+    if (fake_observe(v, root, dir, project, &o) < 0) return -1;
+    if (o.project || o.inherit || o.bytes_hard || o.inodes_hard) return deny(EEXIST);
+    if (faccessat(f->dir, "fail-configure", F_OK, AT_SYMLINK_NOFOLLOW) == 0) return deny(EIO);
+    struct stat s;
+    if (fstat(dir, &s) < 0) return -1;
+    char name[64], text[64];
+    snprintf(name, sizeof(name), "q%u", project);
+    snprintf(text, sizeof(text), "%llu %llu\n", (unsigned long long)bytes, (unsigned long long)inodes);
+    if (fake_write(f->dir, name, text) < 0) return -1;
+    snprintf(name, sizeof(name), "d%llu", (unsigned long long)s.st_ino);
+    snprintf(text, sizeof(text), "%u\n", project);
+    return fake_write(f->dir, name, text);
+}
+#endif
+
+/* systemd Type=notify readiness without libsystemd. */
+static void notify_ready(void) {
+    const char *path = getenv("NOTIFY_SOCKET");
+    if (!path || !path[0]) return;
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    size_t n = strlen(path);
+    if (n >= sizeof(a.sun_path) || (path[0] != '/' && path[0] != '@')) return;
+    memcpy(a.sun_path, path, n);
+    if (a.sun_path[0] == '@') a.sun_path[0] = 0;
+    int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) return;
+    (void)sendto(fd, "READY=1", 7, MSG_NOSIGNAL, (struct sockaddr *)&a,
+                 (socklen_t)(offsetof(struct sockaddr_un, sun_path) + n));
+    close(fd);
+}
+
+/* Fixed socket in a fresh, empty, euid-owned 0700 directory (systemd RuntimeDirectory). The
+ * socket is made root:gateway_gid 0660 and listening BEFORE the directory is opened to the
+ * gateway group (root:gateway_gid 0710); nobody else can traverse to it. SO_PEERCRED in the
+ * transport additionally requires the exact gateway uid before any read. */
+static int listen_socket(int dir, gid_t group) {
+    struct stat s;
+    if (fstat(dir, &s) < 0) return -1;
+    if (!S_ISDIR(s.st_mode) || s.st_uid != geteuid() || (s.st_mode & 07777) != 0700) return deny(EPERM);
+    if (empty(dir) < 0) return -1; /* never unlink/rebind: a leftover socket means refuse */
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (fd < 0) return -1;
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    memcpy(a.sun_path, SOCKET_NAME, sizeof(SOCKET_NAME));
+    /* Relative bind inside the pinned directory: no long or re-resolved path. */
+    if (fchdir(dir) < 0 || bind(fd, (struct sockaddr *)&a, sizeof(a)) < 0 || chdir("/") < 0 ||
+        fchownat(dir, SOCKET_NAME, geteuid(), group, AT_SYMLINK_NOFOLLOW) < 0 ||
+        fchmodat(dir, SOCKET_NAME, 0660, 0) < 0 || fstatat(dir, SOCKET_NAME, &s, AT_SYMLINK_NOFOLLOW) < 0)
+        goto fail;
+    if (!S_ISSOCK(s.st_mode) || s.st_uid != geteuid() || s.st_gid != group || (s.st_mode & 07777) != 0660) {
+        errno = EPERM; goto fail;
+    }
+    if (listen(fd, QB_TRANSPORT_CLIENTS) < 0 || fchown(dir, geteuid(), group) < 0 ||
+        fchmod(dir, 0710) < 0 || fstat(dir, &s) < 0) goto fail;
+    if (s.st_gid != group || (s.st_mode & 07777) != 0710) { errno = EPERM; goto fail; }
+    return fd;
+fail: {
+    int saved = errno; close(fd); errno = saved; return -1;
+}}
+
+static int usage(void) {
+#ifdef QB_BROKER_TESTING
+    say("usage (TESTING build): step-quota-broker-fake --check|--bootstrap|--serve --trust-root DIR "
+        "--policy-dir DIR --broker-dir DIR --socket-dir DIR --fake-dir DIR");
+#else
+    say("usage: step-quota-broker --check|--bootstrap|--serve");
+#endif
+    return EXIT_REFUSED;
+}
+
+int main(int argc, char **argv) {
+    umask(077);
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) return refuse("no_new_privs");
+    /* Inherit nothing but stdio. */
+    if (close_range(3, ~0U, 0) < 0) return refuse("close_range");
+    if (argc < 2) return usage();
+    enum command command;
+    if (!strcmp(argv[1], "--check")) command = CHECK;
+    else if (!strcmp(argv[1], "--bootstrap")) command = BOOTSTRAP;
+    else if (!strcmp(argv[1], "--serve")) command = SERVE;
+    else return usage();
+    errno = 0;
+#ifdef QB_BROKER_TESTING
+    const char *trust_root = NULL, *policy_dir = NULL, *broker_dir = NULL, *socket_dir = NULL,
+               *fake_dir = NULL;
+    if (argc != 12) return usage();
+    for (int i = 2; i < argc; i += 2) {
+        const char **slot = !strcmp(argv[i], "--trust-root") ? &trust_root
+                          : !strcmp(argv[i], "--policy-dir") ? &policy_dir
+                          : !strcmp(argv[i], "--broker-dir") ? &broker_dir
+                          : !strcmp(argv[i], "--socket-dir") ? &socket_dir
+                          : !strcmp(argv[i], "--fake-dir") ? &fake_dir : NULL;
+        if (!slot || *slot) return usage();
+        *slot = argv[i + 1];
+    }
+    if (geteuid() == 0) return refuse("the TESTING build never runs as root");
+    const uid_t owner = geteuid();
+    int base = open(trust_root, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (base < 0) return refuse("trust root");
+    /* paths below are relative to the trust root, written absolute ("/policy") */
+#else
+    if (argc != 2) return usage();
+    if (geteuid() != 0) return refuse("must run as root (installed system service)");
+    const uid_t owner = 0;
+    const char *policy_dir = POLICY_DIR, *broker_dir = BROKER_DIR, *socket_dir = SOCKET_DIR;
+    int base = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (base < 0) return refuse("/");
+#endif
+    /* 1. Policy: every ancestor root/owner-owned and not group/other-writable. */
+    int pdir = open_chain(base, policy_dir, 0, owner, owner);
+    if (pdir < 0) return refuse("policy directory (must be owner-owned, ancestors not group/other-writable)");
+    struct qb_service_policy policy;
+    unsigned int line = 0;
+    errno = 0;
+    if (qb_policy_load(pdir, POLICY_NAME, owner, &policy, &line) < 0) {
+        char what[96];
+        snprintf(what, sizeof(what), "policy file %s/%s (line %u)", policy_dir, POLICY_NAME, line);
+        return refuse(what);
+    }
+    close(pdir);
+#ifndef QB_BROKER_TESTING
+    if (policy.gateway_uid == 0 || policy.workload_uid == 0) { errno = EINVAL; return refuse("policy principals"); }
+#endif
+    /* 2. Broker directory: its ancestors may be owned by root or the gateway (e.g. the XFS mount
+     * root /mnt/step-work); the gateway can then rename it away (denial of service, caught by the
+     * policy's root device/inode) but cannot create a root-owned substitute. */
+    int bdir = open_chain(base, broker_dir, 0, (uid_t)policy.gateway_uid, owner);
+    if (bdir < 0) return refuse("broker directory (must be owner-owned, not group/other-writable)");
+    int root = beneath(bdir, "root", O_RDONLY | O_DIRECTORY);
+    if (root < 0) return refuse("broker root directory");
+    int state = beneath(bdir, "state", O_RDONLY | O_DIRECTORY);
+    if (state < 0) return refuse("broker state directory");
+    close(bdir);
+    struct stat rs;
+    if (fstat(root, &rs) < 0) return refuse("broker root");
+    if ((uint64_t)rs.st_dev != policy.core.root_device || (uint64_t)rs.st_ino != policy.core.root_inode) {
+        errno = ESTALE; return refuse("broker root is not the policy's root_device/root_inode");
+    }
+    if ((rs.st_mode & 07777) != 0710 || rs.st_uid != owner || rs.st_gid != policy.gateway_gid) {
+        errno = EPERM; return refuse("broker root must be owner:gateway_gid mode 0710");
+    }
+    /* 3. Adapter: the live mount must match the policy (UUID, project accounting+enforcement). */
+    struct qb_adapter adapter;
+#ifdef QB_BROKER_TESTING
+    struct fake fake = {.dir = -1};
+    memcpy(fake.uuid, policy.core.mount_uuid, 16);
+    int fbase = open_chain(base, fake_dir, 0, owner, owner);
+    if (fbase < 0) return refuse("fake directory");
+    fake.dir = fbase;
+    adapter = (struct qb_adapter){&fake, fake_mount, fake_observe, fake_configure};
+    uint8_t live[16]; int enforced = 0;
+    if (fake_mount(&fake, root, live, &enforced) < 0) return refuse("fake mount");
+    if (memcmp(live, policy.core.mount_uuid, 16)) { errno = EXDEV; return refuse("mount UUID differs from policy"); }
+    if (!enforced) { errno = EDQUOT; return refuse("project quota not enforced"); }
+#else
+    struct qb_xfs *xfs = NULL;
+    if (qb_xfs_open(root, &policy.core, &xfs, &adapter) < 0)
+        return refuse("XFS adapter (mount UUID, writable XFS, project accounting+enforcement)");
+#endif
+    struct qb *broker = NULL;
+    int status = 0;
+    if (command == BOOTSTRAP) {
+        if (empty(root) < 0) return refuse("bootstrap: broker root is not empty");
+        if (empty(state) < 0) return refuse("bootstrap: state directory is not empty");
+        if (qb_bootstrap(state, &policy.core) < 0) return refuse("bootstrap");
+        if (qb_open(root, state, &policy.core, &adapter, &broker) < 0) return refuse("open after bootstrap");
+        say("bootstrapped: empty journal bound to this policy");
+    } else {
+        if (qb_open(root, state, &policy.core, &adapter, &broker) < 0)
+            return refuse("open broker state (not bootstrapped, policy changed, in use or damaged)");
+        if (command == CHECK) say("check passed: policy, directories, mount and state are consistent");
+    }
+    if (command == SERVE) {
+        int sdir = open_chain(base, socket_dir, 0, owner, owner);
+        if (sdir < 0) { status = refuse("socket directory"); goto out; }
+        int listener = listen_socket(sdir, (gid_t)policy.gateway_gid);
+        if (listener < 0) { status = refuse("socket"); goto out; }
+        sigset_t set;
+        sigemptyset(&set); sigaddset(&set, SIGTERM); sigaddset(&set, SIGINT); sigaddset(&set, SIGHUP);
+        if (sigprocmask(SIG_BLOCK, &set, NULL) < 0) { status = refuse("signals"); goto out; }
+        signal(SIGPIPE, SIG_IGN);
+        int stop = signalfd(-1, &set, SFD_NONBLOCK | SFD_CLOEXEC);
+        if (stop < 0) { status = refuse("signalfd"); goto out; }
+        notify_ready();
+        printf("READY %s/%s\n", socket_dir, SOCKET_NAME);
+        fflush(stdout);
+        /* Serves until SIGTERM/SIGINT/SIGHUP; returns only after closing every client. */
+        if (qb_transport_run(broker, listener, stop, (uid_t)policy.gateway_uid) < 0) {
+            say("transport ended with an error");
+            status = EXIT_RUNTIME;
+        } else say("stopped");
+        close(stop); close(listener); close(sdir);
+    }
+out:
+    qb_close(broker); /* core before adapter */
+#ifdef QB_BROKER_TESTING
+    close(fake.dir);
+#else
+    qb_xfs_close(xfs);
+#endif
+    close(root); close(state); close(base);
+    return status;
+}

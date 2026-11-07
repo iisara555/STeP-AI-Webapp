@@ -1808,3 +1808,11 @@
 ### Current-run result isolation: authority integration gap
 
 Synthetic snapshot tests cover mapping an early return that leaves a prior review and trace untouched. The real gateway tests cover a grounded answer, an ungrounded follow-up, provider failure, and cancellation after a partial response. They do **not** exercise an early authority denial: the workspace runtime uses `serverPolicy()` with the Desktop default authority checks disabled and offers no supported override. These tests do not establish production authority enforcement; integration coverage requires a separately supported policy path. No authority policy was changed.
+
+### Native quota broker service (per-user pools) — prepared, not installed
+
+Installable broker main + hardened system unit (`systemd-analyze security` 1.6 OK) +
+owner install/uninstall script with pinned SHA-256; per-user XFS project pools with
+broker-created workspace subdirectories and a usage report for 80/95 % warnings; TS
+socket client and `brokerQuotaBoundary`. Unprivileged tests only (fake adapter).
+Production gateway still refused. Remaining gates: `docs/native-quota-broker-service.md`.

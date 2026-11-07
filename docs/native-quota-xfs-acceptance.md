@@ -190,3 +190,10 @@ Run by the owner with the installed root-owned copies (`run` sha256 `5aea009f…
 **Security finding (INFO line, measured):** a writer **without** a user namespace could set its file's project id to 0 and clear PROJINHERIT (quota escape); the same writer inside a new user namespace got `EINVAL` for every change. Both sandbox builders pass `--unshare-user --disable-userns`; `server/test/sandbox-userns.test.ts` now fails if either flag is removed or a flag that weakens the boundary is added (verified by deleting `--unshare-user`: 2 of 2 tests failed). Any future launcher that runs workloads in the initial user namespace would reopen this escape.
 
 Not covered by this run: the broker is not yet installed as a root service, and the root transport and launcher integration are still pending. This run proves the real core plus the XFS adapter on a scratch filesystem only.
+
+## Pins changed after the passing run
+
+The core gained the per-user shared layout and usage readback
+(`docs/native-quota-broker-service.md`), so the acceptance binary hash changed to
+`3f711f7e…a323` (wrapper `afd397b9…cce2`). The PASS above is evidence for the old
+binary `c2246ba2…09ae`; re-run before treating the current core as accepted.

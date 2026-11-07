@@ -1,7 +1,7 @@
 // Nonprivileged integration boundary, NOT a root transport or a native launch capability.
 // Never compose DiskQuotaAuthority/DiskQuotaLedger here: qb_ensure owns allocation and p<ID> creation.
 import { closeSync, constants, fstatSync, openSync } from 'node:fs';
-import { lstat, mkdir } from 'node:fs/promises';
+import { lstat, mkdir, open } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { UserId, WorkspaceId, type RuntimeDriver, type RuntimeSpec } from './contract.ts';
@@ -11,6 +11,7 @@ import {
   workspaceStorage,
   type WorkspaceStorage,
 } from './storage.ts';
+import { CanonicalUuid as BrokerUuid, usageLevel, type BrokerClient } from './native-quota-socket.ts';
 
 const CanonicalUuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 const Uint64 = z
@@ -151,21 +152,6 @@ export function nativeQuotaBoundary(
     const spec: RuntimeSpec = Object.freeze({ ownerId, workspaceId, dir, filesDir: join(dir, 'files') });
     return { spec, identity: { device: receipt.device, inode: receipt.inode } };
   }
-  /** Synchronous pin taken inside admission right before spawn: open without following a final symlink, then
-   * re-verify the descriptor (not the path) against the receipt. The returned FD is owned by the driver. */
-  function pin(dir: string, identity: { device: string; inode: string }) {
-    // libuv always adds O_CLOEXEC; only the driver's explicit stdio mapping hands this FD to a child.
-    const fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    try {
-      const stat = fstatSync(fd, { bigint: true });
-      if (!stat.isDirectory() || String(stat.dev) !== identity.device || String(stat.ino) !== identity.inode)
-        throw Error('NATIVE_QUOTA_UNVERIFIED');
-      return fd;
-    } catch (error) {
-      closeSync(fd);
-      throw error;
-    }
-  }
   return {
     storage: {
       ...metadata,
@@ -183,36 +169,232 @@ export function nativeQuotaBoundary(
       conversations: async (record) =>
         readConversationIndexAt((await prepare(record.ownerId, record.id)).spec.dir),
     },
-    driver: boundaryDriver(driver),
+    driver: boundaryDriver(driver, preparedSpecs),
   };
+}
 
-  /** The paired driver half. The inner driver's orphan recovery (#62) is kept: the manager journals every launch
-   * through the journaled inner driver, wrapped again so pinned launch stays the only way in. */
-  function boundaryDriver(inner: RuntimeDriver): RuntimeDriver {
-    const pinned = inner.startPinnedWithAdmission?.bind(inner);
-    if (!pinned) throw Error('RUNTIME_PINNED_LAUNCH_UNSUPPORTED');
-    const recovery = inner.recovery;
-    return {
-      async start() {
-        throw Error('NATIVE_QUOTA_ADMISSION_REQUIRED');
-      },
-      // Never move admit before the async preparation, manufacture admission, wrap handles,
-      // swallow cleanup errors or turn receipts into reusable launch authorization.
-      async startWithAdmission(spec, admit) {
-        const identity = preparedSpecs.get(spec);
-        if (!identity || !preparedSpecs.delete(spec)) throw Error('NATIVE_QUOTA_UNSAFE_SPEC');
-        // A failed pin throws inside the spawn callback, so admission fails and nothing is spawned.
-        return pinned(spec, () => pin(spec.dir, identity), admit);
-      },
-      ...(recovery
-        ? {
-            recovery: {
-              kind: recovery.kind,
-              journaled: (journal) => boundaryDriver(recovery.journaled(journal)),
-              reap: recovery.reap,
-            },
-          }
-        : {}),
-    };
+type Identity = { device: string; inode: string };
+/** Synchronous pin taken inside admission right before spawn: open without following a final symlink, then
+ * re-verify the descriptor (not the path) against the receipt. The returned FD is owned by the driver. */
+function pin(dir: string, identity: Identity) {
+  // libuv always adds O_CLOEXEC; only the driver's explicit stdio mapping hands this FD to a child.
+  const fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    const stat = fstatSync(fd, { bigint: true });
+    if (!stat.isDirectory() || String(stat.dev) !== identity.device || String(stat.ino) !== identity.inode)
+      throw Error('NATIVE_QUOTA_UNVERIFIED');
+    return fd;
+  } catch (error) {
+    closeSync(fd);
+    throw error;
   }
+}
+
+/** The paired driver half. The inner driver's orphan recovery (#62) is kept: the manager journals every launch
+ * through the journaled inner driver, wrapped again so pinned launch stays the only way in. */
+function boundaryDriver(inner: RuntimeDriver, preparedSpecs: WeakMap<RuntimeSpec, Identity>): RuntimeDriver {
+  const pinned = inner.startPinnedWithAdmission?.bind(inner);
+  if (!pinned) throw Error('RUNTIME_PINNED_LAUNCH_UNSUPPORTED');
+  const recovery = inner.recovery;
+  return {
+    async start() {
+      throw Error('NATIVE_QUOTA_ADMISSION_REQUIRED');
+    },
+    // Never move admit before the async preparation, manufacture admission, wrap handles,
+    // swallow cleanup errors or turn receipts into reusable launch authorization.
+    async startWithAdmission(spec, admit) {
+      const identity = preparedSpecs.get(spec);
+      if (!identity || !preparedSpecs.delete(spec)) throw Error('NATIVE_QUOTA_UNSAFE_SPEC');
+      // A failed pin throws inside the spawn callback, so admission fails and nothing is spawned.
+      return pinned(spec, () => pin(spec.dir, identity), admit);
+    },
+    ...(recovery
+      ? {
+          recovery: {
+            kind: recovery.kind,
+            journaled: (journal) => boundaryDriver(recovery.journaled(journal), preparedSpecs),
+            reap: recovery.reap,
+          },
+        }
+      : {}),
+  };
+}
+
+/** Per-user quota pool through the installed broker (owner decision 2026-11-07): one XFS project per user,
+ * every workspace a broker-created subdirectory p<project>/<workspace-uuid> that inherits the user's
+ * project. The sandbox binds only that workspace directory. NOT a production switch by itself: the
+ * gateway entry stays refused until every gate in docs/native-quota-broker-service.md is met.
+ */
+export type BrokerQuotaOptions = {
+  mode: 'broker';
+  dataRoot: string;
+  /** The broker's fixed root (production /mnt/step-work/step-ai-broker/root). */
+  projectRoot: string;
+  client: BrokerClient;
+  /** Expected values, normally from readBrokerPolicy(); every receipt must match them exactly. */
+  mountUuid: string;
+  bytesHard: number;
+  inodesHard: number;
+  firstProjectId: number;
+  lastProjectId: number;
+  /** Owner of the user project directory: the broker (root, 0 in production). */
+  brokerUid: number;
+  gatewayGid: number;
+  workloadUid: number;
+  /** Trusted, operator-provisioned gateway user id -> broker user UUID (the policy's user= lines).
+   * Never derived from a browser request; an unmapped user must throw. */
+  userUuidFor(ownerId: string): string;
+};
+
+async function exactDirectory(
+  path: string,
+  expected: { device: string; inode: string; uid: number; gid: number; mode: number },
+) {
+  // O_NOFOLLOW on the final component; identity is compared on the descriptor, not the path.
+  const handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    const s = await handle.stat({ bigint: true });
+    if (
+      !s.isDirectory() ||
+      String(s.dev) !== expected.device ||
+      String(s.ino) !== expected.inode ||
+      Number(s.uid) !== expected.uid ||
+      Number(s.gid) !== expected.gid ||
+      Number(s.mode & 0o7777n) !== expected.mode
+    )
+      throw Error('NATIVE_QUOTA_UNVERIFIED');
+  } finally {
+    await handle.close();
+  }
+}
+
+export function brokerQuotaBoundary(
+  input: BrokerQuotaOptions,
+  driver: RuntimeDriver,
+): {
+  storage: WorkspaceStorage;
+  driver: RuntimeDriver;
+  /** Usage of the owner's pool for UI warnings (80 % / 95 %); never allocates. */
+  usage(ownerId: string): Promise<
+    ReturnType<typeof usageLevel> & {
+      bytesUsed: number;
+      bytesHard: number;
+      inodesUsed: number;
+      inodesHard: number;
+    }
+  >;
+} {
+  if (input.mode !== 'broker') throw Error('NATIVE_QUOTA_PRODUCTION_UNAVAILABLE');
+  const options = Object.freeze({ ...input });
+  const limits = Limits.parse({
+    mountUuid: options.mountUuid,
+    bytesHard: options.bytesHard,
+    inodesHard: options.inodesHard,
+  });
+  const range = z
+    .object({
+      first: z.number().int().min(100000).max(199999),
+      last: z.number().int().min(100000).max(199999),
+    })
+    .refine((r) => r.first <= r.last)
+    .parse({ first: options.firstProjectId, last: options.lastProjectId });
+  const principal = z.number().int().min(0).max(2147483646);
+  const brokerUid = principal.parse(options.brokerUid);
+  const gatewayGid = principal.min(1).parse(options.gatewayGid);
+  const workloadUid = principal.min(1).parse(options.workloadUid);
+  const dataRoot = resolve(options.dataRoot);
+  const projectRoot = resolve(options.projectRoot);
+  if (
+    dataRoot === projectRoot ||
+    dataRoot.startsWith(projectRoot + '/') ||
+    projectRoot.startsWith(dataRoot + '/')
+  )
+    throw Error('NATIVE_QUOTA_UNSAFE_PATH');
+  if (!driver.startWithAdmission) throw Error('RUNTIME_START_ADMISSION_UNSUPPORTED');
+  if (!driver.startPinnedWithAdmission) throw Error('RUNTIME_PINNED_LAUNCH_UNSUPPORTED');
+  const metadata = workspaceStorage(dataRoot);
+  const preparedSpecs = new WeakMap<RuntimeSpec, Identity>();
+  const userUuid = (owner: string) => {
+    const parsed = BrokerUuid.safeParse(options.userUuidFor(UserId.parse(owner)));
+    if (!parsed.success) throw Error('NATIVE_QUOTA_NO_USER_POOL');
+    return parsed.data;
+  };
+  async function prepare(owner: string, id: string) {
+    const ownerId = UserId.parse(owner);
+    const workspaceId = WorkspaceId.parse(id);
+    const workspaceUuid = nativeWorkspaceUuid(workspaceId);
+    const user = userUuid(ownerId);
+    const r = await options.client.ensureWorkspace(user, workspaceUuid);
+    if (
+      r.userUuid !== user ||
+      r.workspaceUuid !== workspaceUuid ||
+      r.projectId < range.first ||
+      r.projectId > range.last ||
+      r.mountUuid !== limits.mountUuid ||
+      r.bytesHard !== limits.bytesHard ||
+      r.inodesHard !== limits.inodesHard
+    )
+      throw Error('NATIVE_QUOTA_UNVERIFIED');
+    // Fixed names only: p<project> under the fixed root, then the workspace UUID.
+    const userDir = join(projectRoot, `p${r.projectId}`);
+    const dir = join(userDir, workspaceUuid);
+    await exactDirectory(userDir, {
+      device: r.device,
+      inode: r.userInode,
+      uid: brokerUid,
+      gid: gatewayGid,
+      mode: 0o750,
+    });
+    await exactDirectory(dir, {
+      device: r.device,
+      inode: r.inode,
+      uid: workloadUid,
+      gid: gatewayGid,
+      mode: 0o2750,
+    });
+    // The broker created files/ and snapshots/; TS never mkdirs inside the pool.
+    for (const name of ['files', 'snapshots']) {
+      const child = await lstat(join(dir, name));
+      if (!child.isDirectory() || child.isSymbolicLink()) throw Error('NATIVE_QUOTA_UNVERIFIED');
+    }
+    const spec: RuntimeSpec = Object.freeze({ ownerId, workspaceId, dir, filesDir: join(dir, 'files') });
+    return { spec, identity: { device: r.device, inode: r.inode } };
+  }
+  return {
+    storage: {
+      ...metadata,
+      async create(record, admit) {
+        // The workspace directory exists in the user's pool before publication. A denied/over-count
+        // publication leaves it (an empty directory charged to that user's pool); it is never reused
+        // for another workspace id and never removed by TS.
+        await prepare(record.ownerId, record.id);
+        return createWorkspaceFolders(dataRoot, record, admit, false);
+      },
+      async runtimePaths(record) {
+        const { spec, identity } = await prepare(record.ownerId, record.id);
+        preparedSpecs.set(spec, identity);
+        return spec;
+      },
+      conversations: async (record) =>
+        readConversationIndexAt((await prepare(record.ownerId, record.id)).spec.dir),
+    },
+    driver: boundaryDriver(driver, preparedSpecs),
+    async usage(ownerId) {
+      const u = await options.client.usage(userUuid(ownerId));
+      if (
+        u.bytesHard !== limits.bytesHard ||
+        u.inodesHard !== limits.inodesHard ||
+        u.projectId < range.first ||
+        u.projectId > range.last
+      )
+        throw Error('NATIVE_QUOTA_UNVERIFIED');
+      return {
+        ...usageLevel(u),
+        bytesUsed: u.bytesUsed,
+        bytesHard: u.bytesHard,
+        inodesUsed: u.inodesUsed,
+        inodesHard: u.inodesHard,
+      };
+    },
+  };
 }

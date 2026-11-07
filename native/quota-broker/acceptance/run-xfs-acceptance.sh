@@ -19,7 +19,7 @@ umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export LC_ALL=C
 
-readonly BIN_SHA256=c2246ba25f3c67bbbd1a5071e4b5d328de19cb67ec66782099363a09272309ae
+readonly BIN_SHA256=3f711f7e07237b4ac06b28d0280fe01a3b305cc2ad01970fddd34518ebe3a323
 readonly INSTALL_DIR=/usr/local/libexec/step-xfs-acceptance
 readonly SELF_INSTALLED=$INSTALL_DIR/run
 readonly BIN_SRC=$INSTALL_DIR/xfs-acceptance

@@ -144,6 +144,13 @@ int main(void) {
     struct qb_observation o;
     assert(a.observe(a.context, fd, dir, 100000, &o) == 0);
     assert(o.project == 100000 && o.inherit == 1 && o.bytes_hard == 4194304 && o.inodes_hard == 100);
+    assert(o.bytes_used == 0 && o.inodes_used == 0);
+    /* Usage report: d_bcount is 512-byte basic blocks; overflow is malformed. */
+    f.dq.d_bcount = 2048; f.dq.d_icount = 7;
+    assert(a.observe(a.context, fd, dir, 100000, &o) == 0 && o.bytes_used == 1048576 && o.inodes_used == 7);
+    f.dq.d_bcount = UINT64_MAX / 256;
+    assert(a.observe(a.context, fd, dir, 100000, &o) < 0 && errno == EUCLEAN);
+    f.dq.d_bcount = 0; f.dq.d_icount = 0;
     assert(f.writes == 2 && f.attr_fd == dir);
     int retained = f.quota_fd;
     assert(configure(&a, fd, dir) < 0 && f.writes == 2); /* no rewrite/lower/repair */

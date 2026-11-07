@@ -35,19 +35,20 @@ static int configure_fake(void *ctx, int root, int dir, uint32_t project, uint64
         assert(write(m->entered[1], "C", 1) == 1);
         char release; assert(read(m->release[0], &release, 1) == 1 && release == 'C');
     }
-    ((struct model *)ctx)->value = (struct qb_observation){project, bytes, inodes, 1}; return 0;
+    ((struct model *)ctx)->value = (struct qb_observation){.project = project, .bytes_hard = bytes, .inodes_hard = inodes, .inherit = 1}; return 0;
 }
 static int remove_item(const char *p, const struct stat *s, int t, struct FTW *w) {
     (void)s; (void)t; (void)w; return remove(p);
 }
 struct fixture { char path[108]; struct sockaddr_un address; int base, root, state, listener, stop, control[2], ack[2], denied; struct qb *broker; pid_t child; struct model model; };
+static struct fixture *current;
 static void *service_thread(void *context) {
     struct fixture *f=context;
     int result=qb_transport_run(f->broker, f->listener, f->stop, f->denied ? geteuid()+1 : geteuid());
     assert(result == 0); return NULL;
 }
 static void setup(struct fixture *f, int denied, int revoked) {
-    memset(f, 0, sizeof(*f));
+    memset(f, 0, sizeof(*f)); current = f;
     const char *tmp = getenv("TMPDIR"); assert(tmp && tmp[0] == '/');
     int n = snprintf(f->path, sizeof(f->path), "%s/qbt-XXXXXX", tmp); assert(n > 0 && (size_t)n < sizeof(f->path));
     assert(mkdtemp(f->path));
@@ -104,12 +105,20 @@ static void setup(struct fixture *f, int denied, int revoked) {
     }
     close(f->control[0]); close(f->ack[1]);
 }
+/* NULL = the success reply, which is only known once p100000 exists. */
+#define OK NULL
+static void ok_reply(char *out, size_t size) {
+    struct stat s; assert(fstatat(current->root, "p100000", &s, AT_SYMLINK_NOFOLLOW) == 0);
+    int n = snprintf(out, size, "OK/2 100000 %llu %llu 1048576 100 2a000000-0000-0000-0000-000000000000\n",
+                     (unsigned long long)s.st_dev, (unsigned long long)s.st_ino);
+    assert(n > 0 && (size_t)n < size);
+}
 static int connect_client(struct fixture *f) {
     int fd=socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0); assert(fd >= 0);
     assert(connect(fd, (struct sockaddr *)&f->address, sizeof(f->address)) == 0); return fd;
 }
 static void response(int fd, const char *expected) {
-    char bytes[128]; size_t used=0;
+    char bytes[256]; size_t used=0; char success[160];
     for (;;) {
         struct pollfd p={fd, POLLIN, 0}; assert(poll(&p, 1, 3000) > 0);
         char ancillary[CMSG_SPACE(sizeof(int)*4)];
@@ -123,6 +132,7 @@ static void response(int fd, const char *expected) {
         if (!n) break;
         used+=(size_t)n; assert(used < sizeof(bytes));
     }
+    if (!expected) { ok_reply(success, sizeof(success)); expected = success; }
     assert(used == strlen(expected) && !memcmp(bytes, expected, used)); close(fd);
 }
 static void exchange(struct fixture *f, const void *bytes, size_t size, const char *expected) {
@@ -147,11 +157,22 @@ int main(void) {
     assert(fcntl(f.listener, F_SETFD, 0) == 0);
     assert(qb_transport_run(f.broker, f.listener, f.stop, geteuid()) < 0 && errno == EINVAL);
     assert(fcntl(f.listener, F_SETFD, FD_CLOEXEC) == 0);
-    exchange(&f, request, 46, "OK/1\n"); exchange(&f, request, 46, "OK/1\n");
+    char bad[8192];
+    static const char usage[] = "USAGE/1 12345678-1234-4234-8234-000000000000\n";
+    exchange(&f, usage, 45, "DENIED/1\n"); /* usage never allocates */
+    exchange(&f, request, 46, OK); exchange(&f, request, 46, OK);
+    exchange(&f, usage, 45, "USAGE/1 100000 0 1048576 0 100\n");
+    exchange(&f, usage, 44, "DENIED/1\n");
+    exchange(&f, "USAGE/1 12345678-1234-4234-8234-000000000001\n", 45, "DENIED/1\n");
+    /* WORKSPACE/1 needs the shared (per-user) layout; this fixture is private. */
+    exchange(&f, "WORKSPACE/1 12345678-1234-4234-8234-000000000000 aaaaaaaa-0000-4000-8000-000000000001\n",
+             86, "DENIED/1\n");
+    memset(bad, 'X', 87); memcpy(bad, usage, 45);
+    exchange(&f, bad, 87, "DENIED/1\n"); /* longer than any frame */
     /* Strict one-shot EOF framing, no caller authority fields or error details. */
     exchange(&f, "", 0, "DENIED/1\n");
     exchange(&f, request, 45, "DENIED/1\n");
-    char bad[8192]; memset(bad, 'X', sizeof(bad));
+    memset(bad, 'X', sizeof(bad));
     exchange(&f, bad, sizeof(bad), "DENIED/1\n");
     memcpy(bad, request, 46); bad[12] = '\0';
     exchange(&f, bad, 46, "DENIED/1\n");
@@ -166,7 +187,7 @@ int main(void) {
     assert(send(fd, request, 20, MSG_NOSIGNAL) == 20);
     usleep(20000);
     assert(send(fd, request+20, 26, MSG_NOSIGNAL) == 26);
-    assert(shutdown(fd, SHUT_WR) == 0); response(fd, "OK/1\n");
+    assert(shutdown(fd, SHUT_WR) == 0); response(fd, OK);
     /* Complete data without EOF is not accepted; absolute timeout is not reset. */
     fd=connect_client(&f); assert(send(fd, request, 46, MSG_NOSIGNAL) == 46);
     response(fd, "DENIED/1\n");
@@ -175,7 +196,7 @@ int main(void) {
     struct pollfd deadline={fd, POLLIN, 0}; assert(poll(&deadline, 1, 350) > 0);
     response(fd, "DENIED/1\n");
     /* Disconnects don't kill service; repeated success cannot leak receipt FDs. */
-    for (int i=0; i<100; i++) { fd=connect_client(&f); close(fd); exchange(&f, request, 46, "OK/1\n"); }
+    for (int i=0; i<100; i++) { fd=connect_client(&f); close(fd); exchange(&f, request, 46, OK); }
     /* No ancillary caller capabilities, even with an otherwise valid frame. */
     for (int i=0; i<100; i++) {
         fd=connect_client(&f);
@@ -193,7 +214,7 @@ int main(void) {
     for (int i=0; i<QB_TRANSPORT_CLIENTS; i++) held[i]=connect_client(&f);
     usleep(20000); fd=connect_client(&f); response(fd, "");
     for (int i=0; i<QB_TRANSPORT_CLIENTS; i++) response(held[i], "DENIED/1\n");
-    exchange(&f, request, 46, "OK/1\n");
+    exchange(&f, request, 46, OK);
     /* Descriptor exhaustion at accept pauses accepting instead of ending the service,
      * and the queued connection is served once descriptors are free again. */
     {
@@ -208,8 +229,8 @@ int main(void) {
         struct pollfd freed={f.ack[0], POLLIN, 0}; assert(poll(&freed, 1, 3000) > 0);
         assert(read(f.ack[0], &done, 1) == 1 && done == 'F');
         int status; assert(waitpid(f.child, &status, WNOHANG) == 0); /* service still alive */
-        response(queued, "OK/1\n"); /* complete frame + EOF already queued, served after accept */
-        exchange(&f, request, 46, "OK/1\n");
+        response(queued, OK); /* complete frame + EOF already queued, served after accept */
+        exchange(&f, request, 46, OK);
     }
     /* Connected and partially sent before revoke must still be denied at ensure. */
     fd=connect_client(&f); assert(send(fd, request, 20, MSG_NOSIGNAL) == 20);
@@ -242,7 +263,7 @@ int main(void) {
     uint64_t one=1; assert(write(f.stop, &one, sizeof(one)) == sizeof(one));
     int status; assert(waitpid(f.child, &status, WNOHANG) == 0);
     assert(write(f.model.release[1], "C", 1) == 1);
-    response(fd, "OK/1\n"); /* mutation finishes before completed revoke, not after */
+    response(fd, OK); /* mutation finishes before completed revoke, not after */
     assert(poll(&ack, 1, 3000) > 0 && read(f.ack[0], &completed, 1) == 1);
     cleanup(&f); puts("transport: blocked mutation/revoke/stop/join lifetime passed"); return 0;
 }

@@ -65,7 +65,11 @@ static int policy_copy(struct qb_policy *out, const struct qb_policy *p) {
         p->bytes_hard < 4096 || p->bytes_hard > UINT64_C(1099511627776) ||
         p->bytes_hard % 4096 || !p->inodes_hard || p->inodes_hard > 10000000 ||
         p->first_project < 100000 || p->last_project > 199999 ||
-        p->first_project > p->last_project || !p->grant_count || p->grant_count > QB_MAX_GRANTS)
+        p->first_project > p->last_project || !p->grant_count || p->grant_count > QB_MAX_GRANTS ||
+        p->reserved || (p->layout != QB_LAYOUT_PRIVATE && p->layout != QB_LAYOUT_SHARED) ||
+        (p->layout == QB_LAYOUT_PRIVATE && (p->access_gid || p->content_uid)) ||
+        (p->layout == QB_LAYOUT_SHARED && (!p->access_gid || !p->content_uid ||
+                                           p->access_gid == UINT32_MAX || p->content_uid == UINT32_MAX)))
         return deny(EINVAL);
     memset(out, 0, sizeof(*out));
     memcpy(out->epoch, p->epoch, 16);
@@ -74,6 +78,7 @@ static int policy_copy(struct qb_policy *out, const struct qb_policy *p) {
     out->bytes_hard = p->bytes_hard; out->inodes_hard = p->inodes_hard;
     out->first_project = p->first_project; out->last_project = p->last_project;
     out->grant_count = p->grant_count;
+    out->layout = p->layout; out->access_gid = p->access_gid; out->content_uid = p->content_uid;
     for (uint32_t i = 0; i < p->grant_count; i++) {
         if (!uuid(p->grants[i].workspace)) return deny(EINVAL);
         for (uint32_t j = 0; j < i; j++)
@@ -108,6 +113,34 @@ static int protected_fd(int fd, int directory) {
         s.st_uid != geteuid() || (s.st_mode & 07777) != (directory ? 0700 : 0600) ||
         (!directory && s.st_nlink != 1)) return deny(EPERM);
     return 0;
+}
+/* Layout-aware protection of the root and of a provisioned p<ID>. */
+static int protected_root(const struct qb_policy *p, int fd) {
+    if (p->layout == QB_LAYOUT_PRIVATE) return protected_fd(fd, 1);
+    struct stat s;
+    if (fstat(fd, &s) < 0) return -1;
+    if (!S_ISDIR(s.st_mode) || s.st_uid != geteuid() || (uint64_t)s.st_gid != p->access_gid ||
+        (s.st_mode & 07777) != 0710) return deny(EPERM);
+    return 0;
+}
+/* Exact owner/group/mode of a handed-over directory. */
+static int exact(int fd, uint64_t uid, uint64_t gid, mode_t mode) {
+    struct stat s;
+    if (fstat(fd, &s) < 0) return -1;
+    if (!S_ISDIR(s.st_mode) || (uint64_t)s.st_uid != uid || (uint64_t)s.st_gid != gid ||
+        (s.st_mode & 07777) != mode) return deny(EPERM);
+    return 0;
+}
+/* Shared layout: the user project directory stays broker-owned, readable by the access group. */
+static int user_dir_ok(const struct qb_policy *p, int fd) {
+    return exact(fd, (uint64_t)geteuid(), p->access_gid, 0750);
+}
+/* Shared layout: a workspace directory (and its two children) belongs to the workload. */
+static int workspace_dir_ok(const struct qb_policy *p, int fd) {
+    return exact(fd, p->content_uid, p->access_gid, 02750);
+}
+static int project_dir(const struct qb_policy *p, int fd, int fresh) {
+    return p->layout == QB_LAYOUT_PRIVATE || fresh ? protected_fd(fd, 1) : user_dir_ok(p, fd);
 }
 static int empty_dir(int fd) {
     int copy = beneath(fd, ".", O_RDONLY | O_DIRECTORY, 0);
@@ -177,7 +210,7 @@ static int mount_check(struct qb *b) {
     }
     struct statvfs v;
     uint64_t mount_id;
-    if (protected_fd(b->root, 1) < 0 || protected_fd(b->state, 1) < 0 ||
+    if (protected_root(&b->policy, b->root) < 0 || protected_fd(b->state, 1) < 0 ||
         identity(b->root, &s, &mount_id) < 0 || fstatvfs(b->root, &v) < 0) return -1;
     if ((uint64_t)s.st_dev != b->policy.root_device || (uint64_t)s.st_ino != b->policy.root_inode ||
         mount_id != b->mount_id || (v.f_flag & ST_RDONLY)) return deny(ESTALE);
@@ -227,7 +260,7 @@ int qb_open(int root_fd, int state_fd, const struct qb_policy *policy,
     memset(&expected, 0, sizeof(expected)); expected.version = 1;
     if (policy_copy(&expected.policy, policy) < 0 || !adapter || !adapter->mount ||
         !adapter->observe || !adapter->configure) return deny(EINVAL);
-    if (protected_fd(root_fd, 1) < 0 || protected_fd(state_fd, 1) < 0) return -1;
+    if (protected_root(&expected.policy, root_fd) < 0 || protected_fd(state_fd, 1) < 0) return -1;
     struct qb *b = calloc(1, sizeof(*b));
     if (!b) return -1;
     b->root = b->state = b->journal = -1;
@@ -290,6 +323,34 @@ static int observed(struct qb *b, int fd, uint32_t project, int fresh) {
                o.inodes_hard != b->policy.inodes_hard) return deny(EDQUOT);
     return 0;
 }
+/* Shared layout only, fresh provisioning only: p<ID> is still broker-owned 0700 and
+ * already carries project+inheritance. Group first, then mode, then read back. A
+ * failure part-way leaves a directory that project_dir() denies for ever. */
+static int hand_over_user(struct qb *b, int fd) {
+    if (fsync(fd) < 0 || fchown(fd, geteuid(), (gid_t)b->policy.access_gid) < 0 ||
+        fchmod(fd, 0750) < 0 || fsync(fd) < 0 || user_dir_ok(&b->policy, fd) < 0) return -1;
+    return 0;
+}
+/* A fresh workspace directory (broker-owned 0700, empty, inside the user's project):
+ * children first, then owner/group (CAP_CHOWN), then mode 02750 (the broker is no longer
+ * owner/in the group: CAP_FOWNER+CAP_FSETID), then read back. */
+static int hand_over_workspace(struct qb *b, int fd) {
+    static const char *const children[] = {"files", "snapshots"};
+    for (size_t i = 0; i < sizeof(children) / sizeof(children[0]); i++) {
+        if (mkdirat(fd, children[i], 0700) < 0) return -1;
+        int child = beneath(fd, children[i], O_RDONLY | O_DIRECTORY, 0);
+        if (child < 0) return -1;
+        int ok = fchown(child, (uid_t)b->policy.content_uid, (gid_t)b->policy.access_gid);
+        if (!ok) ok = fchmod(child, 02750);
+        if (!ok) ok = fsync(child);
+        if (!ok) ok = workspace_dir_ok(&b->policy, child);
+        int saved = errno; close(child); errno = saved;
+        if (ok < 0) return -1;
+    }
+    if (fsync(fd) < 0 || fchown(fd, (uid_t)b->policy.content_uid, (gid_t)b->policy.access_gid) < 0 ||
+        fchmod(fd, 02750) < 0 || fsync(fd) < 0 || workspace_dir_ok(&b->policy, fd) < 0) return -1;
+    return 0;
+}
 static int ensure_locked(struct qb *b, int index, struct qb_receipt *out) {
     struct allocation *a = &b->allocations[index];
     if (b->poisoned) return deny(EIO);
@@ -309,7 +370,7 @@ static int ensure_locked(struct qb *b, int index, struct qb_receipt *out) {
     if (fd < 0) return -1;
     int result = -1;
     struct stat s; uint64_t mount_id;
-    if (protected_fd(fd, 1) < 0 || identity(fd, &s, &mount_id) < 0) goto done;
+    if (project_dir(&b->policy, fd, fresh) < 0 || identity(fd, &s, &mount_id) < 0) goto done;
     if (mount_id != b->mount_id || (uint64_t)s.st_dev != b->policy.root_device) {
         errno = EXDEV; goto done;
     }
@@ -320,6 +381,7 @@ static int ensure_locked(struct qb *b, int index, struct qb_receipt *out) {
         if (observed(b, fd, a->project, 1) < 0 || mount_check(b) < 0 ||
             b->adapter.configure(b->adapter.context, b->root, fd, a->project,
                                  b->policy.bytes_hard, b->policy.inodes_hard) < 0 || fsync(fd) < 0) goto done;
+        if (b->policy.layout == QB_LAYOUT_SHARED && hand_over_user(b, fd) < 0) goto done;
     } else if (a->device != (uint64_t)s.st_dev || a->inode != (uint64_t)s.st_ino) {
         errno = ESTALE; goto done;
     }
@@ -338,6 +400,7 @@ static int ensure_locked(struct qb *b, int index, struct qb_receipt *out) {
     out->directory_fd = fd; out->project = a->project;
     out->device = a->device; out->inode = a->inode;
     out->bytes_hard = b->policy.bytes_hard; out->inodes_hard = b->policy.inodes_hard;
+    memcpy(out->mount_uuid, b->policy.mount_uuid, 16);
     result = 0;
 done:
     if (result < 0) { int saved = errno; close(fd); errno = saved; }
@@ -376,5 +439,120 @@ int qb_revoke(struct qb *b, const char workspace[37]) {
     }
     int saved = errno;
     pthread_mutex_unlock(&b->mutex); errno = saved;
+    return result;
+}
+
+/* ---- per-user pool: workspace directories and usage (QB_LAYOUT_SHARED) ---- */
+static int frame_uuid(const char *s, size_t at, char out[37]) {
+    memcpy(out, s + at, 36); out[36] = 0;
+    return uuid(out) ? 0 : -1;
+}
+static int same_name(struct qb *b, int parent, const char *name, uint64_t inode) {
+    int named = beneath(parent, name, O_RDONLY | O_DIRECTORY, 0);
+    if (named < 0) return -1;
+    struct stat s; uint64_t mount_id;
+    int ok = identity(named, &s, &mount_id);
+    int saved = errno; close(named); errno = saved;
+    if (ok < 0) return -1;
+    if ((uint64_t)s.st_ino != inode || (uint64_t)s.st_dev != b->policy.root_device ||
+        mount_id != b->mount_id) return deny(ESTALE);
+    return 0;
+}
+static int workspace_locked(struct qb *b, int index, const char *workspace, struct qb_workspace_receipt *out) {
+    struct qb_receipt user;
+    memset(&user, 0, sizeof(user)); user.directory_fd = -1;
+    if (ensure_locked(b, index, &user) < 0) return -1;
+    int result = -1, fd = beneath(user.directory_fd, workspace, O_RDONLY | O_DIRECTORY, 0);
+    int fresh = 0;
+    if (fd < 0 && errno == ENOENT) {
+        /* Nobody but the broker can write p<ID> (broker-owned 0750): no creation race. */
+        if (mkdirat(user.directory_fd, workspace, 0700) < 0 || fsync(user.directory_fd) < 0) goto done;
+        fd = beneath(user.directory_fd, workspace, O_RDONLY | O_DIRECTORY, 0);
+        fresh = 1;
+    }
+    if (fd < 0) goto done;
+    struct stat s; uint64_t mount_id;
+    if ((fresh ? protected_fd(fd, 1) : workspace_dir_ok(&b->policy, fd)) < 0 ||
+        identity(fd, &s, &mount_id) < 0) goto done;
+    if (mount_id != b->mount_id || (uint64_t)s.st_dev != b->policy.root_device) { errno = EXDEV; goto done; }
+    if (fresh && (empty_dir(fd) < 0 || hand_over_workspace(b, fd) < 0)) goto done;
+    /* The workspace must carry the user's project + inheritance (XFS PROJINHERIT). */
+    if (observed(b, fd, user.project, 0) < 0 || mount_check(b) < 0 ||
+        same_name(b, user.directory_fd, workspace, (uint64_t)s.st_ino) < 0) goto done;
+    out->directory_fd = fd; out->project = user.project; out->device = user.device;
+    out->user_inode = user.inode; out->inode = (uint64_t)s.st_ino;
+    out->bytes_hard = user.bytes_hard; out->inodes_hard = user.inodes_hard;
+    memcpy(out->mount_uuid, user.mount_uuid, 16);
+    result = 0;
+done: {
+    int saved = errno;
+    if (result < 0 && fd >= 0) close(fd);
+    if (user.directory_fd >= 0) close(user.directory_fd);
+    errno = saved;
+    return result;
+}}
+int qb_workspace(struct qb *b, uid_t peer, const void *frame, size_t length, struct qb_workspace_receipt *out) {
+    if (!out) return deny(EINVAL);
+    memset(out, 0, sizeof(*out)); out->directory_fd = -1;
+    const char *s = frame;
+    char user[37], workspace[37];
+    if (!b || !s || length != 86 || memcmp(s, "WORKSPACE/1 ", 12) || s[48] != ' ' || s[85] != '\n' ||
+        frame_uuid(s, 12, user) < 0 || frame_uuid(s, 49, workspace) < 0) return deny(EPROTO);
+    if (b->policy.layout != QB_LAYOUT_SHARED) return deny(ENOTSUP);
+    int error = pthread_mutex_lock(&b->mutex);
+    if (error) return deny(error);
+    int index = grant_index(b, user), result = -1;
+    if (index >= 0) {
+        if ((uint64_t)peer == b->policy.grants[index].peer_uid) result = workspace_locked(b, index, workspace, out);
+        else errno = EACCES;
+    }
+    int saved = errno; pthread_mutex_unlock(&b->mutex); errno = saved;
+    return result;
+}
+static int usage_locked(struct qb *b, int index, struct qb_usage *out) {
+    struct allocation *a = &b->allocations[index];
+    if (b->poisoned) return deny(EIO);
+    if (a->revoked) return deny(EACCES);
+    if (!a->project) return deny(ENOENT); /* never allocates */
+    if (!a->inode) return deny(EOWNERDEAD);
+    if (mount_check(b) < 0) return -1;
+    char name[16];
+    int n = snprintf(name, sizeof(name), "p%u", a->project);
+    if (n < 0 || (size_t)n >= sizeof(name)) return deny(EOVERFLOW);
+    int fd = beneath(b->root, name, O_RDONLY | O_DIRECTORY, 0);
+    if (fd < 0) return -1;
+    int result = -1;
+    struct stat s; uint64_t mount_id;
+    struct qb_observation o; memset(&o, 0, sizeof(o));
+    if (project_dir(&b->policy, fd, 0) < 0 || identity(fd, &s, &mount_id) < 0) goto done;
+    if ((uint64_t)s.st_ino != a->inode || (uint64_t)s.st_dev != a->device || mount_id != b->mount_id) {
+        errno = ESTALE; goto done;
+    }
+    if (b->adapter.observe(b->adapter.context, b->root, fd, a->project, &o) < 0) goto done;
+    if (o.project != a->project || o.inherit != 1 || o.bytes_hard != b->policy.bytes_hard ||
+        o.inodes_hard != b->policy.inodes_hard) { errno = EDQUOT; goto done; }
+    out->project = a->project;
+    out->bytes_used = o.bytes_used; out->inodes_used = o.inodes_used;
+    out->bytes_hard = o.bytes_hard; out->inodes_hard = o.inodes_hard;
+    result = 0;
+done: {
+    int saved = errno; close(fd); errno = saved;
+    return result;
+}}
+int qb_usage(struct qb *b, uid_t peer, const void *frame, size_t length, struct qb_usage *out) {
+    if (!out) return deny(EINVAL);
+    memset(out, 0, sizeof(*out));
+    const char *s = frame;
+    char user[37];
+    if (!b || !s || length != 45 || memcmp(s, "USAGE/1 ", 8) || s[44] != '\n' || frame_uuid(s, 8, user) < 0)
+        return deny(EPROTO);
+    int error = pthread_mutex_lock(&b->mutex);
+    if (error) return deny(error);
+    int index = grant_index(b, user), result = -1;
+    if (index >= 0) {
+        if ((uint64_t)peer == b->policy.grants[index].peer_uid) result = usage_locked(b, index, out);
+        else errno = EACCES;
+    }
+    int saved = errno; pthread_mutex_unlock(&b->mutex); errno = saved;
     return result;
 }

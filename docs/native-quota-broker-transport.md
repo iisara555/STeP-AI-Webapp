@@ -149,3 +149,11 @@ executed as root. Nothing is installed, enabled or real-data ready.
 ## Parent review (2026-11-07, read of `transport.c` at c9cfd5a)
 
 No confidentiality or authorization defect found: peer UID is checked before any read or reply, requests are exact-length with write EOF, ancillary data forces denial, and no directory FD or receipt detail is sent. Two availability notes, both failing closed: (1) any `accept4` error other than `EAGAIN`/`EINTR` (for example `EMFILE`, `ENOBUFS`) ended the service loop instead of skipping one connection — fixed: `EMFILE`/`ENFILE`/`ENOBUFS`/`ENOMEM` now pause accepting for `QB_TRANSPORT_ACCEPT_BACKOFF_MS` (50 ms, listener removed from `poll`, no busy loop) and `ECONNABORTED`/`EPROTO`/`EPERM` skip one connection; listener errors still end the loop. Regression test exhausts the service's descriptor table under `RLIMIT_NOFILE=64`, queues a valid request, frees descriptors and requires the same service to answer `OK/1`; it failed (service exited) before the fix; (2) a local user who can reach the socket can keep the 8-slot kernel backlog busy with connections that are accepted and closed, delaying the authorised gateway. Both depend on host policy (socket directory permissions, service restart) that is not yet provisioned. Verified after integration: native `all test analyze sanitize` pass; engine suite 270/270.
+
+## Update: service increment (per-user pools)
+
+The installable service, the policy loader, the extended replies (`OK/2`, `OK/3`,
+`USAGE/1`; requests `ENSURE/1`, `WORKSPACE/1`, `USAGE/1`, ≤ 86 bytes) and the TS
+socket client are in `docs/native-quota-broker-service.md`. The "fixed 47-byte
+receive arrays" above are now 87 bytes (`QB_TRANSPORT_FRAME_MAX` 86 + 1). Replies
+still never carry FDs, paths or error details. Nothing is installed yet.

@@ -1,7 +1,7 @@
 // Entry of one Workspace runtime process (process driver). It opens the pinned Desktop engine headless on this
 // Workspace's own <dir>/workspace.sqlite (ADR 0001 phase 2) and answers the Manager over its private channel.
 // The provider token arrives by `connect` and stays in this process's memory only.
-import { access, constants, rename, writeFile } from 'node:fs/promises';
+import { access, chmod, constants, rename, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
@@ -119,7 +119,10 @@ const writeIndex = () => {
   const file = join(dir, CONVERSATION_INDEX);
   indexing = indexing
     .then(async () => {
-      await writeFile(file + '.tmp', JSON.stringify(listConversations()), { mode: 0o600 });
+      // 0640: in a broker workspace the setgid directory gives it the gateway group, so the gateway can list
+      // conversations of a stopped workspace; nobody else can traverse the broker root.
+      await writeFile(file + '.tmp', JSON.stringify(listConversations()), { mode: 0o640 });
+      await chmod(file + '.tmp', 0o640); // independent of the sandbox umask
       await rename(file + '.tmp', file);
     })
     .catch(() => {});
