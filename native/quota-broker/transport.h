@@ -3,6 +3,7 @@
 #include "core.h"
 #define QB_TRANSPORT_CLIENTS 8
 #define QB_TRANSPORT_DEADLINE_MS 500
+#define QB_TRANSPORT_ACCEPT_BACKOFF_MS 50
 /* Trusted startup only. No listener creation, paths, config parsing or bootstrap.
  * listener: protected AF_UNIX listening STREAM, NONBLOCK and CLOEXEC.
  * stop_fd: separate protected pollable descriptor; readability requests drain.

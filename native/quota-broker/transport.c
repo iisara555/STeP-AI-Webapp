@@ -47,6 +47,7 @@ int qb_transport_run(struct qb *broker, int listener, int stop_fd, uid_t allow_u
     struct client clients[QB_TRANSPORT_CLIENTS];
     for (size_t i = 0; i < QB_TRANSPORT_CLIENTS; i++) clients[i] = (struct client){.fd = -1};
     int result = -1;
+    int64_t accept_resume = 0;
     for (;;) {
         struct pollfd p[QB_TRANSPORT_CLIENTS+2];
         p[0] = (struct pollfd){stop_fd, POLLIN, 0};
@@ -59,6 +60,13 @@ int qb_transport_run(struct qb *broker, int listener, int stop_fd, uid_t allow_u
                 int64_t left = clients[i].deadline - now;
                 if (left < timeout) timeout = left > 0 ? (int)left : 0;
             }
+        }
+        /* Resource exhaustion at accept pauses accepting for a short fixed back-off
+         * (no busy loop, pending peers stay queued) instead of ending the service. */
+        if (accept_resume > now) {
+            p[1].fd = -1;
+            int64_t left = accept_resume - now;
+            if (left < timeout) timeout = (int)left;
         }
         int n = poll(p, QB_TRANSPORT_CLIENTS+2, timeout);
         if (n < 0) { if (errno == EINTR) continue; break; }
@@ -101,7 +109,13 @@ int qb_transport_run(struct qb *broker, int listener, int stop_fd, uid_t allow_u
                 int fd = accept4(listener, NULL, NULL, SOCK_CLOEXEC|SOCK_NONBLOCK);
                 if (fd < 0) {
                     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) break;
-                    goto done;
+                    if (errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM) {
+                        int64_t paused = now_ms(); if (paused < 0) goto done;
+                        accept_resume = paused + QB_TRANSPORT_ACCEPT_BACKOFF_MS; break;
+                    }
+                    /* Per accept(2): one aborted/failed pending connection, not the listener. */
+                    if (errno == ECONNABORTED || errno == EPROTO || errno == EPERM) continue;
+                    goto done; /* EBADF/EINVAL/ENOTSOCK...: listener itself is unusable. */
                 }
                 struct ucred peer;
                 socklen_t peer_length = sizeof(peer);

@@ -83,7 +83,18 @@ static void setup(struct fixture *f, int denied, int revoked) {
         struct rlimit bound={64, 64}; assert(setrlimit(RLIMIT_NOFILE, &bound) == 0);
         pthread_t service; assert(pthread_create(&service, NULL, service_thread, f) == 0);
         char command;
+        int spare[64]; int spares=0;
         while (read(f->control[0], &command, 1) == 1 && command != 'Q') {
+            if (command == 'E') { /* exhaust the descriptor table under the service */
+                int fd;
+                while (spares < 64 && (fd=dup(f->control[0])) >= 0) spare[spares++]=fd;
+                assert(errno == EMFILE);
+                assert(write(f->ack[1], "E", 1) == 1); continue;
+            }
+            if (command == 'F') {
+                while (spares) close(spare[--spares]);
+                assert(write(f->ack[1], "F", 1) == 1); continue;
+            }
             assert(command == 'R');
             assert(qb_revoke(f->broker, policy.grants[0].workspace) == 0);
             assert(write(f->ack[1], "R", 1) == 1);
@@ -183,6 +194,23 @@ int main(void) {
     usleep(20000); fd=connect_client(&f); response(fd, "");
     for (int i=0; i<QB_TRANSPORT_CLIENTS; i++) response(held[i], "DENIED/1\n");
     exchange(&f, request, 46, "OK/1\n");
+    /* Descriptor exhaustion at accept pauses accepting instead of ending the service,
+     * and the queued connection is served once descriptors are free again. */
+    {
+        char done;
+        assert(write(f.control[1], "E", 1) == 1);
+        struct pollfd exhausted={f.ack[0], POLLIN, 0}; assert(poll(&exhausted, 1, 3000) > 0);
+        assert(read(f.ack[0], &done, 1) == 1 && done == 'E');
+        int queued=connect_client(&f);
+        assert(send(queued, request, 46, MSG_NOSIGNAL) == 46 && shutdown(queued, SHUT_WR) == 0);
+        usleep(150000); /* several accept attempts fail with EMFILE meanwhile */
+        assert(write(f.control[1], "F", 1) == 1);
+        struct pollfd freed={f.ack[0], POLLIN, 0}; assert(poll(&freed, 1, 3000) > 0);
+        assert(read(f.ack[0], &done, 1) == 1 && done == 'F');
+        int status; assert(waitpid(f.child, &status, WNOHANG) == 0); /* service still alive */
+        response(queued, "OK/1\n"); /* complete frame + EOF already queued, served after accept */
+        exchange(&f, request, 46, "OK/1\n");
+    }
     /* Connected and partially sent before revoke must still be denied at ensure. */
     fd=connect_client(&f); assert(send(fd, request, 20, MSG_NOSIGNAL) == 20);
     assert(write(f.control[1], "R", 1) == 1);
