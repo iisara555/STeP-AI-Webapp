@@ -1,5 +1,23 @@
 # Progress
 
+## RuntimeManager startup lifecycle follow-up on 62af7bb (synthetic only)
+
+- Test-first deferred empty-grant regression reproduces a cleanup-failed exit being overwritten as running
+  while the handle remains identical. Startup now requires both the same handle and the `starting` state
+  before publishing running; failed lifecycle state cannot be revived. Health stays false, replacement
+  starts fail closed, and the retained capacity is released only after successful cleanup retry.
+- Test-first stop/shutdown regressions reproduce `RUNTIME_CLEANUP_FAILED` being incorrectly remapped to
+  `RUNTIME_STOP_FAILED` after a throwing startup grant. Retries preserve the metadata-only cleanup error
+  and failed reservation until successful release; unknown process cleanup retains stop-failure semantics.
+- Node 26.12.1: targeted lifecycle/connect tests **22/22**, full ungated engine **245/245**, app **118/118**,
+  database **29/29**, check/build/engine-pin passed. Existing 17 upstream engine diagnostics, loader
+  deprecation/localStorage warnings and bundle-size warning remain. Relevant Cloud Workspace Playwright
+  attempted: two desktop cases blocked before execution by missing Chromium `libatk-1.0.so.0`; two existing
+  mobile skips. No host packages installed to bypass this environment limitation.
+- New regressions use only injected synthetic RuntimeDriver/RuntimeHandle seams. Opt-in runner host tests
+  disabled (`STEP_STEP_RUNNER_TESTS=0`); no pressure tests, host configuration changes, live providers,
+  production changes, merge or deployment. Production acceptance remains separate.
+
 ## Runtime/runner review fixes on 03d277db (synthetic only)
 
 - Test-first real RuntimeManager + authenticated account-switched driver fault injection reproduces stop,

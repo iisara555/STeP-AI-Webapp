@@ -7,9 +7,141 @@ import { join } from 'node:path';
 import { RuntimeManager } from '../src/workspace/manager.ts';
 import {
   RuntimeStartCleanupError,
+  WorkspaceError,
   type RuntimeDriver,
   type RuntimeHandle,
 } from '../src/workspace/contract.ts';
+
+test('cleanup-failed exit during a deferred empty grant cannot revive the retained handle', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'step-start-exit-grant-'));
+  let entered!: () => void;
+  let release!: () => void;
+  const granting = new Promise<void>((resolve) => (entered = resolve));
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let exit!: Parameters<RuntimeHandle['onExit']>[0];
+  let cleanupFails = true;
+  let starts = 0;
+  let stops = 0;
+  const manager = new RuntimeManager({
+    dataRoot: provisionTestQuota(dir, 10),
+    workspacesPerUser: 10,
+    maxRunning: 1,
+    driver: {
+      async start(spec) {
+        starts++;
+        return {
+          health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
+          call: async () => ({}) as never,
+          onExit: (listener) => {
+            exit = listener;
+          },
+          stop: async () => {
+            stops++;
+            if (cleanupFails) throw new WorkspaceError('RUNTIME_CLEANUP_FAILED');
+          },
+        };
+      },
+    },
+    grant: async () => {
+      entered();
+      await gate;
+      return undefined;
+    },
+  });
+  try {
+    const first = await manager.create('alice', { name: 'first' });
+    const second = await manager.create('alice', { name: 'second' });
+    const outcome = manager.start('alice', first.id).then(
+      (value) => ({ value, error: undefined }),
+      (error: unknown) => ({ value: undefined, error }),
+    );
+    await granting;
+    exit(1, new WorkspaceError('RUNTIME_CLEANUP_FAILED'));
+    assert.equal((await manager.get('alice', first.id)).state, 'failed');
+    assert.equal((await manager.health('alice', first.id)).ok, false);
+    release();
+    const result = await outcome;
+    assert.match(String(result.error), /RUNTIME_START_FAILED/);
+    assert.equal(result.value, undefined);
+    assert.equal((await manager.get('alice', first.id)).state, 'failed');
+    assert.equal((await manager.health('alice', first.id)).ok, false);
+    await assert.rejects(manager.start('alice', first.id), /RUNTIME_NOT_RUNNING/);
+    await assert.rejects(manager.start('alice', second.id), /RUNTIME_CAPACITY/);
+    assert.equal(starts, 1);
+    assert.equal(stops, 1);
+    cleanupFails = false;
+    assert.equal((await manager.stop('alice', first.id)).state, 'stopped');
+    assert.equal(stops, 2);
+    assert.equal((await manager.start('alice', second.id)).state, 'running');
+  } finally {
+    release();
+    cleanupFails = false;
+    await manager.shutdown();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+for (const retry of ['stop', 'shutdown'] as const) {
+  test(`${retry} preserves metadata-cleanup failure after a throwing startup grant until release`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'step-start-metadata-'));
+    let cleanupFails = true;
+    let stops = 0;
+    let starts = 0;
+    const manager = new RuntimeManager({
+      dataRoot: provisionTestQuota(dir, 10),
+      workspacesPerUser: 10,
+      maxRunning: 1,
+      driver: {
+        async start(spec) {
+          starts++;
+          return {
+            health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
+            call: async () => ({}) as never,
+            onExit: () => {},
+            stop: async () => {
+              stops++;
+              if (cleanupFails) throw new WorkspaceError('RUNTIME_CLEANUP_FAILED');
+            },
+          };
+        },
+      },
+      grant: () => {
+        throw new Error('synthetic grant failure');
+      },
+    });
+    try {
+      const first = await manager.create('alice', { name: 'first' });
+      const second = await manager.create('alice', { name: 'second' });
+      await assert.rejects(manager.start('alice', first.id), { code: 'RUNTIME_START_FAILED' });
+      assert.equal((await manager.get('alice', first.id)).error, 'RUNTIME_START_CLEANUP_FAILED');
+      await assert.rejects(manager.start('alice', first.id), /RUNTIME_NOT_RUNNING/);
+      await assert.rejects(manager.start('alice', second.id), /RUNTIME_CAPACITY/);
+      const cleanup = () => (retry === 'stop' ? manager.stop('alice', first.id) : manager.shutdown());
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await assert.rejects(cleanup(), { code: 'RUNTIME_CLEANUP_FAILED' });
+        const view = await manager.get('alice', first.id);
+        assert.equal(view.state, 'failed');
+        assert.equal(view.error, 'RUNTIME_CLEANUP_FAILED');
+        assert.equal((await manager.health('alice', first.id)).ok, false);
+        if (retry === 'stop') {
+          await assert.rejects(manager.start('alice', first.id), /RUNTIME_NOT_RUNNING/);
+          await assert.rejects(manager.start('alice', second.id), /RUNTIME_CAPACITY/);
+        }
+      }
+      assert.equal(stops, 3);
+      assert.equal(starts, 1);
+      cleanupFails = false;
+      await cleanup();
+      assert.equal(stops, 4);
+      assert.equal((await manager.get('alice', first.id)).state, 'stopped');
+      assert.equal(manager.stats().failed, 0);
+    } finally {
+      cleanupFails = false;
+      await manager.shutdown();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test('failed startup cleanup retains capacity until shutdown retries successfully', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'step-start-cleanup-'));

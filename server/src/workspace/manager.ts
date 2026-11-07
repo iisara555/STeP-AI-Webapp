@@ -295,11 +295,11 @@ export class RuntimeManager {
             clearTimeout(timer);
           }
         }
-        if (entry.handle !== handle) throw new Error('RUNTIME_EXITED');
+        if (entry.handle !== handle || entry.state !== 'starting') throw new Error('RUNTIME_EXITED');
         handle.onEvent?.((event) => {
           for (const listener of this.listeners.get(key) ?? []) listener(event);
         });
-        if (entry.handle !== handle) throw new Error('RUNTIME_EXITED');
+        if (entry.handle !== handle || entry.state !== 'starting') throw new Error('RUNTIME_EXITED');
         entry.state = 'running';
       } catch (error) {
         if (admit && !spawned && !(error instanceof RuntimeStartCleanupError)) {
@@ -671,7 +671,12 @@ export class RuntimeManager {
                 ? error.code
                 : 'RUNTIME_STOP_FAILED';
         }
-        if (entry.startupCleanupFailed && attempt.signalMayHaveOccurred)
+        // Proven process absence remains metadata-only cleanup even after startup failed.
+        if (
+          entry.startupCleanupFailed &&
+          attempt.signalMayHaveOccurred &&
+          !(error instanceof WorkspaceError && error.code === 'RUNTIME_CLEANUP_FAILED')
+        )
           throw new WorkspaceError('RUNTIME_STOP_FAILED');
         throw error;
       }
