@@ -110,6 +110,33 @@ struct qb_workspace_receipt {
 };
 int qb_workspace(struct qb *broker, uid_t authenticated_peer_uid, const void *frame, size_t length,
                  struct qb_workspace_receipt *out);
+/* Trusted in-process launch seam, NOT a wire operation or reusable authorization.
+ * Identity is only a stale-preparation veto, never authority. Every call rechecks
+ * the authenticated peer's live user grant, journal, mount, quota and retained
+ * workspace identity under the SAME mutex as qb_revoke. Never provisions.
+ * A replay while still authorized is a new launch attempt, not deduplicated;
+ * after completed revoke no callback can start (also after broker restart).
+ *
+ * The adapter is protected host code, NEVER supplied/selected by an untrusted
+ * request. It must synchronously perform the actual fixed-policy spawn before
+ * returning: no async queue, FD retained/duplicated for later launches, arbitrary
+ * command, argv, environment or path reopen. FD inheritance is only for the one
+ * synchronously admitted fixed-policy child. The borrowed receipt expires on return.
+ * Return 0 or -1 with errno; no automatic retry, even on an uncertain spawn error.
+ * Must not reenter/close the broker, exit the thread, or allow cancellation while
+ * inside this call. Caller drains/joins every user before qb_close. A slow
+ * callback blocks all mutations/revocations; no timeout can cancel a spawn.
+ * This core contract alone does NOT connect or secure a production launcher. */
+struct qb_launch_identity { uint64_t device, user_inode, inode; };
+struct qb_spawn_adapter {
+    void *context;
+    int (*spawn)(void *, const struct qb_workspace_receipt *borrowed);
+};
+int qb_launch_workspace(struct qb *broker, uid_t authenticated_peer_uid,
+                        const char *user, const char *workspace,
+                        const struct qb_launch_identity *expected,
+                        const struct qb_spawn_adapter *adapter);
+
 /* Read-only usage report of an ALREADY allocated user project. Frame, 45 bytes:
  *   "USAGE/1 <user-uuid>\n"   Never allocates; ENOENT if not allocated yet. */
 struct qb_usage {

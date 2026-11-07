@@ -1,5 +1,24 @@
 # Progress
 
+## Bounded native revoke-through-launch core seam — not connected
+
+- Added `qb_launch_workspace`: fresh grant/peer, mount/quota and retained directory
+  identity validation plus synchronous trusted spawn callback under the existing
+  revoke/mutation mutex. No wire verb, arbitrary command API or default launcher;
+  old receipts/status cannot authorize later work. Launch never provisions.
+- Fake spawn + barrier tests cover revoke ordering on success/error, borrowed FD
+  lifetime, stale receipt/replayed requests, substitution, refusals and join-before-
+  close. Initial absent-API and pool-substitution tests failed first; deliberately
+  unlocking before callback also fails the deterministic mutex assertion.
+- Native all/test/analyze/sanitize and app check/engine pin verified unprivileged.
+  No root/sudo/real XFS/install/host changes or actual runtime launches.
+- [Contract and exact next connection](native-quota-launch-fence.md): authenticated
+  bounded transport must invoke the fixed-policy FD launcher synchronously inside
+  this authority, with incarnation/outcome reconciliation. That connection and
+  independent/host acceptance remain open; production refusal is unchanged. This
+  core-only increment does not refresh older installation/acceptance artifact pins
+  or authorize installation, UI/cutover or production composition.
+
 ## Root-local per-user pool operations recovered — not installed
 
 - Salvaged the interrupted quota-pool-operations worktree without reset. Added

@@ -1,4 +1,5 @@
 /test-core
+/test-launch
 /test-capacity-race
 /test-xfs
 /test-transport

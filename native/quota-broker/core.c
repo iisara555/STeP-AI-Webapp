@@ -517,13 +517,15 @@ static int same_name(struct qb *b, int parent, const char *name, uint64_t inode)
         mount_id != b->mount_id) return deny(ESTALE);
     return 0;
 }
-static int workspace_locked(struct qb *b, int index, const char *workspace, struct qb_workspace_receipt *out) {
+static int workspace_locked(struct qb *b, int index, const char *workspace, int create, struct qb_workspace_receipt *out) {
+    /* Launch never allocates, adopts or repairs a prepared directory. */
+    if (!create && !b->allocations[index].project) return deny(ENOENT);
     struct qb_receipt user;
     memset(&user, 0, sizeof(user)); user.directory_fd = -1;
     if (ensure_locked(b, index, &user) < 0) return -1;
     int result = -1, fd = beneath(user.directory_fd, workspace, O_RDONLY | O_DIRECTORY, 0);
     int fresh = 0;
-    if (fd < 0 && errno == ENOENT) {
+    if (create && fd < 0 && errno == ENOENT) {
         /* Nobody but the broker can write p<ID> (broker-owned 0750): no creation race. */
         if (mkdirat(user.directory_fd, workspace, 0700) < 0 || fsync(user.directory_fd) < 0) goto done;
         fd = beneath(user.directory_fd, workspace, O_RDONLY | O_DIRECTORY, 0);
@@ -536,7 +538,11 @@ static int workspace_locked(struct qb *b, int index, const char *workspace, stru
     if (mount_id != b->mount_id || (uint64_t)s.st_dev != b->policy.root_device) { errno = EXDEV; goto done; }
     if (fresh && (empty_dir(fd) < 0 || hand_over_workspace(b, fd) < 0)) goto done;
     /* The workspace must carry the user's project + inheritance (XFS PROJINHERIT). */
+    char pool_name[16];
+    int n = snprintf(pool_name, sizeof(pool_name), "p%u", user.project);
+    if (n < 0 || (size_t)n >= sizeof(pool_name)) { errno = EOVERFLOW; goto done; }
     if (observed(b, fd, &b->allocations[index], user.project, 0) < 0 || mount_check(b) < 0 ||
+        same_name(b, b->root, pool_name, user.inode) < 0 ||
         same_name(b, user.directory_fd, workspace, (uint64_t)s.st_ino) < 0) goto done;
     out->directory_fd = fd; out->project = user.project; out->device = user.device;
     out->user_inode = user.inode; out->inode = (uint64_t)s.st_ino;
@@ -562,12 +568,40 @@ int qb_workspace(struct qb *b, uid_t peer, const void *frame, size_t length, str
     if (error) return deny(error);
     int index = grant_index(b, user), result = -1;
     if (index >= 0) {
-        if ((uint64_t)peer == b->policy.grants[index].peer_uid) result = workspace_locked(b, index, workspace, out);
+        if ((uint64_t)peer == b->policy.grants[index].peer_uid) result = workspace_locked(b, index, workspace, 1, out);
         else errno = EACCES;
     }
     int saved = errno; pthread_mutex_unlock(&b->mutex); errno = saved;
     return result;
 }
+int qb_launch_workspace(struct qb *b, uid_t peer, const char *user, const char *workspace,
+                        const struct qb_launch_identity *expected,
+                        const struct qb_spawn_adapter *adapter) {
+    if (!b || !user || !workspace || !uuid(user) || !uuid(workspace) || !expected)
+        return deny(EINVAL);
+    if (!adapter || !adapter->spawn) return deny(ENOTSUP); /* no default launcher */
+    if (b->policy.layout != QB_LAYOUT_SHARED) return deny(ENOTSUP);
+    int error = pthread_mutex_lock(&b->mutex);
+    if (error) return deny(error);
+    int index = grant_index(b, user), result = -1;
+    struct qb_workspace_receipt r;
+    memset(&r, 0, sizeof(r)); r.directory_fd = -1;
+    if (index >= 0) {
+        if ((uint64_t)peer != b->policy.grants[index].peer_uid) errno = EACCES;
+        else if (workspace_locked(b, index, workspace, 0, &r) == 0) {
+            if (r.device != expected->device || r.user_inode != expected->user_inode ||
+                r.inode != expected->inode) errno = ESTALE;
+            else result = adapter->spawn(adapter->context, &r);
+        }
+    }
+    /* The actual synchronous spawn, error handling and FD release all precede
+     * unlock. An acknowledged revoke therefore cannot precede a later callback. */
+    int saved = errno;
+    if (r.directory_fd >= 0) close(r.directory_fd);
+    pthread_mutex_unlock(&b->mutex); errno = saved;
+    return result;
+}
+
 /* Open an allocated user's p<ID> and require it is the recorded directory (identity, mount,
  * owner/mode). Never creates. */
 static int open_pool(struct qb *b, const struct allocation *a) {
