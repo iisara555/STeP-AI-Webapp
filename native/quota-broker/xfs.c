@@ -108,9 +108,20 @@ static int attributes(struct qb_xfs *x, int dir, struct fsxattr *a) {
     if (a->fsx_xflags & (FS_XFLAG_REALTIME | FS_XFLAG_RTINHERIT)) return deny(ENOTSUP);
     return 0;
 }
-static int limits(struct qb_xfs *x, uint32_t project, struct fs_disk_quota *q) {
+/* absent_ok: XFS reports a never-allocated or all-zero ("uninitialized") dquot
+ * as ENOENT when no default limits exist (xfs_qm_scall_getquota:
+ * XFS_IS_DQUOT_UNINITIALIZED / dqget(can_alloc=false)). That is exactly zero
+ * limits and zero usage, so it is mapped to a blank record ONLY for that errno
+ * and ONLY where blank is a legal answer. The post-write readback never
+ * accepts absence. ESRCH (quota off) and every other error stay fatal. */
+static int limits(struct qb_xfs *x, uint32_t project, struct fs_disk_quota *q, int absent_ok) {
     memset(q, 0, sizeof(*q));
-    if (quota(x, QCMD(Q_XGETQUOTA, PRJQUOTA), project, q) < 0) return -1;
+    if (quota(x, QCMD(Q_XGETQUOTA, PRJQUOTA), project, q) < 0) {
+        if (!absent_ok || errno != ENOENT) return -1;
+        memset(q, 0, sizeof(*q));
+        q->d_version = FS_DQUOT_VERSION; q->d_flags = FS_PROJ_QUOTA; q->d_id = project;
+        return 0;
+    }
     if (q->d_version != FS_DQUOT_VERSION || q->d_flags != FS_PROJ_QUOTA ||
         q->d_id != project || q->d_blk_hardlimit > UINT64_MAX / 512 ||
         q->d_blk_softlimit || q->d_ino_softlimit || q->d_rtb_hardlimit ||
@@ -122,7 +133,7 @@ static int observe(void *v, int root, int dir, uint32_t project, struct qb_obser
     memset(out, 0, sizeof(*out));
     if (check(x, root, dir, project) < 0) return -1;
     struct fsxattr a; struct fs_disk_quota q;
-    if (attributes(x, dir, &a) < 0 || limits(x, project, &q) < 0 ||
+    if (attributes(x, dir, &a) < 0 || limits(x, project, &q, 1) < 0 ||
         check(x, root, dir, project) < 0) return -1;
     out->project = a.fsx_projid;
     out->inherit = !!(a.fsx_xflags & FS_XFLAG_PROJINHERIT);
@@ -135,7 +146,7 @@ static int configure(void *v, int root, int dir, uint32_t project, uint64_t byte
     if (bytes != x->policy.bytes_hard || inodes != x->policy.inodes_hard) return deny(EACCES);
     if (check(x, root, dir, project) < 0) return -1;
     struct fsxattr a; struct fs_disk_quota old;
-    if (attributes(x, dir, &a) < 0 || limits(x, project, &old) < 0) return -1;
+    if (attributes(x, dir, &a) < 0 || limits(x, project, &old, 1) < 0) return -1;
     if (a.fsx_projid || (a.fsx_xflags & FS_XFLAG_PROJINHERIT) ||
         old.d_blk_hardlimit || old.d_ino_hardlimit || old.d_bcount || old.d_icount)
         return deny(EEXIST);
@@ -148,7 +159,7 @@ static int configure(void *v, int root, int dir, uint32_t project, uint64_t byte
     };
     if (check(x, root, dir, project) < 0 ||
         quota(x, QCMD(Q_XSETQLIM, PRJQUOTA), project, &q) < 0) return -1;
-    if (limits(x, project, &old) < 0) return -1;
+    if (limits(x, project, &old, 0) < 0) return -1;
     if (old.d_blk_hardlimit != q.d_blk_hardlimit || old.d_ino_hardlimit != inodes) return deny(EDQUOT);
     if (check(x, root, dir, project) < 0) return -1;
     a.fsx_projid = project; a.fsx_xflags |= FS_XFLAG_PROJINHERIT;

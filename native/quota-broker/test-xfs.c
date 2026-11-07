@@ -20,6 +20,7 @@ struct fake {
     struct fs_disk_quota dq;
     int writes, calls, fail_at, ignore_quota, ignore_attr;
     int bad_uuid, bad_version, bad_id, bad_flags, unenforced, readonly, not_xfs;
+    int absent, quota_errno; /* absent: real-XFS ENOENT for an all-zero dquot */
     int quota_fd, attr_fd;
 };
 static int fault(struct fake *f) {
@@ -56,6 +57,9 @@ static int fake_quota(void *v, int fd, unsigned int op, uint32_t id, void *arg) 
         if (f->unenforced) s->qs_flags = FS_QUOTA_PDQ_ACCT;
         if (f->bad_version) s->qs_version = 2;
     } else if (op == QCMD(Q_XGETQUOTA, PRJQUOTA)) {
+        if (f->quota_errno) { errno = f->quota_errno; return -1; }
+        if (f->absent && !f->dq.d_blk_hardlimit && !f->dq.d_ino_hardlimit &&
+            !f->dq.d_bcount && !f->dq.d_icount) { errno = ENOENT; return -1; }
         *(struct fs_disk_quota *)arg = f->dq;
         struct fs_disk_quota *q = arg;
         q->d_id = id; q->d_version = 1; q->d_flags = FS_PROJ_QUOTA;
@@ -177,6 +181,20 @@ int main(void) {
         case 13: f.attr.fsx_projid = 500; break;
         default: assert(0);
         }
+        assert(configure(&a, fd, dir) < 0 && f.writes == 0); qb_xfs_close(x);
+    }
+    /* Absent (ENOENT) quota record is blank before the write only. */
+    f = (struct fake){0}; open_fake(fd, &p, &f, &x, &a); f.absent = 1;
+    assert(a.observe(a.context, fd, dir, 100000, &o) == 0 && !o.bytes_hard && !o.inodes_hard);
+    assert(configure(&a, fd, dir) == 0 && f.writes == 2);
+    assert(a.observe(a.context, fd, dir, 100000, &o) == 0 && o.bytes_hard == 4194304);
+    qb_xfs_close(x);
+    f = (struct fake){0}; open_fake(fd, &p, &f, &x, &a); f.absent = 1; f.ignore_quota = 1;
+    assert(configure(&a, fd, dir) < 0 && f.writes == 1); /* absent after set: fatal */
+    qb_xfs_close(x);
+    for (int i = 0; i < 2; i++) { /* quota off / other errors are never blank */
+        f = (struct fake){0}; open_fake(fd, &p, &f, &x, &a); f.quota_errno = i ? EIO : ESRCH;
+        assert(a.observe(a.context, fd, dir, 100000, &o) < 0);
         assert(configure(&a, fd, dir) < 0 && f.writes == 0); qb_xfs_close(x);
     }
     f = (struct fake){0}; open_fake(fd, &p, &f, &x, &a);
