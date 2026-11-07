@@ -34,6 +34,7 @@ import { credentialStillValid, type Identity } from '../gateway/auth.ts';
 import { UserId, WorkspaceError, type ConversationSummary } from './contract.ts';
 import { CONVERSATION_INDEX, listRecords, readRecord, workspacePaths } from './storage.ts';
 import { WriterFence } from './writer-fence.ts';
+import { LaunchJournal } from './launch-journal.ts';
 
 /** Engine record kind of the per-conversation import ledger, beside the `session` rows in workspace.sqlite. */
 export const HISTORY_IMPORT_KIND = 'history-import';
@@ -287,6 +288,9 @@ export async function importHistory(options: ImportOptions): Promise<ImportRepor
   if (!Array.isArray(conversations)) throw new WorkspaceError('INVALID_INPUT');
   const fence = WriterFence.acquire(dataRoot);
   try {
+    // The fence excludes live managers only. A crashed holder's runtimes may still be writing this root until a
+    // Runtime Manager reaps them and empties the launch journal, so import is refused until then (#62).
+    if (LaunchJournal.open(dataRoot).pending().length) throw new WorkspaceError('RUNTIME_RECOVERY_PENDING');
     const ownerId = authenticatedOwner(owner);
     const record = await readRecord(dataRoot, ownerId, workspaceId);
     const approved = approvedOwners(mappings);

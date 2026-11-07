@@ -22,6 +22,7 @@ import { RuntimeManager } from '../src/workspace/manager.ts';
 import { processDriver } from '../src/workspace/process-driver.ts';
 import { createWorkspaceFolders, readConversationIndex, workspacePaths } from '../src/workspace/storage.ts';
 import { WriterFence } from '../src/workspace/writer-fence.ts';
+import { LaunchJournal } from '../src/workspace/launch-journal.ts';
 import { provisionTestQuota } from './support/quota.ts';
 
 const SPIKE = resolve(import.meta.dirname, '../../spikes/063-migration-preview');
@@ -280,6 +281,26 @@ test('refuses while a Runtime Manager (and so any runtime) holds the storage roo
     } finally {
       fence.release();
     }
+  });
+});
+
+test('refuses while a crashed holder left runtime launches that are not yet proven gone', async () => {
+  await withRoot(async (root, workspace) => {
+    const ws = await workspace();
+    // A previous Runtime Manager recorded a launch and was killed before proving it gone: its runtime may still write.
+    const fence = WriterFence.acquire(root);
+    try {
+      LaunchJournal.open(root).record({
+        kind: 'step-runner',
+        unit: `step-rt-${'a'.repeat(32)}.scope`,
+        workspaceId: ws,
+      });
+    } finally {
+      fence.release();
+    }
+    await assert.rejects(run(root, ws, spikeBatch()), /RUNTIME_RECOVERY_PENDING/);
+    // Nothing was imported.
+    assert.equal(sessions(root, ALICE, ws).sessions.length, 0);
   });
 });
 
