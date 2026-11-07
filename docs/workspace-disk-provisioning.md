@@ -1,5 +1,10 @@
 # Workspace disk + inode provisioning: integration protocol, NOT installed
 
+**Native integration follow-up:** [Single-authority native quota boundary](native-quota-integration.md)
+supersedes the TS-allocation composition for the native broker path. The old TS ledger/authority below
+remains an alternate protocol test artifact, not a second allocator to connect to `qb_ensure`.
+Never pass its project IDs to native: native alone owns IDs and `p<project>` root creation.
+
 ## Outcome and boundary
 
 This change advances the disk/inode gate with code under `server/src/workspace/`, not another executable spike:

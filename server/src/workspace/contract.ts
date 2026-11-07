@@ -37,7 +37,10 @@ export type RuntimeHealth = {
 export type RuntimeSpec = {
   workspaceId: string;
   ownerId: string;
-  /** /data/users/<user>/workspaces/<workspace>; holds workspace.sqlite, files/ and snapshots/. */
+  /** Runtime content directory, not necessarily the control-metadata directory.
+   * Default: /data/users/<user>/workspaces/<workspace>. Native composition: <protected-root>/p<project>.
+   * Holds workspace.sqlite, files/ and snapshots/. Paths are never authority to launch.
+   */
   dir: string;
   filesDir: string;
 };

@@ -22,14 +22,7 @@ import {
   type Workspace,
   type WorkspaceRecord,
 } from './contract.ts';
-import {
-  createWorkspaceFolders,
-  listRecords,
-  readConversationIndex,
-  readRecord,
-  saveRecord,
-  workspacePaths,
-} from './storage.ts';
+import { workspaceStorage, type WorkspaceStorage } from './storage.ts';
 import { WorkspaceQuotaStore } from './quota-store.ts';
 
 /** Observe before returning to a fence whose COMMIT can throw after IPC enqueue.
@@ -43,6 +36,8 @@ function observeDispatch<T>(result: Promise<T>): Promise<T> {
 export type RuntimeManagerOptions = {
   dataRoot: string;
   driver: RuntimeDriver;
+  /** Explicit composition; ordinary startup retains the existing storage layout. */
+  storage?: WorkspaceStorage;
   workspacesPerUser: number;
   /** Admission control for the shared server: runtimes beyond this wait for the user to retry. */
   maxRunning?: number;
@@ -100,7 +95,7 @@ export class RuntimeManager {
   private readonly activeCalls = new Map<string, number>();
   /** Event listeners by Workspace; they outlive a runtime so a resumed Workspace keeps reporting to them. */
   private readonly listeners = new Map<string, Set<(event: RuntimeEvent) => void>>();
-  private readonly dataRoot: string;
+  private readonly storage: WorkspaceStorage;
   private readonly workspaceQuota: WorkspaceQuotaStore;
   private readonly driver: RuntimeDriver;
   private readonly maxRunning: number;
@@ -112,6 +107,7 @@ export class RuntimeManager {
   constructor({
     dataRoot,
     driver,
+    storage = workspaceStorage(dataRoot),
     workspacesPerUser,
     maxRunning = 8,
     idleMs = 30 * 60_000,
@@ -119,7 +115,7 @@ export class RuntimeManager {
     now = Date.now,
     grant = () => undefined,
   }: RuntimeManagerOptions) {
-    this.dataRoot = dataRoot;
+    this.storage = storage;
     this.workspaceQuota = new WorkspaceQuotaStore(dataRoot, workspacesPerUser);
     this.driver = driver;
     this.maxRunning = maxRunning;
@@ -142,7 +138,7 @@ export class RuntimeManager {
     const record: WorkspaceRecord = { id: newWorkspaceId(), ownerId, name, createdAt: at, lastActiveAt: at };
     let renamed = false;
     try {
-      await createWorkspaceFolders(this.dataRoot, record, (publish) =>
+      await this.storage.create(record, (publish) =>
         this.workspaceQuota.publish(ownerId, () => {
           let active = true;
           let published = false;
@@ -178,11 +174,11 @@ export class RuntimeManager {
   }
 
   async list(actor: string): Promise<Workspace[]> {
-    return (await listRecords(this.dataRoot, actor)).map((record) => this.view(record));
+    return (await this.storage.list(actor)).map((record) => this.view(record));
   }
 
   async get(actor: string, workspaceId: string): Promise<Workspace> {
-    return this.view(await readRecord(this.dataRoot, actor, workspaceId));
+    return this.view(await this.storage.read(actor, workspaceId));
   }
 
   /** Starts the runtime, or resumes it from its folder after a stop, idle stop or crash. */
@@ -193,7 +189,7 @@ export class RuntimeManager {
     authorize?: () => Promise<void>,
   ): Promise<Workspace> {
     if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
-    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const record = await this.storage.read(actor, workspaceId);
     if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
     await authorize?.();
     if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
@@ -236,7 +232,7 @@ export class RuntimeManager {
       let connectAdmissionDenied = false;
       let admissionFailure: { error: unknown } | undefined;
       try {
-        const spec = workspacePaths(this.dataRoot, record.ownerId, record.id);
+        const spec = await this.storage.runtimePaths(record);
         const handle = admit
           ? await this.driver.startWithAdmission!(spec, (spawn) => {
               try {
@@ -356,13 +352,13 @@ export class RuntimeManager {
     admit?: (signal: () => void) => void,
     authorize?: () => Promise<void>,
   ): Promise<Workspace> {
-    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const record = await this.storage.read(actor, workspaceId);
     await this.stopKey(this.key(record), admit, authorize);
     return this.view(record);
   }
 
   async health(actor: string, workspaceId: string): Promise<RuntimeHealth & { state: RuntimeState }> {
-    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const record = await this.storage.read(actor, workspaceId);
     const entry = this.live.get(this.key(record));
     if (!entry?.handle || entry.state !== 'running')
       return { ok: false, workspaceId: record.id, state: entry?.state ?? 'stopped' };
@@ -399,10 +395,10 @@ export class RuntimeManager {
 
   /** A running runtime answers itself; a stopped one is listed from its index, without being woken. */
   async conversations(actor: string, workspaceId: string): Promise<ConversationSummary[]> {
-    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const record = await this.storage.read(actor, workspaceId);
     const entry = this.live.get(this.key(record));
     if (entry?.handle && entry.state === 'running') return entry.handle.call('conversations', {});
-    return readConversationIndex(this.dataRoot, record.ownerId, record.id);
+    return this.storage.conversations(record);
   }
 
   async newConversation(
@@ -451,7 +447,7 @@ export class RuntimeManager {
     dispatch: (send: () => Promise<{ ok: true }>) => Promise<{ ok: true }> = (send) => send(),
   ) {
     const ref = parse(SessionRef, { sessionId }, 'INVALID_INPUT');
-    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const record = await this.storage.read(actor, workspaceId);
     const entry = this.live.get(this.key(record));
     if (!entry?.handle || entry.state !== 'running') throw new WorkspaceError('RUNTIME_NOT_RUNNING');
     entry.busy++;
@@ -481,7 +477,7 @@ export class RuntimeManager {
 
   /** Receives the progress events of the owner's Workspace, across stops and resumes. Returns an unsubscribe. */
   async subscribe(actor: string, workspaceId: string, listener: (event: RuntimeEvent) => void) {
-    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const record = await this.storage.read(actor, workspaceId);
     const key = this.key(record);
     const set = this.listeners.get(key) ?? new Set();
     set.add(listener);
@@ -507,7 +503,7 @@ export class RuntimeManager {
 
   /** Records user or job activity so the idle policy leaves the runtime running. */
   async touch(actor: string, workspaceId: string) {
-    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const record = await this.storage.read(actor, workspaceId);
     const entry = this.live.get(this.key(record));
     if (entry) await this.touchRecord(record, entry);
   }
@@ -547,7 +543,7 @@ export class RuntimeManager {
     authority?: StartAuthority,
     onPending?: (settled: Promise<void>) => void,
   ) {
-    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    const record = await this.storage.read(actor, workspaceId);
     const key = this.key(record);
     this.activeCalls.set(key, (this.activeCalls.get(key) ?? 0) + 1);
     let entry: Live | undefined;
@@ -700,7 +696,7 @@ export class RuntimeManager {
   ) {
     const lastActive = this.now();
     record.lastActiveAt = new Date(lastActive).toISOString();
-    await saveRecord(this.dataRoot, record, (publish) => {
+    await this.storage.save(record, (publish) => {
       const commit = () => {
         publish();
         entry.lastActive = lastActive;

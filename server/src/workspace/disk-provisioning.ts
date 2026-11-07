@@ -1,4 +1,6 @@
-// Disk/inode quota protocol. No sudo, shell helper or privileged implementation lives here.
+// Alternate TS-owned disk/inode protocol. No sudo, shell helper or privileged implementation lives here.
+// NOT the native integration authority: native-quota.ts never calls this ledger or authority.
+// Do not compose its caller-selected allocations with qb_ensure (which owns IDs and p<ID> creation).
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
 import { UserId, WorkspaceId, type RuntimeDriver, type RuntimeSpec } from './contract.ts';
