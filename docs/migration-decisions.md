@@ -10,3 +10,11 @@ Decisions given by the project owner for #56/#63. They bind future implementatio
 ## Host state
 
 - 2026-11-06: owner created system account `step-runner` (uid 995, gid 983, no home, shell `/usr/sbin/nologin`) for running workspace programs apart from the `itsara`/gateway account. It is not used by anything yet. Starting processes as this account still needs a narrowly scoped privileged launcher, to be designed, tested and separately approved. One shared account separates workloads from the gateway only; isolation between workspaces must still come from per-workspace sandboxing or per-workspace accounts.
+
+## Disk quota model: per-user pool (owner decision, 2026-11-07)
+
+- Each user gets **one storage pool of 15 GiB** (one XFS project per user); all of that user's Workspaces live inside it and share it, like Projects in Claude Desktop or folders in Cursor/opencode/Codex. Number of Workspaces per user is not what limits disk use.
+- Capacity target: **50 users on the current 954 GB SSD** (750 GB committed, ~100 GB kept for system and backups, no overcommit, so the disk cannot fill from user data). A larger SSD is planned before growing to 300 users; pool size is revisited then.
+- When a pool is full: only that user's writes fail (ENOSPC/EDQUOT); other users are unaffected; saved files stay readable, downloadable and deletable; deleting frees space at once (proven on real XFS, docs/native-quota-xfs-acceptance.md).
+- Required with it: warnings at 80% and 95% of the pool; already-saved chat history must never be lost or silently stop saving when a pool is full; an operator can **raise** (never lower) one user's pool.
+- Supersedes the per-Workspace limit placeholder used in the native broker docs and tests.
