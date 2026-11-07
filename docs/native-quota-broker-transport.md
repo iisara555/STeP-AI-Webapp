@@ -145,3 +145,7 @@ real isolated XFS enforcement/exhaustion/escape/mount/crash acceptance; service
 supervision and explicit host-change/deployment approval. No runtime request can
 bypass the production ENOTSUP gate, and this user-writable checkout must never be
 executed as root. Nothing is installed, enabled or real-data ready.
+
+## Parent review (2026-11-07, read of `transport.c` at c9cfd5a)
+
+No confidentiality or authorization defect found: peer UID is checked before any read or reply, requests are exact-length with write EOF, ancillary data forces denial, and no directory FD or receipt detail is sent. Two availability notes, both failing closed: (1) any `accept4` error other than `EAGAIN`/`EINTR` (for example `EMFILE`, `ENOBUFS`) ends the service loop instead of skipping one connection; (2) a local user who can reach the socket can keep the 8-slot kernel backlog busy with connections that are accepted and closed, delaying the authorised gateway. Both depend on host policy (socket directory permissions, service restart) that is not yet provisioned. Verified after integration: native `all test analyze sanitize` pass; engine suite 270/270.
