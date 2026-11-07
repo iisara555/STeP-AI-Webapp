@@ -48,24 +48,24 @@ gate 5 of `docs/native-quota-broker-xfs.md`. It does not approve production use.
 Policy: 16 MiB bytes / 64 inodes per project, projects 100000–100003 (exactly
 four). Workspaces A–E are on the authenticated peer 4242.
 
-| check | what is proven |
-|---|---|
-| `allocation_and_limit_readback` | `qb_ensure(A)` → project 100000. Independent `Q_XGETQUOTA` shows blk_hard×512 = 16 MiB, ino_hard = 64, soft/rt = 0. The dir has projid + PROJINHERIT. Re-ensure returns the same project and inode. |
-| `new_files_and_dirs_inherit_project` | Nested dirs/files made by root, and a file made by the writer in `w/`, all carry projid 100000. Dirs carry PROJINHERIT. |
-| `writer_stops_at_byte_hard_limit` | Writer (995:983, no groups, no caps, no_new_privs, only an inherited dir FD) writes until `ENOSPC`/`EDQUOT`. Written bytes and quota usage are ≤ 16 MiB and within 2 MiB of it, and the filesystem still has more than 64 MiB free. |
-| `space_usable_again_after_deletion` | The writer unlinks the file. Usage drops (`syncfs` + wait for deferred inactivation). An 8 MiB write then succeeds. |
-| `writer_stops_at_inode_hard_limit` | The writer creates empty files. It gets exactly `64 − baseline` before `ENOSPC`/`EDQUOT`, and icount = 64. |
-| `inodes_usable_again_after_deletion` | After unlinking, 8 new files can be created. |
-| `workload_userns_cannot_reassign_or_clear_inherit` | The writer in a new user namespace (the bwrap `--unshare-user` model) cannot set projid 0, clear PROJINHERIT on its own dir, or set REALTIME on its own file. |
-| `wrong_filesystem_uuid_refused` | The adapter refuses a flipped-UUID policy with `EXDEV`. The core refuses a mismatching policy. |
-| `revocation_survives_broker_restart` | B is allocated as 100001 and revoked. Ensure returns `EACCES` before and after a full close/reopen from disk. B's quota record is kept. |
-| `project_ids_never_reused` | After restarts: A keeps 100000, C → 100002, D → 100003, and E → `ENOSPC` (B's id is not recycled). |
-| `nested_and_bind_mount_refused` | In a private mount namespace, a tmpfs mounted over `broker/p100000` is refused with `EXDEV`. A same-device bind of `/other` over it is also refused with `EXDEV`. |
-| `lazily_detached_mount_refused` | In a private mount namespace, `umount2(MNT_DETACH)` of the XFS mount makes ensure fail with `ESTALE`. |
+| check                                              | what is proven                                                                                                                                                                                                                      |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allocation_and_limit_readback`                    | `qb_ensure(A)` → project 100000. Independent `Q_XGETQUOTA` shows blk_hard×512 = 16 MiB, ino_hard = 64, soft/rt = 0. The dir has projid + PROJINHERIT. Re-ensure returns the same project and inode.                                 |
+| `new_files_and_dirs_inherit_project`               | Nested dirs/files made by root, and a file made by the writer in `w/`, all carry projid 100000. Dirs carry PROJINHERIT.                                                                                                             |
+| `writer_stops_at_byte_hard_limit`                  | Writer (995:983, no groups, no caps, no_new_privs, only an inherited dir FD) writes until `ENOSPC`/`EDQUOT`. Written bytes and quota usage are ≤ 16 MiB and within 2 MiB of it, and the filesystem still has more than 64 MiB free. |
+| `space_usable_again_after_deletion`                | The writer unlinks the file. Usage drops (`syncfs` + wait for deferred inactivation). An 8 MiB write then succeeds.                                                                                                                 |
+| `writer_stops_at_inode_hard_limit`                 | The writer creates empty files. It gets exactly `64 − baseline` before `ENOSPC`/`EDQUOT`, and icount = 64.                                                                                                                          |
+| `inodes_usable_again_after_deletion`               | After unlinking, 8 new files can be created.                                                                                                                                                                                        |
+| `workload_userns_cannot_reassign_or_clear_inherit` | The writer in a new user namespace (the bwrap `--unshare-user` model) cannot set projid 0, clear PROJINHERIT on its own dir, or set REALTIME on its own file.                                                                       |
+| `wrong_filesystem_uuid_refused`                    | The adapter refuses a flipped-UUID policy with `EXDEV`. The core refuses a mismatching policy.                                                                                                                                      |
+| `revocation_survives_broker_restart`               | B is allocated as 100001 and revoked. Ensure returns `EACCES` before and after a full close/reopen from disk. B's quota record is kept.                                                                                             |
+| `project_ids_never_reused`                         | After restarts: A keeps 100000, C → 100002, D → 100003, and E → `ENOSPC` (B's id is not recycled).                                                                                                                                  |
+| `nested_and_bind_mount_refused`                    | In a private mount namespace, a tmpfs mounted over `broker/p100000` is refused with `EXDEV`. A same-device bind of `/other` over it is also refused with `EXDEV`.                                                                   |
+| `lazily_detached_mount_refused`                    | In a private mount namespace, `umount2(MNT_DETACH)` of the XFS mount makes ensure fail with `ESTALE`.                                                                                                                               |
 
 The `INFO init_userns_owner_reassignment` line is a measurement and not a gate. The
 same reassignment is tried **without** a user namespace. On Linux, a file owner in
-the initial user namespace is expected to be *able* to change `fsx_projid`, which
+the initial user namespace is expected to be _able_ to change `fsx_projid`, which
 escapes the quota. If the line says `ALLOWED`, the launcher must keep workloads
 inside a user namespace, as `process-driver.ts` does with `--unshare-user`. Record
 the observed value.
