@@ -3,3 +3,5 @@
 /test-transport
 /*.o
 /*.a
+/xfs-acceptance
+/xfs-acceptance-san

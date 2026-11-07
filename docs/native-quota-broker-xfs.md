@@ -156,7 +156,8 @@ isolated native-library change. No daemon/launcher/runtime integration is implie
    mutation/revocation fence; caller/workload project/attribute/mount privileges
    removed; no alternate launch/quota route; manager metadata/publication and
    least-privilege access policy integrated. A receipt alone is not a launch token.
-5. Separate host-change approval and root-owned reviewed disposable acceptance
+5. (Harness prepared, not yet run: `docs/native-quota-xfs-acceptance.md`.)
+   Separate host-change approval and root-owned reviewed disposable acceptance
    harness/build, never execution of this checkout as root. In an isolated
    approved XFS fixture prove UUID/attached identity/accounting/enforcement,
    fresh/absent quota record semantics, both exact limits and inherited descendants,
