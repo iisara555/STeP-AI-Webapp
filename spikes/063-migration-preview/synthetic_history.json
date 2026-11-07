@@ -1,0 +1,160 @@
+{
+  "_comment": "SYNTHETIC FIXTURE ONLY. Invented users, ids and text; never replace with real Supabase data.",
+  "users": [
+    { "auth_user_id": "user-1", "email": "alice@example.test" },
+    { "auth_user_id": "user-2", "email": "bob@example.test" }
+  ],
+  "google_accounts": [
+    { "google_sub": "sub-101", "email": "Alice@example.test" },
+    { "google_sub": "sub-202", "email": "bob@example.test" }
+  ],
+  "approvals": ["user-1", "user-2"],
+  "records": [
+    {
+      "table": "sessions",
+      "row": {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "tenant_id": "00000000-0000-0000-0000-000000000007",
+        "owner_id": "00000000-0000-0000-0000-000000000001",
+        "workspace_id": null,
+        "visibility": "private"
+      }
+    },
+    {
+      "table": "sessions",
+      "row": {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "tenant_id": "00000000-0000-0000-0000-000000000007",
+        "owner_id": "00000000-0000-0000-0000-000000000001",
+        "workspace_id": null,
+        "visibility": "private"
+      }
+    },
+    {
+      "table": "sessions",
+      "row": {
+        "id": "00000000-0000-0000-0000-000000000003",
+        "tenant_id": "00000000-0000-0000-0000-000000000007",
+        "owner_id": "00000000-0000-0000-0000-000000000002",
+        "workspace_id": null,
+        "visibility": "private"
+      }
+    },
+    {
+      "table": "sessions",
+      "row": {
+        "id": "00000000-0000-0000-0000-000000000004",
+        "tenant_id": "00000000-0000-0000-0000-000000000007",
+        "owner_id": "00000000-0000-0000-0000-000000000001",
+        "workspace_id": "00000000-0000-0000-0000-000000000009",
+        "visibility": "workspace"
+      }
+    },
+    {
+      "table": "memories",
+      "row": {
+        "id": "00000000-0000-0000-0000-000000000005",
+        "tenant_id": "00000000-0000-0000-0000-000000000007",
+        "owner_id": "00000000-0000-0000-0000-000000000001",
+        "workspace_id": null,
+        "visibility": "private"
+      }
+    },
+    {
+      "table": "documents",
+      "row": {
+        "id": "00000000-0000-0000-0000-000000000006",
+        "tenant_id": "00000000-0000-0000-0000-000000000007",
+        "owner_id": "00000000-0000-0000-0000-000000000001",
+        "workspace_id": null,
+        "visibility": "private"
+      }
+    }
+  ],
+  "contents": {
+    "00000000-0000-0000-0000-000000000001": {
+      "title": "SYNTHETIC-PLAINTEXT-title-one",
+      "createdAt": "2026-03-01T08:00:00.000Z",
+      "updatedAt": "2026-03-02T09:30:00.000Z",
+      "messages": [
+        {
+          "sourceMessageId": "msg-1a",
+          "role": "user",
+          "text": "SYNTHETIC-PLAINTEXT-question-one",
+          "at": "2026-03-01T08:00:00.000Z",
+          "attachments": [
+            {
+              "sourceAttachmentId": "att-1",
+              "name": "synthetic-brief.pdf",
+              "mediaType": "application/pdf",
+              "byteLength": 2048,
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+            }
+          ]
+        },
+        {
+          "sourceMessageId": "msg-1b",
+          "role": "status",
+          "text": "SYNTHETIC-PLAINTEXT-status-searching",
+          "at": "2026-03-01T08:00:00.000Z",
+          "attachments": []
+        },
+        {
+          "sourceMessageId": "msg-1c",
+          "role": "assistant",
+          "text": "SYNTHETIC-PLAINTEXT-answer-one",
+          "at": "2026-03-01T08:00:05.000Z",
+          "attachments": []
+        },
+        {
+          "sourceMessageId": "msg-1d",
+          "role": "user",
+          "text": "SYNTHETIC-PLAINTEXT-follow-up",
+          "at": "2026-03-02T09:30:00.000Z",
+          "attachments": []
+        }
+      ]
+    },
+    "00000000-0000-0000-0000-000000000002": {
+      "title": "SYNTHETIC-PLAINTEXT-title-two",
+      "createdAt": "2026-04-10T01:00:00.000Z",
+      "updatedAt": "2026-04-10T01:00:09.000Z",
+      "messages": [
+        {
+          "sourceMessageId": "msg-2a",
+          "role": "user",
+          "text": "SYNTHETIC-PLAINTEXT-question-two",
+          "at": "2026-04-10T01:00:00.000Z",
+          "attachments": []
+        },
+        {
+          "sourceMessageId": "msg-2b",
+          "role": "assistant",
+          "text": "SYNTHETIC-PLAINTEXT-answer-two",
+          "at": "2026-04-10T01:00:09.000Z",
+          "attachments": []
+        }
+      ]
+    },
+    "00000000-0000-0000-0000-000000000003": {
+      "title": "SYNTHETIC-PLAINTEXT-title-bob",
+      "createdAt": "2026-05-01T00:00:00.000Z",
+      "updatedAt": "2026-05-01T00:00:01.000Z",
+      "messages": [
+        {
+          "sourceMessageId": "msg-3a",
+          "role": "user",
+          "text": "SYNTHETIC-PLAINTEXT-bob-question",
+          "at": "2026-05-01T00:00:00.000Z",
+          "attachments": []
+        }
+      ]
+    },
+    "00000000-0000-0000-0000-000000000004": {
+      "title": "SYNTHETIC-PLAINTEXT-shared",
+      "createdAt": "2026-05-02T00:00:00.000Z",
+      "updatedAt": "2026-05-02T00:00:00.000Z",
+      "messages": []
+    }
+  }
+}
