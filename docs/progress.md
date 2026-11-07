@@ -278,6 +278,7 @@
 - No privileged host changes, account switch, live provider, production data, deployment
   or production activation. Browser acceptance remains blocked by missing Chromium
   `libatk-1.0.so.0`; no privileged dependency installation was attempted.
+
 ## #57 · disk/inode provisioning protocol integration (not installed)
 
 - เพิ่ม `server/src/workspace/disk-provisioning.ts` ที่ storage/runtime seams: รับเฉพาะ
