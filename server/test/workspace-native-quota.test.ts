@@ -179,6 +179,7 @@ test('native alone allocates project roots; manager publishes control metadata a
       '.workspace-quota-established',
       'users',
       'workspace-quota.sqlite',
+      'workspace-writer.fence',
     ]);
     assert.equal((await f.manager.list('alice')).length, 1);
     assert.equal((await f.manager.list('bob')).length, 0);
@@ -195,6 +196,8 @@ test('native alone allocates project roots; manager publishes control metadata a
     assert.deepEqual(await f.manager.conversations('alice', workspace.id), [
       { id: 'native-session', title: 'persisted', status: 'review' },
     ]);
+    // One live writer per data root (#62): the resuming manager replaces the first one.
+    await f.manager.shutdown();
     const resumed = new RuntimeManager({
       dataRoot: f.dataRoot,
       workspacesPerUser: 2,
@@ -223,6 +226,7 @@ test('native protected grant denial cannot auto-register a generated workspace o
       },
     }),
   };
+  await f.manager.shutdown();
   const manager = new RuntimeManager({
     dataRoot: f.dataRoot,
     workspacesPerUser: 2,
@@ -564,6 +568,7 @@ test('exit during deferred provider grant cannot become running and retains requ
   const f = await fixture();
   const entered = deferred();
   const gate = deferred();
+  await f.manager.shutdown();
   const manager = new RuntimeManager({
     dataRoot: f.dataRoot,
     workspacesPerUser: 2,

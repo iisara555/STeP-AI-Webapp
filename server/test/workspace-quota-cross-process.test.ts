@@ -13,7 +13,7 @@ import { RuntimeManager } from '../src/workspace/manager.ts';
 
 const exec = promisify(execFile);
 
-test('another process cannot bypass a gateway workspace quota via RuntimeManager', async () => {
+test('another process cannot bypass a gateway workspace quota via a second RuntimeManager', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'step-workspace-cross-process-'));
   const manager = new RuntimeManager({
     workspacesPerUser: 1,
@@ -46,8 +46,10 @@ test('another process cannot bypass a gateway workspace quota via RuntimeManager
     assert.equal(response.status, 200);
     const script = `
       import { RuntimeManager } from './server/src/workspace/manager.ts';
-      const manager = new RuntimeManager({ workspacesPerUser: 1, dataRoot: process.argv[1], driver: { start: async () => { throw Error('unused'); } } });
-      try { await manager.create('alice', { name: 'second' }); console.log('CREATED'); }
+      try {
+        const manager = new RuntimeManager({ workspacesPerUser: 1, dataRoot: process.argv[1], driver: { start: async () => { throw Error('unused'); } } });
+        await manager.create('alice', { name: 'second' }); console.log('CREATED');
+      }
       catch (error) { console.log(error.code ?? error.message); }
     `;
     const { stdout } = await exec(
@@ -55,7 +57,8 @@ test('another process cannot bypass a gateway workspace quota via RuntimeManager
       ['--import', 'tsx', '--input-type=module', '-e', script, dir],
       { cwd: process.cwd() },
     );
-    assert.equal(stdout.trim(), 'QUOTA_WORKSPACES');
+    // The live gateway manager holds the writer fence (#62), so the second manager never starts.
+    assert.equal(stdout.trim(), 'WORKSPACE_WRITER_FENCE_HELD');
     assert.equal((await manager.list('alice')).length, 1);
   } finally {
     server.closeAllConnections();

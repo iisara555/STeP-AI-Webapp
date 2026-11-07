@@ -24,6 +24,7 @@ import {
 } from './contract.ts';
 import { workspaceStorage, type WorkspaceStorage } from './storage.ts';
 import { WorkspaceQuotaStore } from './quota-store.ts';
+import { WriterFence } from './writer-fence.ts';
 
 /** Observe before returning to a fence whose COMMIT can throw after IPC enqueue.
  * Keep the original Promise so admitted callers still receive the runtime result/error.
@@ -103,6 +104,8 @@ export class RuntimeManager {
   private readonly connectTimeoutMs: number;
   private readonly now: () => number;
   private readonly grant: NonNullable<RuntimeManagerOptions['grant']>;
+  /** Exactly one live manager writes a data root (#62); held from construction until a clean shutdown. */
+  private readonly writerFence: WriterFence;
 
   constructor({
     dataRoot,
@@ -125,6 +128,8 @@ export class RuntimeManager {
     this.connectTimeoutMs = connectTimeoutMs;
     this.now = now;
     this.grant = grant;
+    // Last, so nothing after acquisition can throw and strand the fence; startup fails closed without it.
+    this.writerFence = WriterFence.acquire(dataRoot);
   }
 
   async create(
@@ -132,6 +137,7 @@ export class RuntimeManager {
     input: { name: string },
     admit?: (publish: () => void) => void,
   ): Promise<Workspace> {
+    if (this.shuttingDown) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
     const ownerId = parse(UserId, actor, 'INVALID_ID');
     const name = parse(WorkspaceName, input.name, 'INVALID_NAME');
     const at = new Date(this.now()).toISOString();
@@ -531,6 +537,8 @@ export class RuntimeManager {
     this.shutdownAttempt = attempt;
     try {
       await attempt;
+      // Only a clean shutdown hands the root on; a failed one keeps it fenced while runtimes may still write.
+      this.writerFence.release();
     } finally {
       if (this.shutdownAttempt === attempt) this.shutdownAttempt = undefined;
     }
@@ -694,6 +702,7 @@ export class RuntimeManager {
     admit?: (publish: () => void) => void,
     skipDenied = false,
   ) {
+    if (!this.writerFence.held) throw new Error('RUNTIME_MANAGER_SHUTTING_DOWN');
     const lastActive = this.now();
     record.lastActiveAt = new Date(lastActive).toISOString();
     await this.storage.save(record, (publish) => {

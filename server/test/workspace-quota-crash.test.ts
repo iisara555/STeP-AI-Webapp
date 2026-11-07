@@ -63,11 +63,18 @@ test('gateway refuses startup even without workspace quota configuration', async
 test('simultaneous processes share one workspace limit', async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-quota-processes-'));
   try {
-    new RuntimeManager({ dataRoot: provisionTestQuota(dataRoot, 1), driver, workspacesPerUser: 1 });
+    await new RuntimeManager({
+      dataRoot: provisionTestQuota(dataRoot, 1),
+      driver,
+      workspacesPerUser: 1,
+    }).shutdown();
+    // A concurrent second manager is refused by the writer fence (#62); a sequential one by the quota.
     const script = `
       import { RuntimeManager } from './server/src/workspace/manager.ts';
-      const manager = new RuntimeManager({ dataRoot: process.argv[1], workspacesPerUser: 1, driver: {start: async () => {throw Error('unused')}} });
-      try { await manager.create('alice', {name:'test'}); console.log('CREATED'); }
+      try {
+        const manager = new RuntimeManager({ dataRoot: process.argv[1], workspacesPerUser: 1, driver: {start: async () => {throw Error('unused')}} });
+        await manager.create('alice', {name:'test'}); console.log('CREATED');
+      }
       catch (error) { console.log(error.message); }
     `;
     const createInChild = () =>
@@ -75,7 +82,9 @@ test('simultaneous processes share one workspace limit', async () => {
         cwd: process.cwd(),
       });
     const results = await Promise.all([createInChild(), createInChild()]);
-    assert.deepEqual(results.map((result) => result.stdout.trim()).sort(), ['CREATED', 'QUOTA_WORKSPACES']);
+    const [created, refused] = results.map((result) => result.stdout.trim()).sort();
+    assert.equal(created, 'CREATED');
+    assert.match(refused!, /^(QUOTA_WORKSPACES|WORKSPACE_WRITER_FENCE_HELD)$/);
     const manager = new RuntimeManager({
       dataRoot,
       driver,
