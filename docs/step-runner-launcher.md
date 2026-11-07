@@ -120,11 +120,18 @@ any socket, journal entry or spawn.
   empty env at bwrap, stdin byte for byte, only fds 0–3, refusals never exec);
   `-fanalyzer` clean; ASan/UBSan pass; the production build refuses outside uid 995
   and links no `getenv`. App bind source regressions failed ten checks before the fix.
-- `bash native/runner-launcher/install/test-install-script.sh`: 24 checks with
-  stubbed privileged tools (real `visudo -c -f` for fragments). Two regressions
-  demonstrated successful unsafe installs before the fix: writable or symlinked
-  `/opt/step`. The installer now refuses untrusted destination chains before writes
-  for install/revoke/restore/uninstall; it never takes over an unsafe existing parent.
+- `make -C native/runner-launcher install-script-test`: 26 lifecycle checks with
+  stubbed privileged tools (real unprivileged `visudo -c -f` for fragments), plus
+  three Python tests exercising the **actual documented inline bootstrap** with
+  real hashes, modes and symlinks in a remapped scratch layout. Tests cover
+  independent full pins for each copied artifact, successful verification before
+  execution, and non-root/group-writable/other-writable/symlinked destination
+  ancestors refusing before any write. Bootstrap ownership is simulated, not
+  privileged acceptance. The lifecycle regressions failed before the fixes:
+  busy purge deleted app/Node; live-principal purge succeeded. Both now refuse
+  before removing even the sudoers rule and preserve app/Node; unexpected socket
+  parent entries also preserve the installation. Purge requires the offline
+  maintenance prerequisite below; process snapshots do not fence concurrent launch.
 - `server/test/step-runner-launcher.test.ts` (6): option/request validation; and a
   contract test that runs the TESTING launcher with exactly the driver's argv and
   requires the exec'd vector to equal the raw-bwrap sandbox.
@@ -137,12 +144,13 @@ a real runtime under the launcher. Those are the gated host tests below.
 
 ## Exact owner commands
 
-Verified SHA-256 (default compiler/flags of this worktree; installer pins launcher,
-fragment and Node, not itself):
+Verified SHA-256 (default compiler/flags of this worktree; the bootstrap below
+independently pins installer, launcher and fragment; the installer also pins
+launcher, fragment and Node):
 
 ```text
 fb19a64c0bd71aa7eb40b1ecee1c19efb1fd992c17f97d2b015842507bf1a54f  launch
-17ad5f375a40519a294e541e0e97871f03b7fee7ce495ee65f58ae9ee830aecd  install/install-runner-launcher.sh
+93b9289a21af661faecabeee1a96c420da424d209fef84c15fa737714b476326  install/install-runner-launcher.sh
 af866337286102d4f687140999a910d08679eec143cb2cc3243136959d0b9a47  install/sudoers-step-runner-launch
 08f12d42fb304468e8ee86247fe686aae5b225836ea65e9d6566c11ae6ba2e8e  node (26.12.1 linux-x64)
 ```
@@ -159,20 +167,61 @@ make clean launch install-check sudoers-check     # pinned == actual, "parsed OK
 sha256sum launch install/install-runner-launcher.sh install/sudoers-step-runner-launch
 ```
 
-Install (one password prompt; copies root-owned files, the installer re-verifies the pins):
+Install (one password prompt). Obtain the three full expected hashes below from
+an independently reviewed/trusted copy of this runbook, NOT from the checkout or
+the installer being copied. The inline root shell is the bootstrap trust base;
+review it too. It validates every existing destination ancestor before its first
+write. Root executes only the installed copy after all three independent checks
+pass. No checkout script is executed as root. Do not run during concurrent
+privileged updates.
 
 ```sh
-cd /home/itsara/projects/step-protected-launcher/native/runner-launcher && sudo sh -c '
-test ! -e /usr/local/libexec/step-runner-launch &&
-test ! -L /usr/local/libexec/step-runner-launch &&
-install -d -o root -g root -m 0755 /usr/local/libexec/step-runner-launch &&
-install -o root -g root -m 0755 launch /usr/local/libexec/step-runner-launch/launch &&
-install -o root -g root -m 0755 install/install-runner-launcher.sh /usr/local/libexec/step-runner-launch/install &&
-install -o root -g root -m 0444 install/sudoers-step-runner-launch /usr/local/libexec/step-runner-launch/sudoers-step-runner-launch &&
-/usr/local/libexec/step-runner-launch/install --install \
+sudo /bin/bash <<'ROOT_BOOTSTRAP'
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+umask 077
+src=/home/itsara/projects/step-protected-launcher/native/runner-launcher
+dst=/usr/local/libexec/step-runner-launch
+# Validate ALL existing ancestors before install -d, copies or any other writes.
+trusted_existing_dirs() {
+  local p=$1 meta
+  while :; do
+    if [[ -e $p || -L $p ]]; then
+      [[ -d $p && ! -L $p ]] || { echo "REFUSED directory: $p" >&2; exit 2; }
+      meta=$(stat -c '%u %a' -- "$p")
+      [[ ${meta%% *} == 0 ]] && (( (8#${meta#* } & 8#022) == 0 )) ||
+        { echo "REFUSED ownership/mode: $p" >&2; exit 2; }
+    fi
+    [[ $p != / ]] || break
+    p=$(dirname -- "$p")
+  done
+}
+for p in "$dst" /opt/step /var/lib /etc/sudoers.d; do
+  trusted_existing_dirs "$p"
+done
+for p in "$dst" /opt/step/app /opt/step/node /var/lib/step-runner-launch /etc/sudoers.d/step-runner-launch; do
+  [[ ! -e $p && ! -L $p ]] || { echo "REFUSED existing destination: $p" >&2; exit 2; }
+done
+install -d -o root -g root -m 0700 -- "$dst"
+install -o root -g root -m 0755 -- "$src/launch" "$dst/launch"
+install -o root -g root -m 0755 -- "$src/install/install-runner-launcher.sh" "$dst/install"
+install -o root -g root -m 0444 -- "$src/install/sudoers-step-runner-launch" "$dst/sudoers-step-runner-launch"
+# Hash the COPIES in the validated root-only chain, not the mutable sources.
+sha256sum --check --strict <<'EXPECTED_SHA256'
+fb19a64c0bd71aa7eb40b1ecee1c19efb1fd992c17f97d2b015842507bf1a54f  /usr/local/libexec/step-runner-launch/launch
+93b9289a21af661faecabeee1a96c420da424d209fef84c15fa737714b476326  /usr/local/libexec/step-runner-launch/install
+af866337286102d4f687140999a910d08679eec143cb2cc3243136959d0b9a47  /usr/local/libexec/step-runner-launch/sudoers-step-runner-launch
+EXPECTED_SHA256
+chmod 0755 -- "$dst"
+"$dst/install" --install \
   --app-source /home/itsara/projects/step-protected-launcher \
-  --node-source /home/itsara/.hermes/tools/node-26.12.1-linux-x64/bin/node'
+  --node-source /home/itsara/.hermes/tools/node-26.12.1-linux-x64/bin/node
+ROOT_BOOTSTRAP
 ```
+
+On copy/hash failure nothing is executed. Inspect/remove the partial root-owned
+bootstrap directory before retrying; never bypass a mismatching hash.
 
 Then tier A host tests, then close the gate:
 
@@ -187,12 +236,34 @@ After `--revoke-bwrap` the existing raw-bwrap gated suite
 (`step-runner-driver.test.ts`) can no longer pass; it must move to the protected
 mode (with the broker installed, tier B) before it is run again.
 
-Undo:
+Undo (restoring bwrap reopens gate 5; it is not needed to uninstall):
+
+**`--purge` is offline-only, not a concurrent deployment operation.** The enforced
+operational prerequisite is a boot with `systemd.unit=emergency.target`, network
+disconnected, using the root console (not an itsara SSH/sudo session). Do not start
+multi-user services, cron/at, gateway/workload user managers, containers, or allow
+logins/jobs for uid 1000 or 995 until purge completes. There must be no remaining
+processes with either real or effective uid 1000/995; the installer checks both
+and refuses before any removal. This snapshot is defense in depth, **not a launch
+fence**: emergency/offline maintenance is what prevents a new process from
+appearing after the check. A stopped gateway service or empty socket directory
+alone is insufficient, especially while the old arbitrary-bwrap rule exists.
+If this prerequisite cannot be enforced, use `--uninstall` **without `--purge`**
+and leave app/Node/socket files intact. Do not remove the bootstrap directory
+while workloads may still run.
+
+From that offline root console, purge using:
 
 ```sh
-sudo /usr/local/libexec/step-runner-launch/install --restore-bwrap     # undo --revoke-bwrap
-sudo /usr/local/libexec/step-runner-launch/install --uninstall --purge # undo --install
-sudo rm -r /usr/local/libexec/step-runner-launch
+/usr/local/libexec/step-runner-launch/install --uninstall --purge
+rm -r /usr/local/libexec/step-runner-launch
+```
+
+Non-purging undo (files retained, so it does not require offline purge):
+
+```sh
+sudo /usr/local/libexec/step-runner-launch/install --restore-bwrap # optional; reopens the unsafe rule
+sudo /usr/local/libexec/step-runner-launch/install --uninstall
 ```
 
 ## Residual risks

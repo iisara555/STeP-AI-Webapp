@@ -30,7 +30,8 @@
 #   $INSTALL_DIR/previous-step-runner.sudoers (root 0400); visudo -c.
 # --restore-bwrap: puts that saved rule back (visudo -c -f first).
 # --uninstall: removes /etc/sudoers.d/step-runner-launch. KEEPS /opt/step and the socket root
-#   unless --purge (socket root only while empty). Never restores the bwrap rule by itself.
+#   unless --purge (OFFLINE root-console maintenance only; see the runbook).
+#   Purge preflights process absence and the complete socket layout before any removal.
 set -euo pipefail
 IFS=$' \t\n'
 umask 077
@@ -61,7 +62,7 @@ readonly GATEWAY_NAME=itsara GATEWAY_UID=1000 GATEWAY_GID=1000
 readonly WORKLOAD_NAME=step-runner WORKLOAD_UID=995 WORKLOAD_GID=983
 readonly APP_PARTS="node_modules harness server/src server/package.json package.json"
 readonly APP_REQUIRED="node_modules/tsx/dist/loader.mjs server/src/register.mjs server/src/workspace/runtime-main.ts"
-readonly TOOLS="stat sha256sum install getent id visudo runuser tar find chmod chown mv rm rmdir mktemp cmp cat"
+readonly TOOLS="stat sha256sum install getent id visudo runuser tar find chmod chown mv rm rmdir mktemp cmp cat pgrep"
 
 usage() {
     echo "usage: $0 --dry-run [--app-source DIR --node-source FILE]" >&2
@@ -160,7 +161,8 @@ Steps of a real --install (root only):
      rename to $SUDOERS_DST, visudo -c (removed again on failure)
   7. smoke: runuser -u $WORKLOAD_NAME -- $LAUNCH must refuse (usage; then broker-root/workspace)
 Then: sudo $SELF_INSTALLED --revoke-bwrap   (undo: --restore-bwrap)
-Undo install: sudo $SELF_INSTALLED --uninstall [--purge]
+Undo install: sudo $SELF_INSTALLED --uninstall (keeps app/Node/sockets)
+Purge: OFFLINE root-console maintenance only; see docs/step-runner-launcher.md.
 EOF
     exit 0
 fi
@@ -228,6 +230,34 @@ if [[ $MODE == restore-bwrap ]]; then
 fi
 
 if [[ $MODE == uninstall ]]; then
+    # OFFLINE MAINTENANCE REQUIRED for --purge: the owner must first stop/fence all
+    # gateway and workload sessions, services, timers and login/cron entry points,
+    # and keep them fenced until purge finishes (see the owner runbook). Empty
+    # sockets alone do NOT prove quiescence and this script is not a launch fence.
+    # Preflight ALL layout refusals before removing even the sudoers rule.
+    if (( PURGE )); then
+        visudo -c || die "visudo -c failed before purge; nothing removed"
+        # Snapshot checks are defense in depth, NOT a fence against later spawn.
+        # Check real AND effective IDs; fail closed on pgrep errors as well.
+        for ids in -u -U; do
+            set +e
+            pgrep "$ids" "$GATEWAY_UID,$WORKLOAD_UID" >/dev/null
+            rc=$?
+            set -e
+            [[ $rc == 1 ]] || die "gateway/workload processes still present or process check failed; offline maintenance required"
+        done
+        if [[ -e $SOCKETS || -L $SOCKETS ]]; then
+            [[ -d $SOCKETS && ! -L $SOCKETS ]] || die "$SOCKETS is not a real directory"
+            entries=$(find "$SOCKETS" -mindepth 1 -maxdepth 1 -print -quit) || die "cannot inspect $SOCKETS"
+            [[ -z $entries ]] ||
+                die "$SOCKETS is not empty (a gateway may be running); not purging it"
+        fi
+        if [[ -d $SOCKET_PARENT ]]; then
+            entries=$(find "$SOCKET_PARENT" -mindepth 1 -maxdepth 1 ! -name sockets -print -quit) || die "cannot inspect $SOCKET_PARENT"
+            [[ -z $entries ]] ||
+                die "$SOCKET_PARENT has unexpected entries; not purging it"
+        fi
+    fi
     if [[ -e $SUDOERS_DST ]]; then
         rm -f -- "$SUDOERS_DST"
         visudo -c || die "visudo -c failed after removing $SUDOERS_DST"
@@ -245,7 +275,7 @@ if [[ $MODE == uninstall ]]; then
         [[ ! -d $SOCKET_PARENT ]] || rmdir -- "$SOCKET_PARENT"
         echo "purged $APP, $STEP_DIR/node and $SOCKET_PARENT"
     else
-        echo "kept $APP, $STEP_DIR/node and $SOCKETS (add --purge to remove)"
+        echo "kept $APP, $STEP_DIR/node and $SOCKETS (purge requires offline root-console maintenance; see the runbook)"
     fi
     echo "launcher and scripts remain in $INSTALL_DIR; remove with: sudo rm -r $INSTALL_DIR"
     exit 0
@@ -325,4 +355,4 @@ set -e
 created=()
 echo "INSTALLED: $LAUNCH (sha256 $LAUNCH_SHA256), $SUDOERS_DST, $APP, $NODE_DIR/node, $SOCKETS"
 echo "The old any-arguments rule $OLD_RULE is still present: sudo $SELF_INSTALLED --revoke-bwrap"
-echo "Undo: sudo $SELF_INSTALLED --uninstall --purge"
+echo "Undo: sudo $SELF_INSTALLED --uninstall (purge only from the offline root console; see the runbook)"

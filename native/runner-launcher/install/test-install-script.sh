@@ -23,6 +23,7 @@ stub id '[[ $1 == -u ]] && { echo 0; exit 0; }; [[ "$1 $2" == "-G step-runner" ]
 stub stat 'last=${!#}; a=(); for x in "$@"; do [[ $last != */sockets ]] && x=${x//%u/0}; a+=("$x"); done; exec /usr/bin/stat "${a[@]}"'
 stub install 'a=(); while (($#)); do case $1 in -o|-g) shift 2;; *) a+=("$1"); shift;; esac; done; exec /usr/bin/install "${a[@]}"'
 stub chown 'echo "chown $*" >>'"$calls"
+stub pgrep '[[ -e '"$work"'/processes-present ]] && { echo 12345; exit 0; }; exit 1'
 stub getent 'case "$1 $2" in
 "passwd '"$me"'") echo "'"$me"':x:'"$uid:$gid"'::/home:/bin/bash";;
 "passwd step-runner") echo "step-runner:x:995:983::/:/usr/sbin/nologin";;
@@ -190,11 +191,23 @@ run --uninstall
 [[ $rc == 0 && ! -e $work/sudoers.d/step-runner-launch && ! -e $work/sudoers.d/step-runner && -d $app ]] &&
     grep -q 'fail closed' "$work/out" && ok "uninstall removes the launcher rule, never re-adds the bwrap rule, keeps the app" ||
     bad "uninstall ($rc): $(cat "$work/out")"
+cp "$here/sudoers-step-runner-launch" "$work/sudoers.d/step-runner-launch"
+touch "$work/processes-present"
+run --uninstall --purge
+[[ $rc == 2 && -f $app/server/src/register.mjs && -f $step/node/bin/node && -f $work/sudoers.d/step-runner-launch ]] &&
+    grep -q 'processes still present' "$work/out" && ok "purge refuses live principals before any removal" || bad "purge live processes ($rc)"
+rm "$work/processes-present"
 mkdir "$work/var/lib/step-runner-launch/sockets/0011"
 run --uninstall --purge
-[[ $rc == 2 && -d $work/var/lib/step-runner-launch/sockets/0011 ]] && grep -q 'not empty' "$work/out" &&
-    ok "purge keeps a non-empty socket root" || bad "purge busy ($rc)"
+[[ $rc == 2 && -d $work/var/lib/step-runner-launch/sockets/0011 && -f $app/server/src/register.mjs && -f $step/node/bin/node && -f $work/sudoers.d/step-runner-launch ]] &&
+    cmp -s "$step/node/bin/node" "$work/node-src" && cmp -s "$app/server/src/register.mjs" "$a/server/src/register.mjs" && grep -q 'not empty' "$work/out" &&
+    ok "busy purge preserves app, node and socket root" || bad "purge busy preservation ($rc)"
 rmdir "$work/var/lib/step-runner-launch/sockets/0011"
+echo unexpected >"$work/var/lib/step-runner-launch/keep"
+run --uninstall --purge
+[[ $rc == 2 && -f $app/server/src/register.mjs && -f $step/node/bin/node && -f $work/sudoers.d/step-runner-launch && -d $work/var/lib/step-runner-launch/sockets ]] &&
+    grep -q 'unexpected entries' "$work/out" && ok "unexpected socket-parent entry preserves the whole install" || bad "purge unexpected entry ($rc)"
+rm "$work/var/lib/step-runner-launch/keep"
 run --uninstall --purge
 [[ $rc == 0 && ! -e $step && ! -e $work/var/lib/step-runner-launch ]] && ok "purge removes app, node and socket root" ||
     bad "purge ($rc): $(cat "$work/out")"

@@ -63,8 +63,9 @@ sudoers-check:
 install-dry-run:
 	bash install/install-runner-launcher.sh --dry-run
 
-install-script-test:
+install-script-test: launch
 	bash install/test-install-script.sh
+	python3 install/test-owner-bootstrap.py
 
 clean:
 	rm -f launch launch-testing launch-san fake-bwrap test-launcher
