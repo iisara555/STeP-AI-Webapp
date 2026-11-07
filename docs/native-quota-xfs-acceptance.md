@@ -80,7 +80,7 @@ zero bootstrap users and projects 100010–100013. It checks:
 - `operator_raise_limit_enforced_and_replayed`: lower/overcommit refusals,
   durable raise, independent hard-limit readback, write beyond the old limit up to
   the new limit, idempotent retry and restart receipts/usage.
-- `add_user_refused_on_overcommit`: outstanding promises plus reserve cannot fit;
+- `add_user_refused_on_overcommit`: full durable hard limits plus reserve cannot fit;
   journal unchanged and refused user cannot allocate.
 - `full_pool_keeps_sqlite_history_intact`: an unprivileged writer opens the Store
   schema in WAL mode, commits 200 history rows, fills the shared pool through a
@@ -88,6 +88,19 @@ zero bootstrap users and projects 100010–100013. It checks:
   checksum/integrity and every successful small write must survive reopen;
   another user's pool must still write; freeing the filler must allow a new
   6 MiB database write and clean reopen.
+
+Capacity-fix compatibility (source inspection, not a root-run result): the harness
+sets reserve to initial settled `f_bavail` minus 3.5 default pools. Two grants
+charge 2 pools; raising U1 charges 3, leaving 0.5 pool (8 MiB) for intervening
+metadata/occupancy under the conservative free-space veto. The third grant would
+charge 4 pools and must be refused even after U1 deletes its filler. The total
+ceiling is no tighter than the free-space veto because `f_bavail <= f_blocks`.
+No harness usage discount is needed; unrelated growth may conservatively reject
+the earlier raise and fail acceptance rather than permit overcommit. The
+full-pool SQL checks occur only after these admissions. This is a fixed durable
+reservation-budget guarantee, not a guarantee against unrelated external writes,
+metadata growth or physical inode exhaustion. See the service document's capacity
+limitations; no test here proves that a disk can never fill.
 
 `INFO full_pool_details` measures USAGE readback and fresh Store startup while
 full. Store startup writes (including search-index rebuild) may fail even if
@@ -117,8 +130,8 @@ ignored build output and is never committed or installed.
 ## Pinned values (this commit; build with `make -C native/quota-broker acceptance`)
 
 ```text
-874a5a809c5464ffa60f00d310287ee73f9e0ca57f60157c151850f11b1dea70  xfs-acceptance   (= BIN_SHA256 in run)
-08bdda340e51ee91af9a84caabf16388ff465d9f3923c4db82590042b9166d54  run (acceptance/run-xfs-acceptance.sh)
+65881479679ee35a56ede6057fc367d5ce642e6291a48cfffbae4cb0f2bd5835  xfs-acceptance   (= BIN_SHA256 in run)
+559f84281995d9a9fb3816d8be81c0974d143b8a1fb6e7f979ab4a6e546ee00d  run (acceptance/run-xfs-acceptance.sh)
 ```
 
 ## Exact owner commands
@@ -188,7 +201,7 @@ and `ls -d /var/tmp/step-xfs-acceptance.*` should print nothing. Send
 ## Unprivileged verification done (as itsara)
 
 ```sh
-make -C native/quota-broker clean all test analyze   # 24 core + xfs seam + transport/policy/broker + SQL model; analyzer clean
+make -C native/quota-broker clean all test analyze   # 25 core + 12 capacity schedules + xfs seam + transport/policy/broker + SQL model; analyzer clean
 make -C native/quota-broker sanitize                 # ASan+UBSan tests; sanitized acceptance binary refusal paths (exit 2)
 make -C native/quota-broker acceptance acceptance-check acceptance-dry-run acceptance-wrapper-test
 shellcheck -s bash native/quota-broker/acceptance/*.sh   # ShellCheck 0.11.0 (pip shellcheck-py in a scratch venv): clean

@@ -32,7 +32,7 @@ umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export LC_ALL=C
 
-readonly BIN_SHA256=1274e38e3be4e43893416384756fd308fff77db3baf8c33ea26dd83990d207f3
+readonly BIN_SHA256=0cee49e9c91f4bee0b59565ea67b6d4a998772e0af7cacb3aa33a52da2f19cdc
 readonly UNIT_SHA256=2d86101468b2af0622680ffa5e1004ba1ef55239a82192a6e16f4f7082e39394
 readonly INSTALL_DIR=/usr/local/libexec/step-quota-broker
 readonly SELF_INSTALLED=$INSTALL_DIR/install

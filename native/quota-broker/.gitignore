@@ -1,4 +1,5 @@
 /test-core
+/test-capacity-race
 /test-xfs
 /test-transport
 /*.o

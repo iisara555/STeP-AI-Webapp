@@ -64,8 +64,9 @@ xfs.o: xfs.c xfs.h core.h
 libstep-quota-xfs.a: xfs.o
 	$(AR) rcs $@ $<
 
-test: test-core test-xfs test-transport test-policy test-broker acceptance-sql-test
+test: test-core test-capacity-race test-xfs test-transport test-policy test-broker acceptance-sql-test
 	./test-core
+	./test-capacity-race
 	./test-xfs
 	./test-transport
 	./test-policy
@@ -73,6 +74,9 @@ test: test-core test-xfs test-transport test-policy test-broker acceptance-sql-t
 
 test-xfs: xfs.c xfs.h core.c core.h test-xfs.c
 	$(CC) $(CFLAGS) -pthread -DQB_XFS_TESTING core.c xfs.c test-xfs.c -o $@
+
+test-capacity-race: core.c core.h test-core.c test-capacity-race.c
+	$(CC) $(CFLAGS) -pthread core.c test-capacity-race.c -Wl,--wrap=fsync -Wl,--wrap=fstatvfs -o $@
 
 test-core: core.c core.h test-core.c
 	$(CC) $(CFLAGS) -pthread core.c test-core.c -Wl,--wrap=fsync -Wl,--wrap=fstatvfs -o $@
@@ -136,4 +140,4 @@ analyze:
 	$(CC) $(CFLAGS) -DQB_BROKER_TESTING -fanalyzer -c policy.c -o /dev/null
 
 clean:
-	rm -f test-acceptance-sql test-core test-xfs test-transport test-policy test-broker step-quota-broker step-quota-broker-fake step-quota-broker-san xfs-acceptance xfs-acceptance-san core.o xfs.o transport.o libstep-quota-core.a libstep-quota-xfs.a libstep-quota-transport.a
+	rm -f test-capacity-race test-acceptance-sql test-core test-xfs test-transport test-policy test-broker step-quota-broker step-quota-broker-fake step-quota-broker-san xfs-acceptance xfs-acceptance-san core.o xfs.o transport.o libstep-quota-core.a libstep-quota-xfs.a libstep-quota-transport.a

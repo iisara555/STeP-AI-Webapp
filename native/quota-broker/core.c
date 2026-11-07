@@ -627,19 +627,21 @@ int qb_usage(struct qb *b, uid_t peer, const void *frame, size_t length, struct 
 }
 
 /* ---- operator-only pool operations ---- */
-/* No overcommit. Outstanding promise of every user (policy and journal, revoked included):
- * a pool with a directory promises hard - min(used, hard) (its usage is read through the
- * adapter; failure to verify any pool fails the whole check); a pool without a directory
- * promises its full hard limit (0 if revoked: it can never allocate). `changed` (or -1)
- * uses `changed_bytes` as that user's new limit; `adding` counts one more fresh pool. */
+/* Reservation ledger: charge FULL hard limits of ALL grants, including revoked and
+ * unallocated grants. Usage is report-only: it must NEVER buy admission headroom.
+ * The root-owned reserve and filesystem total define the reservation ceiling; a second,
+ * deliberately stricter free-space veto charges all current occupancy again (including
+ * user data). Thus no subtraction of asynchronous quota usage from statvfs is needed.
+ * This can refuse safe grants, but concurrent deletion cannot count freed space twice.
+ * Unknown future external writes/metadata still require operator reserve and monitoring;
+ * no read sequence is an atomic snapshot or a fence against external disk consumers. */
 static int capacity(struct qb *b, int changed, uint64_t changed_bytes, int adding, struct qb_capacity *out) {
     struct qb_capacity c; memset(&c, 0, sizeof(c));
     for (uint32_t i = 0; i < b->policy.grant_count; i++) {
         const struct allocation *a = &b->allocations[i];
-        uint64_t hard = (int)i == changed ? changed_bytes : a->bytes_hard, promised = hard;
+        uint64_t hard = (int)i == changed ? changed_bytes : a->bytes_hard;
         c.users++;
-        if (!a->project && a->revoked) promised = 0;
-        else if (a->inode) {
+        if (a->inode) {
             int fd = open_pool(b, a);
             if (fd < 0) return -1;
             struct qb_observation o; memset(&o, 0, sizeof(o));
@@ -649,18 +651,26 @@ static int capacity(struct qb *b, int changed, uint64_t changed_bytes, int addin
             if (o.project != a->project || o.inherit != 1 || !o.bytes_hard || !o.inodes_hard ||
                 o.bytes_hard > a->bytes_hard ||
                 o.inodes_hard > a->inodes_hard) return deny(EDQUOT);
-            promised = hard - (o.bytes_used < hard ? o.bytes_used : hard);
         }
-        c.committed += promised; /* <= 512 x 1 TiB: no overflow */
+        if (hard > UINT64_MAX - c.committed) return deny(EOVERFLOW);
+        c.committed += hard;
     }
-    if (adding) { c.users++; c.committed += b->policy.bytes_hard; }
+    if (adding) {
+        if (b->policy.bytes_hard > UINT64_MAX - c.committed) return deny(EOVERFLOW);
+        c.users++; c.committed += b->policy.bytes_hard;
+    }
     struct statvfs v;
     if (fstatvfs(b->root, &v) < 0) return -1;
-    if (v.f_frsize && v.f_bavail > UINT64_MAX / v.f_frsize) c.available = UINT64_MAX;
-    else c.available = (uint64_t)v.f_bavail * v.f_frsize;
+    /* Reserved filesystem blocks are NOT user capacity (use bavail, never bfree).
+     * Invalid geometry or multiplication overflow fails closed, never saturates. */
+    if (!v.f_frsize || v.f_bfree > v.f_blocks || v.f_bavail > v.f_bfree) return deny(EIO);
+    if (v.f_blocks > UINT64_MAX / v.f_frsize) return deny(EOVERFLOW);
+    uint64_t total = (uint64_t)v.f_blocks * v.f_frsize;
+    c.available = (uint64_t)v.f_bavail * v.f_frsize;
     c.reserve = b->policy.reserve_bytes;
     if (out) *out = c;
-    if (c.committed > c.available || c.available - c.committed < c.reserve) return deny(EFBIG);
+    if (c.reserve > total || c.committed > total - c.reserve ||
+        c.committed > c.available || c.available - c.committed < c.reserve) return deny(EFBIG);
     return 0;
 }
 static int grant_locked(struct qb *b, const char *user, uint32_t *project, struct qb_capacity *cap) {

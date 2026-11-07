@@ -31,11 +31,23 @@ int __wrap_fsync(int fd) {
 }
 /* Link-time seam for the no-overcommit check: a fixed number of free bytes. */
 static uint64_t fake_available; /* 0 = real */
+static int fake_geometry; /* malformed/overflow statvfs and reserved-block cases */
+static void (*after_space_read)(void); /* deterministic workload scheduling seam */
 int __real_fstatvfs(int fd, struct statvfs *v);
 int __wrap_fstatvfs(int fd, struct statvfs *v);
 int __wrap_fstatvfs(int fd, struct statvfs *v) {
     int rc = __real_fstatvfs(fd, v);
     if (!rc && fake_available) { v->f_frsize = 4096; v->f_bavail = fake_available / 4096; }
+    if (!rc && fake_geometry) {
+        v->f_frsize = 4096; v->f_blocks = 1024; v->f_bfree = 1024; v->f_bavail = 1024;
+        if (fake_geometry == 1) v->f_frsize = 0;
+        if (fake_geometry == 2) v->f_blocks = UINT64_MAX;
+        if (fake_geometry == 3) v->f_bavail = 1025;
+        if (fake_geometry == 4) v->f_bfree = 1025;
+        if (fake_geometry == 5) v->f_bavail = 0; /* all free space reserved to root */
+        if (fake_geometry == 6) v->f_bavail = 512; /* exact 2 MiB usable */
+    }
+    if (!rc && after_space_read) after_space_read();
     return rc;
 }
 /* Synthetic ioctl model ONLY. No ioctl/quotactl/mount/root path is executed. */
@@ -697,10 +709,15 @@ static void no_overcommit(void) {
     /* 4 pools x 1 MiB + 1 MiB reserve > 4.5 MiB free: refused, nothing written. */
     assert(qb_grant_add(f.broker, user_z, &project, &c) < 0 && errno == EFBIG && c.committed == 4 * MIB_);
     assert(journal_size(&f) == size);
-    /* Space a pool already uses is no longer promised (it is gone from the free space too). */
+    /* Usage cannot buy admission headroom, even after deletion or restart. */
     assert(ensure(&f, 0, &r) == 0 && r.project == 100002); close(r.directory_fd);
     f.model.slots[2].value.bytes_used = MIB_;
-    assert(qb_grant_add(f.broker, user_z, &project, &c) == 0 && c.committed == 3 * MIB_ && c.users == 4);
+    assert(qb_grant_add(f.broker, user_z, &project, &c) < 0 && errno == EFBIG && c.committed == 4 * MIB_);
+    restart(&f);
+    f.model.slots[2].value.bytes_used = 0;
+    assert(qb_grant_add(f.broker, user_z, &project, &c) < 0 && errno == EFBIG);
+    fake_available = 6 * MIB_;
+    assert(qb_grant_add(f.broker, user_z, &project, &c) == 0 && c.committed == 4 * MIB_ && c.users == 4);
     /* A pool whose usage cannot be verified fails the check closed. */
     size = journal_size(&f);
     f.model.corrupt = 2;
@@ -713,6 +730,41 @@ static void no_overcommit(void) {
     assert(journal_size(&f) == size);
     fake_available = 0;
     cleanup(&f);
+}
+static void capacity_geometry(void) {
+    struct fixture f; fixture_init(&f); f.policy.grant_count = 1;
+    f.policy.reserve_bytes = MIB_; bootstrap(&f);
+    struct qb_receipt r; assert(ensure(&f, 0, &r) == 0); close(r.directory_fd);
+    struct qb_capacity c; uint32_t project;
+    for (int raising = 0; raising < 2; raising++) {
+        for (int mode = 1; mode <= 6; mode++) {
+            fake_geometry = mode;
+            off_t size = journal_size(&f);
+            int rc = raising ? qb_raise(f.broker, f.policy.grants[0].workspace, 2*MIB_, 200, &c)
+                             : qb_grant_add(f.broker, user_x, &project, &c);
+            assert(rc < 0 && errno == (mode == 2 ? EOVERFLOW : mode <= 4 ? EIO : EFBIG));
+            assert(journal_size(&f) == size && f.model.raise_calls == 0);
+        }
+    }
+    fake_geometry = 0; fake_available = 3*MIB_;
+    assert(qb_raise(f.broker, f.policy.grants[0].workspace, 2*MIB_, 200, &c) == 0);
+    assert(c.committed == 2*MIB_ && c.reserve == MIB_); /* equality admits */
+    restart(&f);
+    off_t size = journal_size(&f);
+    assert(qb_grant_add(f.broker, user_x, &project, &c) < 0 && errno == EFBIG && c.committed == 3*MIB_);
+    /* Revocation does not release the durable reservation, even across restart. */
+    assert(qb_revoke(f.broker, f.policy.grants[0].workspace) == 0); restart(&f);
+    assert(qb_grant_add(f.broker, user_x, &project, &c) < 0 && errno == EFBIG && c.committed == 3*MIB_);
+    assert(journal_size(&f) > size);
+    fake_available = 4*MIB_;
+    assert(qb_grant_add(f.broker, user_x, &project, &c) == 0 && project == 100001);
+    fake_available = 0; cleanup(&f);
+    fixture_init(&f); f.policy.grant_count = 0; f.policy.reserve_bytes = QB_MAX_RESERVE_BYTES;
+    bootstrap(&f); fake_geometry = 6;
+    size = journal_size(&f);
+    assert(qb_grant_add(f.broker, user_x, &project, &c) < 0 && errno == EFBIG);
+    assert(journal_size(&f) == size);
+    fake_geometry = 0; cleanup(&f);
 }
 static void raise_limits(void) {
     struct fixture f; fixture_init(&f); f.policy.grant_count = 2; bootstrap(&f);
@@ -853,7 +905,7 @@ int main(void) {
         uncertain_commit, truncated_live_state, substitution_during_adapter, exclusive_process_authority,
         concurrent_ten, revoke_fences_mutation, cached_revoke_truncated_journal,
         cached_revoke_idempotency_and_mount_health, shared_layout, private_layout_receipt,
-        journal_grants, no_overcommit, raise_limits, shared_journal_users, uncertain_operator_sync};
+        journal_grants, no_overcommit, capacity_geometry, raise_limits, shared_journal_users, uncertain_operator_sync};
     const char *names[] = {"strict bounded protocol", "explicit protected policy/bootstrap",
         "allocation/retry/restart", "never adopt foreign tree", "substitution/symlink/retained FD",
         "mount/evidence fail closed", "unknown outcome/capacity", "interrupted provision/restart",
@@ -863,7 +915,8 @@ int main(void) {
         "cached revoke idempotency/restart/mount health", "per-user pool: user dir, workspace subdirs, usage",
         "private layout unchanged, receipt carries mount UUID",
         "operator journal grants: fresh ids, duplicates/invalid refused, replay",
-        "no overcommit at add: outstanding pools + reserve <= free space",
+        "no overcommit at add: full durable reservations, usage cannot buy capacity",
+        "capacity geometry/reserved blocks/overflow; raises and revoked budgets survive restart",
         "operator raise: increase only, record before set, readback, retry, replay",
         "service model: zero bootstrap users, journal users, raised workspace receipts",
         "operator uncertain journal sync: no mutation, poison, replay and same-request recovery"};

@@ -233,6 +233,8 @@ int __wrap_fstatvfs(int fd, struct statvfs *v) {
     char text[32];
     if (rc == 0 && fake_space_dir >= 0 && fake_read(fake_space_dir, "available", text, sizeof(text)) > 0) {
         v->f_frsize = 4096; v->f_bavail = strtoull(text, NULL, 10) / 4096;
+        /* A complete synthetic filesystem, not impossible available > total geometry. */
+        v->f_bfree = v->f_bavail; v->f_blocks = v->f_bavail;
     }
     return rc;
 }

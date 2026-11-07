@@ -13,24 +13,40 @@ The target is 50 users now and 300 after the SSD upgrade; these are capacity
 planning targets, not users provisioned by this change. The inode example remains
 750000 per user. Limits already granted are never lowered.
 
-Root-local add/raise admission requires:
+Root-local add/raise admission uses a conservative reservation ledger:
 
 ```text
-sum(each pool's hard bytes minus min(used bytes, hard bytes)) + reserve_bytes
-    <= current filesystem free bytes (fstatvfs on the pinned broker root)
+C = sum(FULL journal/policy hard-byte limits AFTER the proposed operation)
+C + reserve_bytes <= filesystem total bytes (f_blocks * f_frsize)
+C + reserve_bytes <= current unprivileged free bytes (f_bavail * f_frsize)
 ```
 
-Never-allocated grants count their full limit. Revoked allocated pools still
-count; revoked unallocated grants cannot allocate and promise zero. Every
-allocated pool must be independently observable with nonzero hard limits,
-correct project/inheritance and limits not above the journal. A pending raise
-can leave kernel limits below the journal; its full journal promise still counts.
-Unknown usage, identity/mount failure, or missing limits denies admission.
+The first inequality is a total-based reservation ceiling bound to the root-owned
+policy reserve and pinned filesystem. The second is an additional **conservative
+occupancy veto**: it double-charges ALL existing occupancy, even managed user data,
+rather than trying to infer unmanaged occupancy by subtracting asynchronous user
+usage. This can refuse a grant that would safely fit; usage is report-only and is
+never credited toward admission. No atomic usage/free snapshot is assumed.
+Deleting user data cannot decrease `C`; writes cannot increase the total ceiling.
 
-This is byte-capacity admission, not a guarantee against unrelated root writers,
-filesystem metadata overhead or future host changes. Choose protected headroom
-explicitly using `--reserve-bytes`; the dry-run test uses zero only as an example.
-Physical inode capacity is not reserved by this check.
+Every grant counts its full hard limit, including never-allocated, revoked and
+pending/unapplied raises. Replay reconstructs that same ledger after restart.
+Every allocated pool must still be independently observable with nonzero hard
+limits, correct project/inheritance and limits not above the journal. Unknown
+quota evidence, identity/mount failure, malformed geometry, multiplication overflow,
+or missing limits denies admission without a new journal record or quota write.
+Filesystem-reserved blocks are excluded by `f_bavail`, never offered as `f_bfree`.
+
+**Limitations:** the free-space veto is only a point-in-time conservative check,
+not a fence against unrelated/root writers. Unknown external consumption after
+the read, filesystem metadata growth, reflink/accounting overhead and future host
+changes can still exhaust disk space. `--reserve-bytes` is explicit operator
+headroom, not a physically isolated reservation or a kernel-enforced non-user
+quota. Its adequacy requires an operator census, bounds on non-user writers and
+monitoring; reserve zero is only a test/example, not a production recommendation.
+Physical inode capacity is not reserved by this check. Stopping the broker only
+serializes operator journal operations; already-running workloads keep writing.
+The fix does not depend on stopping those workloads or reversing the read order.
 
 ## Ownership and protocol
 
@@ -142,11 +158,11 @@ Reproducible binary SHA-256 values (independent scratch-directory builds were
 byte-identical):
 
 ```text
-1274e38e3be4e43893416384756fd308fff77db3baf8c33ea26dd83990d207f3  step-quota-broker
+0cee49e9c91f4bee0b59565ea67b6d4a998772e0af7cacb3aa33a52da2f19cdc  step-quota-broker
 2d86101468b2af0622680ffa5e1004ba1ef55239a82192a6e16f4f7082e39394  service/step-quota-broker.service
-b623274e8d9397ce36042c80422f8a5bf904084ad66b6ee1f9985e6fcaec633a  service/install-quota-broker.sh
-874a5a809c5464ffa60f00d310287ee73f9e0ca57f60157c151850f11b1dea70  xfs-acceptance
-08bdda340e51ee91af9a84caabf16388ff465d9f3923c4db82590042b9166d54  acceptance/run-xfs-acceptance.sh
+0855775b6d90fd8e246b0425d537043cf972ed6b4e3ed2ec1bf606cdcdbbd860  service/install-quota-broker.sh
+65881479679ee35a56ede6057fc367d5ce642e6291a48cfffbae4cb0f2bd5835  xfs-acceptance
+559f84281995d9a9fb3816d8be81c0974d143b8a1fb6e7f979ab4a6e546ee00d  acceptance/run-xfs-acceptance.sh
 ```
 
 Only the owner may install root-owned copies. The installer requires its exact
@@ -168,15 +184,32 @@ increment. The current wrapper correctly reports that mismatch in dry-run.
 
 Unprivileged verification:
 
-- Native `all`, `test`, `analyze`, `sanitize` pass: 24 core tests, XFS syscall seam
+- Native `all`, `test`, `analyze`, `sanitize` pass: 25 core tests, 12 deterministic
+  capacity-race schedules (add/raise; writes/deletion before/after statvfs), XFS syscall seam
   (including 17 raise fault points), transport, 5 policy groups, 7 fake-broker
   groups, and SQLite self-test. Sanitized root binaries exercise refusals only.
+- Regression sensitivity: compiling the new race test against the pre-fix
+  `70bd3d8` core in scratch fails its deletion assertion for BOTH add and raise:
+  the old code admits 2 MiB of hard limits plus 1 MiB reserve against 2 MiB
+  free, charging only 1 MiB. The fixed core refuses without journal/quota changes;
+  roomy post-statvfs schedules admit full limits and retain that charge on replay.
 - Installer lifecycle and acceptance wrapper lifecycle pass with stubs; no real
   quota, mount, loop, installation or systemd service mutation. Offline unit
   validation passes (exposure 1.6).
 - `npm run check`, `npm test` (118), `npm run test:db` (29), and
   `npm run test:engine` (320) pass. The check retains the existing 17 upstream
-  engine diagnostics noted by the server type checker.
+  engine diagnostics noted by the server type checker. `npm run build` passes
+  with the existing large-chunk warning.
+- Browser suite: 84 passed, 2 skipped, 2 failed (88 collected). The two
+  `owner-trial.spec.ts` cases fail before browser actions because the trial starts
+  a fresh RuntimeManager without explicit quota-policy provisioning:
+  `QUOTA_POLICY_REQUIRED` (also reproduced directly with a fresh scratch data
+  directory). This increment does not change the trial or weaken that fail-closed
+  requirement. Chromium initially could not load `libatk-1.0.so.0`; rerunning with
+  existing scratch-only libraries via
+  `LD_LIBRARY_PATH=/home/itsara/.hermes/cache/scratch/step-e2e-libs/root/usr/lib/x86_64-linux-gnu`
+  produced the counts above without a host package installation. Browser traces
+  and reports are ignored generated output, not committed artifacts.
 - The SQLite self-test uses real SQLite 3.46.1 plus `RLIMIT_FSIZE`, **not XFS**:
   200 committed history rows retain checksum/integrity, 20 small writes reported
   success remain present after reopen, the 6 MiB write fails with extended code

@@ -36,9 +36,11 @@ struct qb_policy {
     /* Users added after bootstrap (qb_grant_add) are journal state, not policy: every added
      * user's peer_uid is added_peer_uid (the service: gateway_uid); 0 disables adding. */
     uint32_t added_peer_uid, reserved2;
-    /* No overcommit (qb_grant_add / qb_raise): the space still promised to every user pool
-     * (sum of hard - used, a never-allocated grant counts its full hard limit) plus
-     * reserve_bytes must fit in the filesystem's free space (fstatvfs of the root). */
+    /* Capacity admission (qb_grant_add / qb_raise): sum ALL full granted hard limits
+     * plus reserve_bytes <= filesystem total. A conservative additional veto requires
+     * that same sum <= f_bavail * f_frsize, double-charging current user occupancy.
+     * No mutable usage snapshot is credited. Reserve must cover non-user growth and
+     * metadata; this is NOT a fence against external writers or physical inode use. */
     uint64_t reserve_bytes;
 };
 #define QB_MAX_RESERVE_BYTES (UINT64_C(1) << 50)
@@ -123,7 +125,7 @@ int qb_usage(struct qb *broker, uid_t authenticated_peer_uid, const void *frame,
 struct qb_capacity {
     uint64_t available;  /* free bytes of the filesystem (f_bavail * f_frsize of the root) */
     uint64_t reserve;    /* policy reserve_bytes */
-    uint64_t committed;  /* outstanding promise of every pool AFTER the operation */
+    uint64_t committed;  /* sum of FULL durable hard limits AFTER operation, revoked included */
     uint32_t users;      /* grants counted (policy + journal, revoked included) */
 };
 /* Append a durable user grant (journal event) with a fresh, never reused project id taken
