@@ -223,11 +223,15 @@ Remaining work, split into explicit gates:
    from another workspace, committed-history verification and write recovery.
    None of these new root paths was executed. The prior recorded PASS covers
    only the older private-layout binary, not this increment.
-2. **Gateway per-user raised-limit expectations.** Socket receipts carry raised
-   limits, but the existing manager boundary still compares against its configured
-   exact default limits and safely refuses a raised user. A trusted per-user
-   expectation policy and tests are needed; do not loosen it to accept arbitrary
-   larger receipts. The parser update here is read-only v2 compatibility only.
+2. **Gateway per-user raised-limit expectations: bounded application gate closed.**
+   An optional protected operator metadata reader now binds each user's exact
+   project/limits to the service v2 policy, installation identity and mount. The
+   broker boundary accepts only exact matches and rereads claims after asynchronous
+   operations; arbitrary larger receipts, unknown users and stale claims refuse.
+   See [trusted-source boundary and evidence](native-quota-raised-expectations.md).
+   This is unprivileged/synthetic evidence, not installed root-service acceptance.
+   Owner-reviewed metadata provisioning and real raised-user XFS/service checks
+   remain host gates. The legacy synthetic RPC remains exact-default-only.
 3. **Protected launcher and revocation-through-spawn fence.** Integrate/review the
    separate launcher work, retire the broad sudoers bwrap permission, enforce user
    namespaces and one-workspace binds, then perform owner host acceptance. Those

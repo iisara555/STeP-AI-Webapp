@@ -12,6 +12,7 @@ import {
   type WorkspaceStorage,
 } from './storage.ts';
 import { CanonicalUuid as BrokerUuid, usageLevel, type BrokerClient } from './native-quota-socket.ts';
+import { isQuotaExpectationSource, type QuotaExpectationSource } from './native-quota-expectations.ts';
 
 const CanonicalUuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 const Uint64 = z
@@ -241,7 +242,9 @@ export type BrokerQuotaOptions = {
   brokerUid: number;
   gatewayGid: number;
   workloadUid: number;
-  /** Trusted, operator-provisioned gateway user id -> broker user UUID (the policy's user= lines).
+  /** Optional protected operator metadata. Without it, ONLY exact default limits are accepted. */
+  expectations?: QuotaExpectationSource;
+  /** Trusted, operator-provisioned gateway user id -> broker user UUID (out-of-band mapping).
    * Never derived from a browser request; an unmapped user must throw. */
   userUuidFor(ownerId: string): string;
 };
@@ -319,20 +322,48 @@ export function brokerQuotaBoundary(
     if (!parsed.success) throw Error('NATIVE_QUOTA_NO_USER_POOL');
     return parsed.data;
   };
+  if (options.expectations && !isQuotaExpectationSource(options.expectations))
+    throw Error('NATIVE_QUOTA_EXPECTATIONS_UNSAFE');
+  async function expected(user: string) {
+    const claim = await options.expectations?.read(user);
+    if (!claim) return { ...limits, projectId: undefined, revision: undefined };
+    const p = claim.policy;
+    const root = await lstat(projectRoot, { bigint: true });
+    if (
+      p.mountUuid !== limits.mountUuid ||
+      p.bytesHard !== limits.bytesHard ||
+      p.inodesHard !== limits.inodesHard ||
+      p.firstProjectId !== range.first ||
+      p.lastProjectId !== range.last ||
+      p.gatewayGid !== gatewayGid ||
+      p.workloadUid !== workloadUid ||
+      !root.isDirectory() ||
+      root.isSymbolicLink() ||
+      String(root.dev) !== p.rootDevice ||
+      String(root.ino) !== p.rootInode
+    )
+      throw Error('NATIVE_QUOTA_UNVERIFIED');
+    return { ...claim.grant, mountUuid: p.mountUuid, revision: claim.revision };
+  }
+  async function unchanged(user: string, revision: string | undefined) {
+    if ((await expected(user)).revision !== revision) throw Error('NATIVE_QUOTA_UNVERIFIED');
+  }
   async function prepare(owner: string, id: string) {
     const ownerId = UserId.parse(owner);
     const workspaceId = WorkspaceId.parse(id);
     const workspaceUuid = nativeWorkspaceUuid(workspaceId);
     const user = userUuid(ownerId);
+    const e = await expected(user);
     const r = await options.client.ensureWorkspace(user, workspaceUuid);
     if (
       r.userUuid !== user ||
       r.workspaceUuid !== workspaceUuid ||
       r.projectId < range.first ||
       r.projectId > range.last ||
-      r.mountUuid !== limits.mountUuid ||
-      r.bytesHard !== limits.bytesHard ||
-      r.inodesHard !== limits.inodesHard
+      r.mountUuid !== e.mountUuid ||
+      r.bytesHard !== e.bytesHard ||
+      r.inodesHard !== e.inodesHard ||
+      (e.projectId !== undefined && r.projectId !== e.projectId)
     )
       throw Error('NATIVE_QUOTA_UNVERIFIED');
     // Fixed names only: p<project> under the fixed root, then the workspace UUID.
@@ -357,6 +388,7 @@ export function brokerQuotaBoundary(
       const child = await lstat(join(dir, name));
       if (!child.isDirectory() || child.isSymbolicLink()) throw Error('NATIVE_QUOTA_UNVERIFIED');
     }
+    await unchanged(user, e.revision);
     const spec: RuntimeSpec = Object.freeze({ ownerId, workspaceId, dir, filesDir: join(dir, 'files') });
     return { spec, identity: { device: r.device, inode: r.inode } };
   }
@@ -380,14 +412,18 @@ export function brokerQuotaBoundary(
     },
     driver: boundaryDriver(driver, preparedSpecs),
     async usage(ownerId) {
-      const u = await options.client.usage(userUuid(ownerId));
+      const user = userUuid(ownerId);
+      const e = await expected(user);
+      const u = await options.client.usage(user);
       if (
-        u.bytesHard !== limits.bytesHard ||
-        u.inodesHard !== limits.inodesHard ||
+        u.bytesHard !== e.bytesHard ||
+        u.inodesHard !== e.inodesHard ||
+        (e.projectId !== undefined && u.projectId !== e.projectId) ||
         u.projectId < range.first ||
         u.projectId > range.last
       )
         throw Error('NATIVE_QUOTA_UNVERIFIED');
+      await unchanged(user, e.revision);
       return {
         ...usageLevel(u),
         bytesUsed: u.bytesUsed,
