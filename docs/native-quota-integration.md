@@ -38,6 +38,34 @@ There is no production composition or environment opt-in. Existing production ga
   Unfenced start and drivers without synchronous admission refuse. Handles/cleanup errors pass
   through unchanged; manager capacity, failed startup, stop and shutdown semantics remain intact.
 
+## Launch-time directory pinning (rename+substitute gap)
+
+Review reproduced that `runtimePaths()` verified `p<ID>` device/inode by pathname, and the driver
+then bound `spec.dir` **by pathname** at spawn: renaming `p<ID>` away and creating a same-named
+directory in between launched the runtime into the substitute. Now:
+
+- The composition requires `driver.startPinnedWithAdmission` and refuses path-only drivers
+  (`RUNTIME_PINNED_LAUNCH_UNSUPPORTED`). The one-use spec carries the receipt's device/inode.
+- Inside the synchronous admission spawn callback, immediately before spawning, `pin()` opens
+  `spec.dir` with `O_RDONLY|O_DIRECTORY|O_NOFOLLOW` (libuv adds `O_CLOEXEC`) and compares the
+  **descriptor's** `fstat` device/inode with the receipt. A mismatch closes it and throws
+  `NATIVE_QUOTA_UNVERIFIED` inside admission, so nothing is spawned (manager records a failed start).
+- The step-runner driver hands that descriptor to the launcher as **stdout (fd 1)**: sudo-rs drops
+  fds above 2 and stdin already carries the launch nonce. Bubblewrap 0.11 mounts it with
+  `--bind-fd 1 <spec.dir>` (no `--bind <path>`) and closes it before exec; the parent closes its copy
+  right after spawn. A substitution after the pin cannot redirect the mount: the verified inode is bound.
+- Unprivileged bwrap probe on this host (same user, no sudo): with the fd opened, the directory
+  renamed and a substitute created, the sandbox saw and wrote the original; fd 1 was closed in the
+  sandbox's pid 1. **Not yet proven:** that sudo-rs passes a directory fd 1 verbatim to bwrap as
+  step-runner. The gated test `pinned launch: a rename+substitute after the pin ...` checks exactly
+  that (mountinfo root names the renamed original). If sudo-rs replaces fd 1, bwrap fails and the
+  start fails closed (`RUNTIME_START_FAILED`); it never falls back to a pathname bind.
+- Residual: the synthetic adapter still opens a **pathname** it does not own; that is an identity
+  check, not the root-owned retained `qb_receipt.directory_fd`. Parent components are not fenced
+  (identity is compared on the final descriptor). `files/` (the `--chdir` target) is workload-owned
+  content inside the pinned mount and is resolved inside the sandbox only. This does not make an
+  exclusive launcher or production isolation proven; production stays refused.
+
 The `WorkspaceStorage` seam defaults to the existing layout for every ordinary manager caller;
 all manager metadata lookup/save/list operations use that seam. It is trusted composition, not a
 request-selectable storage plugin. Supply the returned pair together and the same `dataRoot` to

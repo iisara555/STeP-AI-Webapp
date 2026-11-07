@@ -65,8 +65,14 @@ export function isolatedRuntimeArgs(spec: RuntimeSpec, tmpfsBytes?: number): str
 /** Every Bubblewrap option before the command: namespaces, read-only app and Node, the one writable workspace. */
 export function sandboxMounts(
   spec: RuntimeSpec,
-  { appRoot, nodeDir, tmpfsBytes }: { appRoot: string; nodeDir: string; tmpfsBytes?: number },
+  {
+    appRoot,
+    nodeDir,
+    tmpfsBytes,
+    dirFd,
+  }: { appRoot: string; nodeDir: string; tmpfsBytes?: number; dirFd?: number },
 ): string[] {
+  if (dirFd !== undefined && !(Number.isSafeInteger(dirFd) && dirFd >= 0)) throw new Error('INVALID_DIR_FD');
   validateTmpfsBytes(tmpfsBytes);
   const binds = [
     '/usr',
@@ -95,9 +101,9 @@ export function sandboxMounts(
     '--tmpfs',
     '/tmp',
     ...binds.flatMap((path) => ['--ro-bind', path, path]),
-    '--bind',
-    spec.dir,
-    spec.dir,
+    // With dirFd, bwrap mounts the already-open (identity-verified) directory and closes the descriptor before
+    // exec; spec.dir is then only the mount point inside the sandbox, never re-resolved on the host.
+    ...(dirFd === undefined ? ['--bind', spec.dir, spec.dir] : ['--bind-fd', String(dirFd), spec.dir]),
     '--chdir',
     spec.filesDir,
   ];

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { closeSync, fstatSync, lstatSync, mkdirSync, renameSync } from 'node:fs';
 import { mkdtemp, mkdir, lstat, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,6 +39,10 @@ async function fixture(count = 2) {
   let wait: (() => Promise<void>) | undefined;
   let cleanupFails = false;
   let stops = 0;
+  // What the fake launch actually bound: the inode a path bind resolves at spawn, or the pinned descriptor's inode.
+  const bound: string[] = [];
+  let beforeLaunch: (() => void) | undefined;
+  let atSpawn: (() => void) | undefined;
   const handle = {
     stop: async () => {
       stops++;
@@ -52,7 +57,26 @@ async function fixture(count = 2) {
       throw Error('unfenced launch');
     },
     startWithAdmission: async (spec, admit) => {
-      admit(() => specs.push(spec));
+      beforeLaunch?.();
+      admit(() => {
+        atSpawn?.();
+        bound.push(String(lstatSync(spec.dir, { bigint: true }).ino));
+        specs.push(spec);
+      });
+      return handle;
+    },
+    startPinnedWithAdmission: async (spec, pin, admit) => {
+      beforeLaunch?.();
+      admit(() => {
+        const fd = pin();
+        try {
+          atSpawn?.();
+          bound.push(String(fstatSync(fd, { bigint: true }).ino));
+          specs.push(spec);
+        } finally {
+          closeSync(fd);
+        }
+      });
       return handle;
     },
   };
@@ -108,6 +132,13 @@ async function fixture(count = 2) {
     },
     setWait: (fn: typeof wait) => {
       wait = fn;
+    },
+    bound,
+    setBeforeLaunch: (fn: typeof beforeLaunch) => {
+      beforeLaunch = fn;
+    },
+    setAtSpawn: (fn: typeof atSpawn) => {
+      atSpawn = fn;
     },
     failCleanup: (fail: boolean) => {
       cleanupFails = fail;
@@ -381,6 +412,71 @@ test('start preparation is not admission: revocation at the deferred native repl
   } finally {
     await f.close();
   }
+});
+
+const substitute = (dir: string) => {
+  renameSync(dir, `${dir}-moved`);
+  mkdirSync(dir);
+  mkdirSync(join(dir, 'files'));
+};
+
+test('a p<ID> renamed and substituted after verification, before spawn, is never launched into', async () => {
+  const f = await fixture();
+  try {
+    const w = await f.manager.create('alice', { name: 'swap before spawn' });
+    const dir = join(f.projectRoot, 'p100037');
+    f.setBeforeLaunch(() => substitute(dir));
+    await assert.rejects(
+      f.manager.start('alice', w.id, (spawn) => spawn()),
+      /NATIVE_QUOTA_UNVERIFIED/,
+    );
+    assert.deepEqual(f.bound, [], 'nothing launched into the substitute');
+    assert.equal(f.specs.length, 0);
+    // The pin fails inside the spawn callback, so the manager conservatively records a failed start.
+    assert.equal((await f.manager.get('alice', w.id)).state, 'failed');
+  } finally {
+    await f.close();
+  }
+});
+
+test('a substitution after the pin is taken cannot redirect the launch: the verified inode is bound', async () => {
+  const f = await fixture();
+  try {
+    const w = await f.manager.create('alice', { name: 'swap at spawn' });
+    const dir = join(f.projectRoot, 'p100037');
+    const original = String((await lstat(dir, { bigint: true })).ino);
+    f.setAtSpawn(() => substitute(dir));
+    assert.equal((await f.manager.start('alice', w.id, (spawn) => spawn())).state, 'running');
+    assert.notEqual(
+      String((await lstat(dir, { bigint: true })).ino),
+      original,
+      'the path now names a substitute',
+    );
+    assert.deepEqual(f.bound, [original]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('native composition refuses a driver that can only bind by pathname', () => {
+  const driver: RuntimeDriver = {
+    start: async () => {
+      throw Error('unfenced launch');
+    },
+    startWithAdmission: async () => {
+      throw Error('path launch');
+    },
+  };
+  const options = {
+    mode: 'synthetic-only',
+    dataRoot: '/tmp/native-meta-unused',
+    projectRoot: '/tmp/native-root-unused',
+    ...limits,
+    firstProjectId: 100000,
+    lastProjectId: 100099,
+    forOwner: () => ({ ensure: async () => ({}) }),
+  } satisfies NativeQuotaOptions;
+  assert.throws(() => nativeQuotaBoundary(options, driver), /RUNTIME_PINNED_LAUNCH_UNSUPPORTED/);
 });
 
 test('shutdown during deferred native provisioning cannot launch after shutdown', async () => {

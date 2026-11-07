@@ -140,6 +140,17 @@ export type RuntimeDriver = {
    * Drivers unable to provide this guarantee must omit this method.
    */
   startWithAdmission?(spec: RuntimeSpec, admit: (spawn: () => void) => void): Promise<RuntimeHandle>;
+  /** startWithAdmission whose workload directory is pinned by descriptor, not by pathname. Inside the spawn
+   * callback, synchronously and immediately before spawning, the driver must call pin() exactly once; it returns
+   * an owned O_DIRECTORY descriptor whose identity the caller has just verified (or throws, which must abort the
+   * spawn). The driver must mount spec.dir from that descriptor only (never by resolving spec.dir again) and must
+   * close it on every outcome. Drivers that cannot hand the descriptor to the sandbox must omit this method.
+   */
+  startPinnedWithAdmission?(
+    spec: RuntimeSpec,
+    pin: () => number,
+    admit: (spawn: () => void) => void,
+  ): Promise<RuntimeHandle>;
 };
 
 /** Startup failed with required process or non-process cleanup still unconfirmed. */

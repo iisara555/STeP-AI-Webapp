@@ -14,7 +14,7 @@
 // cgroup.kill on the scope, then proof that the scope is empty.
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { chmodSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import net from 'node:net';
 import { dirname, isAbsolute, join, normalize, relative } from 'node:path';
@@ -102,8 +102,16 @@ export type StepRunnerHandle = RuntimeHandle & { scope: StepRunnerScope };
 export type StepRunnerDriver = {
   start(spec: RuntimeSpec): Promise<StepRunnerHandle>;
   startWithAdmission(spec: RuntimeSpec, admit: (spawn: () => void) => void): Promise<StepRunnerHandle>;
+  startPinnedWithAdmission(
+    spec: RuntimeSpec,
+    pin: () => number,
+    admit: (spawn: () => void) => void,
+  ): Promise<StepRunnerHandle>;
 };
-type Launch = { unit: string; socketDir: string };
+/** `pinned`: the workspace directory arrives as the launcher's stdout descriptor and is bound with --bind-fd. */
+type Launch = { unit: string; socketDir: string; pinned?: boolean };
+// sudo-rs closes descriptors above 2 (spikes/057) and stdin carries the nonce; stdout is otherwise unused.
+const PINNED_DIR_FD = 1;
 
 const invalid = (): never => {
   throw new Error('INVALID_STEP_RUNNER_OPTIONS');
@@ -142,12 +150,14 @@ export function stepRunnerSandboxArgs(
   o: Pick<StepRunnerOptions, 'appRoot' | 'nodePath' | 'tmpfsBytes'> & {
     socketDir: string;
     env: Record<string, string>;
+    dirFd?: number;
   },
 ): string[] {
   const mounts = sandboxMounts(spec, {
     appRoot: o.appRoot,
     nodeDir: dirname(o.nodePath),
     tmpfsBytes: o.tmpfsBytes,
+    dirFd: o.dirFd,
   });
   return [
     '--clearenv',
@@ -190,7 +200,12 @@ export function stepRunnerCommand(spec: RuntimeSpec, o: StepRunnerOptions, launc
     '-u',
     o.runnerUser ?? 'step-runner',
     '/usr/bin/bwrap',
-    ...stepRunnerSandboxArgs(spec, { ...o, socketDir: launch.socketDir, env }),
+    ...stepRunnerSandboxArgs(spec, {
+      ...o,
+      socketDir: launch.socketDir,
+      env,
+      ...(launch.pinned ? { dirFd: PINNED_DIR_FD } : {}),
+    }),
     '--',
     o.nodePath,
     '--import',
@@ -254,10 +269,15 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
     hooks.writeCgroupFile ?? ((path: string, data: string) => writeFileSync(path, data));
   const readCgroupFile = hooks.readCgroupFile ?? ((path: string) => readFile(path, 'utf8'));
 
-  const start = async (spec: RuntimeSpec, admit: (spawn: () => void) => void): Promise<StepRunnerHandle> => {
+  const start = async (
+    spec: RuntimeSpec,
+    admit: (spawn: () => void) => void,
+    pin?: () => number,
+  ): Promise<StepRunnerHandle> => {
     const launch: Launch = {
       unit: `step-rt-${randomBytes(16).toString('hex')}.scope`,
       socketDir: join(o.socketRoot, randomBytes(16).toString('hex')),
+      pinned: pin !== undefined,
     };
     const launchNonce = randomBytes(32).toString('hex');
     // The socket root must be ours and not writable or listable by others. This does not hide the folder name (it is
@@ -300,7 +320,18 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
     try {
       admit(() => {
         if (!admitting || child) throw new Error('RUNTIME_START_ADMISSION_REPEATED');
-        child = spawn(argv[0]!, argv.slice(1), { env: hostEnv, stdio: ['pipe', 'ignore', 'inherit'] });
+        // Pinned: verify-and-open happens here, synchronously, immediately before the spawn. A failed pin throws
+        // before anything is spawned. The descriptor passes systemd-run --scope and sudo-rs as stdout; bwrap mounts
+        // it and closes it before exec, so the runtime never holds a host-namespace directory descriptor.
+        const dirFd = pin?.();
+        try {
+          child = spawn(argv[0]!, argv.slice(1), {
+            env: hostEnv,
+            stdio: ['pipe', dirFd ?? 'ignore', 'inherit'],
+          });
+        } finally {
+          if (dirFd !== undefined) closeSync(dirFd);
+        }
         // sudo-rs passes stdin straight through (no pty): the nonce reaches only the runtime.
         child.stdin!.on('error', () => {});
         child.stdin!.end(
@@ -711,7 +742,11 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
     }
     return handle;
   };
-  return { start: (spec) => start(spec, (spawn) => spawn()), startWithAdmission: start };
+  return {
+    start: (spec) => start(spec, (spawn) => spawn()),
+    startWithAdmission: (spec, admit) => start(spec, admit),
+    startPinnedWithAdmission: (spec, pin, admit) => start(spec, admit, pin),
+  };
 }
 
 /** Typed as the generic contract for callers that do not need the scope details. */

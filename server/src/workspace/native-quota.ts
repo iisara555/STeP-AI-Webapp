@@ -1,5 +1,6 @@
 // Nonprivileged integration boundary, NOT a root transport or a native launch capability.
 // Never compose DiskQuotaAuthority/DiskQuotaLedger here: qb_ensure owns allocation and p<ID> creation.
+import { closeSync, constants, fstatSync, openSync } from 'node:fs';
 import { lstat, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -59,7 +60,7 @@ export function nativeWorkspaceUuid(workspaceId: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-// This is a synthetic path consistency check, NOT openat2/mount-ID/FD fencing.
+// Synthetic path consistency check at preparation; launch identity is fenced separately by pin().
 async function checkedDirectory(path: string) {
   let current = path;
   while (true) {
@@ -107,13 +108,16 @@ export function nativeQuotaBoundary(
     projectRoot.startsWith(dataRoot + '/')
   )
     throw Error('NATIVE_QUOTA_UNSAFE_PATH');
-  const admitted = driver.startWithAdmission?.bind(driver);
-  if (!admitted) throw Error('RUNTIME_START_ADMISSION_UNSUPPORTED');
+  if (!driver.startWithAdmission) throw Error('RUNTIME_START_ADMISSION_UNSUPPORTED');
+  // A pathname bind re-resolves p<ID> at spawn: a rename+substitute after verification would be launched into.
+  const pinned = driver.startPinnedWithAdmission?.bind(driver);
+  if (!pinned) throw Error('RUNTIME_PINNED_LAUNCH_UNSUPPORTED');
   const metadata = workspaceStorage(dataRoot);
   // Pair the storage and driver halves: arbitrary or copied paths are never accepted.
   // This is a one-use internal consistency marker, NOT authorization (admit is still required).
-  const preparedSpecs = new WeakSet<RuntimeSpec>();
-  async function prepare(owner: string, id: string): Promise<RuntimeSpec> {
+  // Maps each one-use spec to the identity the receipt and lstat agreed on.
+  const preparedSpecs = new WeakMap<RuntimeSpec, { device: string; inode: string }>();
+  async function prepare(owner: string, id: string) {
     const ownerId = UserId.parse(owner);
     const workspaceId = WorkspaceId.parse(id);
     const workspaceUuid = nativeWorkspaceUuid(workspaceId);
@@ -145,7 +149,23 @@ export function nativeQuotaBoundary(
       }
       await checkedDirectory(child);
     }
-    return Object.freeze({ ownerId, workspaceId, dir, filesDir: join(dir, 'files') });
+    const spec: RuntimeSpec = Object.freeze({ ownerId, workspaceId, dir, filesDir: join(dir, 'files') });
+    return { spec, identity: { device: receipt.device, inode: receipt.inode } };
+  }
+  /** Synchronous pin taken inside admission right before spawn: open without following a final symlink, then
+   * re-verify the descriptor (not the path) against the receipt. The returned FD is owned by the driver. */
+  function pin(dir: string, identity: { device: string; inode: string }) {
+    // libuv always adds O_CLOEXEC; only the driver's explicit stdio mapping hands this FD to a child.
+    const fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+      const stat = fstatSync(fd, { bigint: true });
+      if (!stat.isDirectory() || String(stat.dev) !== identity.device || String(stat.ino) !== identity.inode)
+        throw Error('NATIVE_QUOTA_UNVERIFIED');
+      return fd;
+    } catch (error) {
+      closeSync(fd);
+      throw error;
+    }
   }
   return {
     storage: {
@@ -157,12 +177,12 @@ export function nativeQuotaBoundary(
         return createWorkspaceFolders(dataRoot, record, admit, false);
       },
       async runtimePaths(record) {
-        const spec = await prepare(record.ownerId, record.id);
-        preparedSpecs.add(spec);
+        const { spec, identity } = await prepare(record.ownerId, record.id);
+        preparedSpecs.set(spec, identity);
         return spec;
       },
       conversations: async (record) =>
-        readConversationIndexAt((await prepare(record.ownerId, record.id)).dir),
+        readConversationIndexAt((await prepare(record.ownerId, record.id)).spec.dir),
     },
     driver: {
       async start() {
@@ -171,8 +191,10 @@ export function nativeQuotaBoundary(
       // Never move admit before the async preparation, manufacture admission, wrap handles,
       // swallow cleanup errors or turn receipts into reusable launch authorization.
       async startWithAdmission(spec, admit) {
-        if (!preparedSpecs.delete(spec)) throw Error('NATIVE_QUOTA_UNSAFE_SPEC');
-        return admitted(spec, admit);
+        const identity = preparedSpecs.get(spec);
+        if (!identity || !preparedSpecs.delete(spec)) throw Error('NATIVE_QUOTA_UNSAFE_SPEC');
+        // A failed pin throws inside the spawn callback, so admission fails and nothing is spawned.
+        return pinned(spec, () => pin(spec.dir, identity), admit);
       },
     },
   };

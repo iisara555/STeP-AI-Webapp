@@ -8,6 +8,7 @@ import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_pr
 import {
   chmodSync,
   closeSync,
+  constants,
   cpSync,
   existsSync,
   mkdirSync,
@@ -15,6 +16,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -196,6 +198,47 @@ test('an unsafe socket root fails closed before anything is spawned', async () =
   }
 });
 
+test('pinned launch command binds the workspace from the launcher stdout descriptor, never by pathname', () => {
+  const launch = { unit: `step-rt-${'c'.repeat(32)}.scope`, socketDir: '/run/step/sockets/y', pinned: true };
+  const argv = stepRunnerCommand(pureSpec, pure, launch);
+  assert.ok(!argv.includes('--bind'), 'no pathname bind remains');
+  assert.equal(argv.filter((a) => a === '--bind-fd').length, 1);
+  assert.deepEqual(argv.slice(argv.indexOf('--bind-fd'), argv.indexOf('--bind-fd') + 3), [
+    '--bind-fd',
+    '1',
+    pureSpec.dir,
+  ]);
+  assert.deepEqual(argv.slice(argv.indexOf('--chdir'), argv.indexOf('--chdir') + 2), [
+    '--chdir',
+    pureSpec.filesDir,
+  ]);
+});
+
+test('a failing pin aborts inside admission: nothing is spawned and the socket directory is removed', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'step-socket-root-'));
+  try {
+    chmodSync(root, 0o700);
+    let admitted = 0;
+    await assert.rejects(
+      stepRunnerDriver({ ...pure, socketRoot: root }).startPinnedWithAdmission(
+        pureSpec,
+        () => {
+          throw new Error('PIN_REFUSED');
+        },
+        (spawnRuntime) => {
+          admitted++;
+          spawnRuntime();
+        },
+      ),
+      /PIN_REFUSED/,
+    );
+    assert.equal(admitted, 1);
+    assert.deepEqual(readdirSync(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 describe('step-runner host driver', host, () => {
   let root = '';
   let options: StepRunnerOptions;
@@ -292,6 +335,8 @@ describe('step-runner host driver', host, () => {
         }),
       startWithAdmission: (spec: RuntimeSpec, admit: (spawn: () => void) => void) =>
         d.startWithAdmission(spec, admit).then(track),
+      startPinnedWithAdmission: (spec: RuntimeSpec, pin: () => number, admit: (spawn: () => void) => void) =>
+        d.startPinnedWithAdmission(spec, pin, admit).then(track),
     };
   };
   const exited = (handle: StepRunnerHandle) => new Promise<number | null>((done) => handle.onExit(done));
@@ -837,6 +882,42 @@ setTimeout(() => (out({ timeout: true, received }), process.exit(0)), 30000);
       await assertClean();
     },
   );
+
+  test('pinned launch: a rename+substitute after the pin still runs the runtime in the verified directory', async () => {
+    const spec = workspace();
+    const moved = `${spec.dir}-moved`;
+    let opened = -1;
+    const handle = await driver().startPinnedWithAdmission(
+      spec,
+      () => {
+        opened = openSync(spec.dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        // Substitute the pathname after the descriptor is taken, before the launcher even starts.
+        renameSync(spec.dir, moved);
+        mkdirSync(spec.filesDir, { recursive: true });
+        chmodSync(spec.dir, 0o777);
+        chmodSync(spec.filesDir, 0o777);
+        return opened;
+      },
+      (spawnRuntime) => spawnRuntime(),
+    );
+    try {
+      assert.ok(opened >= 0);
+      const health = await handle.health();
+      assert.equal(health.ok, true);
+      assert.equal(health.cwd, spec.filesDir);
+      const runtime = procs(handle.scope.cgroupPath).find((p) => isRuntime(p))!;
+      const mount = readFileSync(`/proc/${runtime.pid}/mountinfo`, 'utf8')
+        .split('\n')
+        .map((line) => line.split(' '))
+        .find((fields) => fields[4] === spec.dir);
+      assert.ok(mount, 'the workspace mount point exists in the sandbox');
+      // mountinfo names the mounted dentry by its current host path: the verified (renamed) original.
+      assert.ok(mount[3]!.endsWith(moved.split('/').at(-1)!), mount.join(' '));
+    } finally {
+      await handle.stop();
+    }
+    await assertClean();
+  });
 
   test('a second workspace sandbox cannot see the first one’s socket or files', async () => {
     const a = workspace();
