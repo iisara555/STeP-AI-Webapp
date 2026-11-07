@@ -154,3 +154,7 @@ Review: local standards/spec review against the requested single-authority gate,
 existing disk protocol; no independent subagent review capability is exposed to this delegate.
 Parent must independently review/test before merging. This artifact is committed separately, not
 installed or integrated into the main integration branch.
+
+### Host verification of the pinned launch (2026-11-07, parent)
+
+Ran on ik-node-01 at c9e13da with the existing `/etc/sudoers.d/step-runner` rule (sudo-rs 0.2.13, bwrap 0.11.1): `STEP_STEP_RUNNER_TESTS=1 node --import tsx --import ./server/src/register.mjs --test server/test/step-runner-driver.test.ts` → 30 tests, 29 passed on the first run, including "pinned launch: a rename+substitute after the pin still runs the runtime in the verified directory". So a directory descriptor on fd 1 does reach bwrap through `systemd-run --scope` and sudo-rs. The one failure was the CPU acceptance preflight refusing to run while the host's one-minute load was ≥ 1 (another test job). Rerun alone at load 0.64: passed. No `step-runner` processes or `step-rt-*` units left afterwards. Note: bwrap closes fd 1 after `--bind-fd`; Node re-opens fds 0–2 on `/dev/null` at startup, so a later workload `open()` cannot land on fd 1 and receive log output. After cherry-pick as 1e8fad8: check pass, app 118/118, db 29/29, engine 275/275, native tests pass.
