@@ -278,6 +278,21 @@
 - No privileged host changes, account switch, live provider, production data, deployment
   or production activation. Browser acceptance remains blocked by missing Chromium
   `libatk-1.0.so.0`; no privileged dependency installation was attempted.
+## #57 · disk/inode provisioning protocol integration (not installed)
+
+- เพิ่ม `server/src/workspace/disk-provisioning.ts` ที่ storage/runtime seams: รับเฉพาะ
+  workspace ID, ให้ authority จอง project ID ถาวรด้วย SQLite transaction ก่อน provisioning,
+  ผูก mount/owner/limits จากนโยบายที่ broker ควบคุม และตรวจ byte/inode quota ใหม่ก่อน start/resume
+  โดยคง synchronous spawn admission เดิม ปิด helper/sudoers proposal ที่มี path race และ caller-selected ID
+- Node 26.12.1: targeted 10/10, application 118/118, database 29/29, engine 227/227 ผ่าน;
+  `npm run check`, build, engine-pin และ diff whitespace ผ่าน มี 17 upstream engine diagnostics
+  และ Vite chunk warning เดิม Cloud Workspace Playwright 2 desktop ผ่าน/2 mobile skip เดิม
+  ใช้ scripted synthetic fixture ไม่ใช่ real runner/disk quota acceptance
+- ยังไม่ติดตั้งหรือแก้ quota/สิทธิ์ host และ production Gateway ยังปฏิเสธ startup ต้องมี protected
+  native broker ที่ยึด mount/directory descriptors, ทะเบียนจอง ID ที่ป้องกันการแก้, authenticated transport
+  และ broker-owned creation/publication ก่อนให้เขียนจริง `RuntimeManager.create` เดิมยังไม่ใช่ boundary นี้
+  รายละเอียด prerequisites/blocker/actual exhaustion-and-recovery gate อยู่ใน
+  [workspace-disk-provisioning.md](workspace-disk-provisioning.md) ไม่อ้างว่าทดสอบ XFS enforcement แล้ว
 
 ## #57 · opt-in bounded private tmpfs (integration port)
 

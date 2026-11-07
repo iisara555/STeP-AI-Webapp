@@ -1,59 +1,6 @@
 #!/bin/bash
-# step-workspace-quota: the ONLY root operation the STeP gateway needs for disk limits.
-# Sets, clears or reports an XFS project quota on exactly one workspace folder:
-#   /mnt/step-work/step-ai/users/<owner-id>/workspaces/<workspace-id>
-# Install root-owned (0755) at /usr/local/sbin/step-workspace-quota. It accepts IDs, never paths,
-# and only project IDs 100000-199999, so it cannot touch other folders or other quota projects.
-set -euo pipefail
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C
-umask 077
-
-MNT=/mnt/step-work
-USERS=$MNT/step-ai/users
-OWNER_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
-WS_RE='^ws_[0-9a-f]{32}$'
-die() { echo "step-workspace-quota: $1" >&2; exit 2; }
-usage() {
-  die "usage: set <owner> <workspace> <project-id> <max-MiB> <max-files> | clear <owner> <workspace> <project-id> | report <project-id>"
-}
-num() { [[ $1 =~ ^[1-9][0-9]{0,9}$ ]] && (( $1 >= $2 && $1 <= $3 )) || die "$4 out of range"; }
-
-[[ $(id -u) == 0 ]] || die "must run as root"
-[[ $(findmnt -n -o FSTYPE --mountpoint "$MNT") == xfs ]] || die "$MNT is not a mounted XFS filesystem"
-findmnt -n -o OPTIONS --mountpoint "$MNT" | tr , '\n' | grep -qx prjquota || die "project quota is not enabled on $MNT"
-
-workspace_dir() {
-  [[ $1 =~ $OWNER_RE ]] || die "invalid owner id"
-  [[ $2 =~ $WS_RE ]] || die "invalid workspace id"
-  local dir=$USERS/$1/workspaces/$2
-  # Refuse symlinks anywhere on the path: the resolved path must equal the literal one.
-  [[ -d $dir && ! -L $dir && $(realpath -e -- "$dir") == "$dir" ]] || die "workspace folder not found"
-  [[ $(stat -c %F -- "$dir") == directory ]] || die "not a directory"
-  printf '%s' "$dir"
-}
-
-cmd=${1:-}
-case $cmd in
-  set)
-    (( $# == 6 )) || usage
-    dir=$(workspace_dir "$2" "$3")
-    num "$4" 100000 199999 "project id"; num "$5" 1 1048576 "max MiB"; num "$6" 1 10000000 "max files"
-    xfs_quota -x -c "project -s -p $dir $4" "$MNT" >/dev/null
-    xfs_quota -x -c "limit -p bhard=${5}m ihard=$6 $4" "$MNT"
-    echo "ok: project $4 limited to ${5} MiB and $6 files"
-    ;;
-  clear)
-    (( $# == 4 )) || usage
-    dir=$(workspace_dir "$2" "$3")
-    num "$4" 100000 199999 "project id"
-    xfs_quota -x -c "limit -p bhard=0 ihard=0 $4" "$MNT"
-    xfs_quota -x -c "project -C -p $dir $4" "$MNT" >/dev/null
-    echo "ok: project $4 cleared"
-    ;;
-  report)
-    (( $# == 2 )) || usage
-    num "$2" 100000 199999 "project id"
-    xfs_quota -x -c "quota -p -N -b -i $2" "$MNT"
-    ;;
-  *) usage ;;
-esac
+# Retired: check/use path races and caller-selected project IDs were not a safe root boundary.
+# Deliberately refuse BEFORE root checks, filesystem inspection, or any mutation.
+# Do not install this file or grant sudo access. See docs/workspace-disk-provisioning.md.
+printf '%s\n' 'DISABLED_UNSAFE_QUOTA_HELPER: protected broker required; no quota operation performed' >&2
+exit 2
