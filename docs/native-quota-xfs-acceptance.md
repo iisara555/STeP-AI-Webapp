@@ -174,3 +174,19 @@ code in `xfs-acceptance.c`. That is exactly what the owner run is for.
 - เมื่อจบ ไม่ว่าจะผ่านหรือล้มเหลว สคริปต์จะ unmount ถอด loop device และลบไฟล์ชั่วคราวเสมอ เก็บไว้แค่ log ที่ `/var/tmp/step-xfs-acceptance.log`
 - root จะรันเฉพาะไฟล์ที่ติดตั้งเป็นของ root แล้ว และตรวจ SHA-256 ก่อนทุกครั้ง
 - วิธียกเลิก: `sudo rm -r /usr/local/libexec/step-xfs-acceptance`
+
+## Result of the owner run (2026-11-07 13:08 UTC, ik-node-01)
+
+Run by the owner with the installed root-owned copies (`run` sha256 `5aea009f…ba65`, `xfs-acceptance` sha256 `c2246ba2…09ae`, both verified in place afterwards). Kernel 7.0.0-30-generic, mkfs.xfs 6.18.0, util-linux 2.41.3, `/dev/loop6`, mount options `prjquota`.
+
+**RESULT: PASS (12 passed, 0 failed)**, exit 0. Cleanup: unmounted, loop device detached, work dir removed; afterwards no `step-xfs` mount, loop device or temp dir remained.
+
+- Byte limit: writer 995:983 wrote exactly 16777216 B, then `ENOSPC`; usage never exceeded the hard limit while the filesystem still had 229310464 B free.
+- Inode limit: 62 files on top of the 2 baseline inodes, then `ENOSPC`; icount 64 = hard 64.
+- Both limits usable again after deletion; project id and PROJINHERIT inherited by new files and directories.
+- Wrong UUID → `EXDEV`/`EILSEQ`; tmpfs and same-device bind over `p<A>` → `EXDEV`; lazily detached mount → `ESTALE`.
+- Revocation persisted across broker restart (`EACCES` before and after); project ids 100000–100003 never reused, range exhaustion → `ENOSPC`.
+
+**Security finding (INFO line, measured):** a writer **without** a user namespace could set its file's project id to 0 and clear PROJINHERIT (quota escape); the same writer inside a new user namespace got `EINVAL` for every change. Both sandbox builders pass `--unshare-user --disable-userns`; `server/test/sandbox-userns.test.ts` now fails if either flag is removed or a flag that weakens the boundary is added (verified by deleting `--unshare-user`: 2 of 2 tests failed). Any future launcher that runs workloads in the initial user namespace would reopen this escape.
+
+Not covered by this run: the broker is not yet installed as a root service, and the root transport and launcher integration are still pending. This run proves the real core plus the XFS adapter on a scratch filesystem only.
