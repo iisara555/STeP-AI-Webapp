@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
+import { provisionTestQuota } from '../../server/test/support/quota.ts';
 
 let child: ChildProcess;
 let dir: string;
@@ -11,6 +12,8 @@ let url: string;
 let origin: string;
 test.beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'step-trial-'));
+  // Explicit synthetic provisioning, matching owner-trial.ts. Startup itself stays fail-closed.
+  provisionTestQuota(dir, 10);
   const probe = createServer();
   await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
   const port = (probe.address() as { port: number }).port;

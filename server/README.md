@@ -327,6 +327,30 @@ homelab ไม่มี GPU ให้รัน engine บน homelab แล้�
 
 ## หน้าเว็บทดลอง engine สำหรับเจ้าของ
 
+เตรียม quota policy ของ root สังเคราะห์ใหม่อย่างชัดเจนก่อนเริ่ม (จำนวน Workspace ต่อผู้ใช้ต้องเป็น `10`):
+
+```sh
+npm run workspace:quota:init -- .data/owner-trial 10
+npm run engine:owner-trial
+```
+
+ถ้าเปลี่ยน `STEP_TRIAL_DATA` ต้อง provision path เดียวกันก่อนเสมอ; อย่าใช้ root ของข้อมูลจริง
+หรือใช้ flag onboard เพื่อซ่อน policy ที่หายไป ตัว trial ไม่สร้างหรือซ่อม policy ตอน startup
+และยังปฏิเสธเมื่อ policy หายหรือ limit ไม่ตรงกัน เช่นเดียวกับ Runtime Manager ปกติ
+fixture ของ `test/e2e/owner-trial.spec.ts` provision policy `10` ใน scratch root แยกต่อ worker
+ก่อน spawn trial; ตรวจทั้ง desktop/mobile ด้วย `npm run test:e2e -- owner-trial.spec.ts`
+(`playwright.config.ts` เริ่ม web servers ของทั้ง suite ด้วย)
+
+ตรวจ regression นี้บน Node 26.12.1 ใน worktree แยก: ก่อนแก้ owner-trial **2 fail**
+ก่อน browser actions (`QUOTA_POLICY_REQUIRED`); หลัง provision fixture **2 pass**.
+Full Playwright **86 pass, 2 skip, 0 fail**; skips เดิมเป็น Cloud Workspace บน mobile.
+ใช้ config ชั่วคราวที่สืบทอด config หลัก เปลี่ยนเฉพาะ demo server/baseURL ไป `15173`
+และตั้ง `reuseExistingServer: false` ทุก server (auth `5174`, cloud UI `5175`, gateway `8799`);
+ไม่แตะ demo เดิมบน `5173`. Chromium ใช้ library ที่มีอยู่แล้วใน user-local scratch ผ่าน
+`LD_LIBRARY_PATH` (ไม่ติดตั้งระบบ). `npm run check` และ `npm run check:engine-pin` ผ่าน;
+`npm test` **118 pass**, `npm run test:db` **29 pass**, `npm run test:engine` **326 pass**
+โดยไม่มี skip/fail ในสาม suite นี้ เป็นข้อมูลสังเคราะห์ ไม่ใช่ production/privileged acceptance.
+
 รัน `npm run engine:owner-trial` บน homelab แล้วเปิด URL ที่แสดงใน terminal ผ่าน SSH local
 port forwarding (`ssh -L 8766:127.0.0.1:8766 <user>@homelab`); เปิด URL บนเครื่องเจ้าของ
 เท่านั้น อย่าส่ง URL ให้ผู้อื่น token ใน URL เปลี่ยนทุกครั้งที่เริ่มใหม่และเก็บไว้ในหน่วยความจำ
