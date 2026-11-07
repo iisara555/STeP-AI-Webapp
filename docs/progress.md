@@ -1839,3 +1839,19 @@ owner install/uninstall script with pinned SHA-256; per-user XFS project pools w
 broker-created workspace subdirectories and a usage report for 80/95 % warnings; TS
 socket client and `brokerQuotaBoundary`. Unprivileged tests only (fake adapter).
 Production gateway still refused. Remaining gates: `docs/native-quota-broker-service.md`.
+
+### Protected step-runner launcher (gate 5) — prepared, not installed
+
+Root-owned C launcher (`native/runner-launcher`) is the only program the new sudo rule
+(`launch v1 *`) lets the gateway run as step-runner: one fixed-format request, fd 1 verified
+as a genuine broker workspace (device, kernel path, root-owned `p<ID>` parent, XFS project +
+`PROJINHERIT`), exec of a compiled-in bwrap vector (`--unshare-user --disable-userns`, one
+`--bind-fd 1`, empty environment). Driver option `launcher: 'protected'`; owner installer with
+pinned SHA-256 and separate `--revoke-bwrap` / `--restore-bwrap`. Unprivileged tests only; host
+tests prepared and gated. Details and owner commands: `docs/step-runner-launcher.md`.
+Recovery review additionally fixed unsafe writable/symlinked installer destinations
+and validated every app bind source (not only the app root), with regressions
+observed failing first. Verified: native 263 checks + analyzer/ASan/UBSan, installer
+24 stub checks, protected driver 6 tests, check + npm 118 + DB 29 + engine 326.
+No root/sudo/install/host tests run; raw-bwrap remains the gated default. Residual
+privileged-update and revocation-through-spawn races are documented, not closed.

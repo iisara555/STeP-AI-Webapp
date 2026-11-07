@@ -3,7 +3,9 @@
 // isolated mode): this driver is not wired into the Gateway entry, which stays fail-closed.
 //
 // Host facts this relies on (spikes/057-step-runner-sudo): the service account may run only `/usr/bin/bwrap` as
-// step-runner through `sudo -n`; sudo-rs passes neither the environment nor fd 3, so the channel is a Unix socket in
+// step-runner through `sudo -n` (or, with `launcher: 'protected'`, only the protected launcher of
+// native/runner-launcher, which builds the bwrap vector itself; docs/step-runner-launcher.md); sudo-rs passes neither
+// the environment nor fd 3, so the channel is a Unix socket in
 // a fresh random directory that is bound into this one sandbox only. The directory name is NOT secret: it appears in
 // the systemd-run/sudo/bwrap command lines, which every local user can read through /proc. Until the socket root can
 // be made 0700 with a group or ACL for step-runner (needs a host change), anyone local can connect, so the listener
@@ -55,7 +57,32 @@ export const MAX_REJECTED_PEERS = 32;
 /** The first frame is only `ready` + nonce: a peer not yet trusted may not buffer more than this. */
 const MAX_FIRST_FRAME_BYTES = 4096;
 
+/**
+ * The protected launcher (native/runner-launcher, installed root-owned by its owner-run installer). The sudo rule
+ * lets the gateway run only this program as step-runner, with one fixed-format request; the launcher verifies the
+ * workspace descriptor on fd 1 and execs bwrap with its own compiled-in vector. Every value here is compiled into the
+ * launcher too (launcher.h); it refuses anything else.
+ */
+export const PROTECTED_LAUNCHER = Object.freeze({
+  path: '/usr/local/libexec/step-runner-launch/launch',
+  appRoot: '/opt/step/app',
+  nodePath: '/opt/step/node/bin/node',
+  socketRoot: '/var/lib/step-runner-launch/sockets',
+  brokerRoot: '/mnt/step-work/step-ai-broker/root',
+  firstProject: 100000,
+  lastProject: 199999,
+  maxTmpfsBytes: 1024 * 1024 * 1024,
+});
+const PROTECTED_DIR =
+  /^\/mnt\/step-work\/step-ai-broker\/root\/p([1-9][0-9]{5})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+
 export type StepRunnerOptions = {
+  /**
+   * How the runner account is reached. `raw-bwrap` (default, the spikes/057 rule): sudo runs /usr/bin/bwrap with the
+   * driver's arguments. `protected`: sudo runs only PROTECTED_LAUNCHER.path with a fixed request; requires the fixed
+   * layout above, authenticated transport, a tmpfs bound and pinned (descriptor) starts.
+   */
+  launcher?: 'raw-bwrap' | 'protected';
   /** Explicit compatibility mode for older nonce-only fixtures; synthetic assembly uses authenticated. */
   transport?: 'nonce' | 'authenticated';
   /** World-readable copy of the app (node_modules, harness, server/src, package.json files); never under /home. */
@@ -154,6 +181,34 @@ function validate(options: StepRunnerOptions) {
   } catch {
     invalid();
   }
+  if (o.launcher !== undefined && o.launcher !== 'raw-bwrap' && o.launcher !== 'protected') invalid();
+  if (o.launcher === 'protected') {
+    const p = PROTECTED_LAUNCHER;
+    if (o.transport !== 'authenticated') invalid();
+    if (o.appRoot !== p.appRoot || o.nodePath !== p.nodePath || o.socketRoot !== p.socketRoot) invalid();
+    if ((o.runnerUser ?? 'step-runner') !== 'step-runner' || (o.entry ?? DEFAULT_ENTRY) !== DEFAULT_ENTRY)
+      invalid();
+    if (o.tmpfsBytes === undefined || o.tmpfsBytes > p.maxTmpfsBytes) invalid();
+  }
+}
+
+/** The launcher's request for one launch, or a throw for anything the launcher would refuse. */
+function protectedRequest(spec: RuntimeSpec, o: StepRunnerOptions, launch: Launch): string[] {
+  const unsupported = () => {
+    throw new Error('PROTECTED_LAUNCH_UNSUPPORTED');
+  };
+  // Only a descriptor bind: the launcher mounts fd 1 and never resolves a workspace path.
+  if (!launch.pinned) unsupported();
+  const match = PROTECTED_DIR.exec(spec.dir) ?? unsupported();
+  const project = Number(match[1]);
+  const uuid = match[2]!;
+  if (project < PROTECTED_LAUNCHER.firstProject || project > PROTECTED_LAUNCHER.lastProject) unsupported();
+  if (spec.filesDir !== `${spec.dir}/files` || spec.workspaceId !== `ws_${uuid.replaceAll('-', '')}`)
+    unsupported();
+  const launchId = launch.socketDir.slice(PROTECTED_LAUNCHER.socketRoot.length + 1);
+  if (launch.socketDir !== `${PROTECTED_LAUNCHER.socketRoot}/${launchId}` || !/^[0-9a-f]{32}$/.test(launchId))
+    unsupported();
+  return [PROTECTED_LAUNCHER.path, 'v1', `p${project}/${uuid}`, launchId, String(o.tmpfsBytes)];
 }
 
 /** Bubblewrap options for one step-runner sandbox: cleared environment, the shared mounts and its socket folder. */
@@ -185,14 +240,7 @@ export function stepRunnerSandboxArgs(
 
 /** The whole launch: a fresh scope with limits, sudo to the runner account (bwrap only), then the runtime. */
 export function stepRunnerCommand(spec: RuntimeSpec, o: StepRunnerOptions, launch: Launch): string[] {
-  const env = {
-    ...runtimeEnv(spec),
-    STEP_SYNTHETIC_PROVIDER: '1',
-    ...(o.transport === 'authenticated'
-      ? { STEP_RUNTIME_TRANSPORT: 'unix' }
-      : { STEP_RUNTIME_SOCKET: `${SANDBOX_SOCKET_DIR}/${SOCKET_NAME}` }),
-  };
-  return [
+  const scope = [
     'systemd-run',
     '--user',
     '--scope',
@@ -211,6 +259,18 @@ export function stepRunnerCommand(spec: RuntimeSpec, o: StepRunnerOptions, launc
     '-n',
     '-u',
     o.runnerUser ?? 'step-runner',
+  ];
+  // Protected: the sandbox vector, environment and runtime entry are the launcher's own, not ours.
+  if (o.launcher === 'protected') return [...scope, ...protectedRequest(spec, o, launch)];
+  const env = {
+    ...runtimeEnv(spec),
+    STEP_SYNTHETIC_PROVIDER: '1',
+    ...(o.transport === 'authenticated'
+      ? { STEP_RUNTIME_TRANSPORT: 'unix' }
+      : { STEP_RUNTIME_SOCKET: `${SANDBOX_SOCKET_DIR}/${SOCKET_NAME}` }),
+  };
+  return [
+    ...scope,
     '/usr/bin/bwrap',
     ...stepRunnerSandboxArgs(spec, {
       ...o,
@@ -428,6 +488,13 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
       pinned: pin !== undefined,
     };
     const launchNonce = randomBytes(32).toString('hex');
+    // Pure, and first: a launch the protected launcher would refuse creates no socket, journal entry or process.
+    let argv: string[];
+    try {
+      argv = stepRunnerCommand(spec, o, launch);
+    } catch {
+      throw Object.assign(new WorkspaceError('RUNTIME_START_FAILED'), { cause: 'LAUNCH_SPEC_UNSUPPORTED' });
+    }
     // The socket root must be ours and not writable or listable by others. This does not hide the folder name (it is
     // in /proc/<pid>/cmdline); the peer check and nonce below are what keep other local users out.
     try {
@@ -436,7 +503,6 @@ export function stepRunnerDriver(options: StepRunnerOptions, hooks: StepRunnerHo
     } catch {
       throw Object.assign(new WorkspaceError('RUNTIME_START_FAILED'), { cause: 'SOCKET_ROOT_UNSAFE' });
     }
-    const argv = stepRunnerCommand(spec, o, launch);
     const socketPath = join(launch.socketDir, SOCKET_NAME);
     const server = net.createServer({ pauseOnConnect: true });
     const removeSocket = () => {
