@@ -1,5 +1,39 @@
 # Progress
 
+## Bounded native broker Unix transport on 83b0c88 — not installed
+
+- New isolated worktree `/home/itsara/projects/step-native-quota-broker-transport`,
+  branch `feat/native-broker-transport`; original core/XFS/reviewer/TS worktrees
+  untouched. Added real `transport.c/.h`, native archive and cross-process executable
+  integration fixture. [Wire contract, TS coordination and release gates](native-quota-broker-transport.md).
+- SO_PEERCRED fixed client UID checked before reading/parsing/replying; exact
+  46-byte workspace-only frame plus write EOF, no trailing/pipelined input or
+  caller FDs/authority fields. Fixed eight-client/backlog/accept-work bounds,
+  47-byte receive arrays, absolute 500 ms input deadlines, nonblocking I/O and
+  tiny status-only replies. No receipt/metadata/FD disclosure or launch authority.
+- Real core authorization/revocation remains under its mutation fence; native core
+  remains the single allocator. No second TS/SQLite allocator or invented rich
+  TS receipt bridge. UID equality explicitly does not exclude compromised same-UID
+  principals; shared gateway authentication/delegation remains a host-policy gate.
+- Hardened `make clean all test analyze` and ASan/UBSan `make sanitize` pass:
+  existing 17 core tests, fake-XFS faults at 22 configure calls, plus transport
+  malformed/oversize/fragmented/no-EOF/slow/unauthorized peers, saturation/recovery,
+  repeated disconnect/retry and SCM_RIGHTS denials under child RLIMIT_NOFILE=64,
+  exact replies with no ancillary FDs, connected-request revocation, blocked fake
+  mutation overlapping revoke/stop, accepted-socket drain and join-before-core-close.
+  A red regression first accepted valid frame + caller SCM_RIGHTS; recvmsg now
+  rejects ancillary truncation and Linux discards those FDs without installing them.
+- Default XFS archive still only exports open/close, with no ioctl/quota/test-constructor
+  symbols; ENOTSUP unchanged. Completed independent 83b0c88 adapter review reported
+  no confirmed defect in unprivileged scope; real quota acceptance remains unrun,
+  not an additional open adapter-review blocker. New transport has local self-review.
+- Zero root/sudo/install/XFS mutation/real-data or host-policy changes. App/DB/engine/
+  browser suites not rerun for isolated native code. Socket I/O deadlines do not
+  cancel a synchronous durable core operation; stop drains it, then caller joins.
+  Protected startup/host policy, independently protected anti-rollback witness,
+  protected FD-consuming launcher sharing revoke-through-spawn authority, actual
+  XFS acceptance and explicit deployment approval are still missing. Nothing enabled.
+
 ## FD-based native XFS adapter on 0681439 — disabled, no privileged acceptance
 
 - Isolated `/home/itsara/projects/step-native-quota-broker-xfs`, branch
