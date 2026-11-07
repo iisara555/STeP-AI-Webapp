@@ -175,6 +175,35 @@ static int configure(void *v, int root, int dir, uint32_t project, uint64_t byte
         return deny(EDQUOT);
     return 0;
 }
+/* Raise an already configured project (operator-only, through qb_raise). Requires the
+ * directory to carry exactly this project + inheritance and the current kernel limits to be
+ * a real (non-zero, never absent) configuration not above the request. Writes only the two
+ * hard fields, then reads them back. Equal limits: nothing is written. */
+static int raise_limits(void *v, int root, int dir, uint32_t project, uint64_t bytes, uint64_t inodes) {
+    struct qb_xfs *x = v;
+    if (bytes < 4096 || bytes > UINT64_C(1099511627776) || bytes % 4096 || !inodes || inodes > 10000000)
+        return deny(EINVAL);
+    if (check(x, root, dir, project) < 0) return -1;
+    struct fsxattr a; struct fs_disk_quota old;
+    if (attributes(x, dir, &a) < 0 || limits(x, project, &old, 0) < 0) return -1;
+    if (a.fsx_projid != project || !(a.fsx_xflags & FS_XFLAG_PROJINHERIT)) return deny(EPERM);
+    if (!old.d_blk_hardlimit || !old.d_ino_hardlimit) return deny(ENOENT); /* never configured */
+    if (old.d_blk_hardlimit > bytes / 512 || old.d_ino_hardlimit > inodes) return deny(EINVAL);
+    if (old.d_blk_hardlimit != bytes / 512 || old.d_ino_hardlimit != inodes) {
+        struct fs_disk_quota q = {
+            .d_version = FS_DQUOT_VERSION, .d_flags = FS_PROJ_QUOTA,
+            .d_fieldmask = FS_DQ_BHARD | FS_DQ_IHARD, .d_id = project,
+            .d_blk_hardlimit = bytes / 512, .d_ino_hardlimit = inodes,
+        };
+        if (check(x, root, dir, project) < 0 ||
+            quota(x, QCMD(Q_XSETQLIM, PRJQUOTA), project, &q) < 0) return -1;
+    }
+    struct qb_observation o;
+    if (observe(x, root, dir, project, &o) < 0) return -1;
+    if (o.project != project || !o.inherit || o.bytes_hard != bytes || o.inodes_hard != inodes)
+        return deny(EDQUOT);
+    return 0;
+}
 static int create(int root, const struct qb_policy *p, const struct qb_xfs_calls *calls,
                   struct qb_xfs **out, struct qb_adapter *adapter) {
     if (!out || !adapter) return deny(EINVAL);
@@ -191,7 +220,7 @@ static int create(int root, const struct qb_policy *p, const struct qb_xfs_calls
         errno = ESTALE; goto fail;
     }
     if (mount_check(x, root, uuid, &enforced) < 0) goto fail;
-    *adapter = (struct qb_adapter){x, mount_check, observe, configure}; *out = x;
+    *adapter = (struct qb_adapter){x, mount_check, observe, configure, raise_limits}; *out = x;
     return 0;
 fail: {
     int saved = errno; qb_xfs_close(x); return deny(saved);

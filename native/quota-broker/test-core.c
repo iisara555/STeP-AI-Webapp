@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -28,10 +29,20 @@ int __wrap_fsync(int fd) {
     }
     return __real_fsync(fd);
 }
+/* Link-time seam for the no-overcommit check: a fixed number of free bytes. */
+static uint64_t fake_available; /* 0 = real */
+int __real_fstatvfs(int fd, struct statvfs *v);
+int __wrap_fstatvfs(int fd, struct statvfs *v);
+int __wrap_fstatvfs(int fd, struct statvfs *v) {
+    int rc = __real_fstatvfs(fd, v);
+    if (!rc && fake_available) { v->f_frsize = 4096; v->f_bavail = fake_available / 4096; }
+    return rc;
+}
 /* Synthetic ioctl model ONLY. No ioctl/quotactl/mount/root path is executed. */
 struct model {
     uint8_t uuid[16];
     int enforced, configure_calls, fail, corrupt, crash, entered, release, block, substitute;
+    int raise_calls, fail_raise, ignore_raise;
     struct { uint64_t inode; struct qb_observation value; } slots[QB_MAX_GRANTS];
     pthread_mutex_t gate;
     pthread_cond_t changed;
@@ -92,6 +103,20 @@ static int mock_configure(void *context, int mount_fd, int fd, uint32_t project,
                                                   .inodes_hard = inodes, .inherit = 1};
     return 0;
 }
+/* Raise model: only an already configured slot of this exact directory, never lower. */
+static int mock_raise(void *context, int mount_fd, int fd, uint32_t project, uint64_t bytes, uint64_t inodes) {
+    struct model *m = context;
+    struct stat s, root;
+    assert(fstat(fd, &s) == 0 && fstat(mount_fd, &root) == 0 && s.st_dev == root.st_dev);
+    unsigned int index = project - 100000;
+    assert(index < QB_MAX_GRANTS && m->slots[index].inode == (uint64_t)s.st_ino);
+    struct qb_observation *v = &m->slots[index].value;
+    assert(v->bytes_hard && v->inodes_hard && bytes >= v->bytes_hard && inodes >= v->inodes_hard);
+    m->raise_calls++;
+    if (m->fail_raise) { errno = EIO; return -1; }
+    if (!m->ignore_raise) { v->bytes_hard = bytes; v->inodes_hard = inodes; }
+    return 0;
+}
 static void fixture_init(struct fixture *f) {
     memset(f, 0, sizeof(*f));
     const char *tmp = getenv("TMPDIR"); assert(tmp && tmp[0] == '/');
@@ -118,7 +143,9 @@ static void fixture_init(struct fixture *f) {
     assert(pthread_mutex_init(&f->model.gate, NULL) == 0);
     assert(pthread_cond_init(&f->model.changed, NULL) == 0);
     f->adapter = (struct qb_adapter){.context = &f->model, .mount = mock_mount,
-                                    .observe = mock_observe, .configure = mock_configure};
+                                    .observe = mock_observe, .configure = mock_configure,
+                                    .raise = mock_raise};
+    f->policy.added_peer_uid = (uint32_t)geteuid();
 }
 static void start(struct fixture *f) {
     assert(qb_open(f->root, f->state, &f->policy, &f->adapter, &f->broker) == 0);
@@ -167,7 +194,9 @@ static void policy_and_bootstrap(void) {
     struct stat s; assert(fstatat(f.state, "manifest", &s, 0) < 0 && errno == ENOENT);
     struct qb_policy bad = f.policy; bad.bytes_hard = 1;
     assert(qb_bootstrap(f.state, &bad) < 0);
-    bad = f.policy; bad.grant_count = 0; assert(qb_bootstrap(f.state, &bad) < 0);
+    bad = f.policy; bad.grant_count = QB_MAX_GRANTS + 1; assert(qb_bootstrap(f.state, &bad) < 0);
+    bad = f.policy; bad.reserved2 = 1; assert(qb_bootstrap(f.state, &bad) < 0);
+    bad = f.policy; bad.reserve_bytes = QB_MAX_RESERVE_BYTES + 1; assert(qb_bootstrap(f.state, &bad) < 0);
     bad = f.policy; bad.grants[1] = bad.grants[0]; assert(qb_bootstrap(f.state, &bad) < 0);
     assert(fchmod(f.state, 0777) == 0 && qb_bootstrap(f.state, &f.policy) < 0);
     assert(fchmod(f.state, 0700) == 0);
@@ -179,6 +208,10 @@ static void policy_and_bootstrap(void) {
     bad = f.policy; bad.epoch[0]++;
     assert(qb_open(f.root, f.state, &bad, &f.adapter, &second) < 0);
     bad = f.policy; bad.bytes_hard *= 2;
+    assert(qb_open(f.root, f.state, &bad, &f.adapter, &second) < 0);
+    bad = f.policy; bad.reserve_bytes++;
+    assert(qb_open(f.root, f.state, &bad, &f.adapter, &second) < 0);
+    bad = f.policy; bad.added_peer_uid++;
     assert(qb_open(f.root, f.state, &bad, &f.adapter, &second) < 0);
     assert(qb_open(f.root, f.state, &f.policy, NULL, &second) < 0);
     assert(unlinkat(f.state, "journal", 0) == 0);
@@ -583,6 +616,235 @@ static void private_layout_receipt(void) {
     assert(workspace_as(&f, 0, ws_a, geteuid(), &w) < 0 && errno == ENOTSUP && w.directory_fd == -1);
     cleanup(&f);
 }
+/* ---- operator pool operations: journal grants, no overcommit, raise ---- */
+static off_t journal_size(struct fixture *f) {
+    struct stat s; assert(fstatat(f->state, "journal", &s, 0) == 0); return s.st_size;
+}
+static void restart(struct fixture *f) { qb_close(f->broker); f->broker = NULL; start(f); }
+static int ensure_uuid(struct fixture *f, const char *user, uid_t peer, struct qb_receipt *out) {
+    char frame[47];
+    int n = snprintf(frame, sizeof(frame), "ENSURE/1 %s\n", user); assert(n == 46);
+    return qb_ensure(f->broker, peer, frame, 46, out);
+}
+static const char *user_x = "f0000000-0000-4000-8000-0000000000f0";
+static const char *user_y = "f1000000-0000-4000-8000-0000000000f1";
+static const char *user_z = "f2000000-0000-4000-8000-0000000000f2";
+static const char *user_w = "f3000000-0000-4000-8000-0000000000f3";
+#define MIB_ UINT64_C(1048576)
+static void journal_grants(void) {
+    struct fixture f; fixture_init(&f); f.policy.grant_count = 1; f.policy.last_project = 100003;
+    bootstrap(&f);
+    uint32_t project = 0; struct qb_capacity c; struct qb_receipt r;
+    off_t size = journal_size(&f);
+    char upper[37]; memcpy(upper, user_x, 37); upper[0] = 'F';
+    assert(qb_grant_add(f.broker, upper, &project, &c) < 0 && errno == EINVAL);
+    assert(qb_grant_add(f.broker, "../../../../etc/passwd", &project, &c) < 0 && errno == EINVAL);
+    assert(qb_grant_add(f.broker, f.policy.grants[0].workspace, &project, &c) < 0 && errno == EEXIST);
+    assert(qb_grant_add(NULL, user_x, &project, &c) < 0 && errno == EINVAL);
+    assert(journal_size(&f) == size && project == 0); /* refusals write nothing */
+    assert(qb_grant_add(f.broker, user_x, &project, &c) == 0 && project == 100000);
+    assert(c.users == 2 && c.committed == 2 * MIB_ && c.reserve == 0); /* unallocated grant counts full */
+    off_t event = journal_size(&f) - size; assert(event > 0);
+    assert(qb_grant_add(f.broker, user_x, &project, &c) < 0 && errno == EEXIST);
+    assert(journal_size(&f) == size + event);
+    /* A policy grant takes the next id at its first ENSURE, never one already granted. */
+    assert(ensure(&f, 0, &r) == 0 && r.project == 100001); close(r.directory_fd);
+    assert(ensure_uuid(&f, user_x, (uid_t)(geteuid() + 1), &r) < 0 && errno == EACCES);
+    assert(f.model.configure_calls == 1);
+    assert(ensure_uuid(&f, user_x, geteuid(), &r) == 0 && r.project == 100000 && r.bytes_hard == MIB_);
+    uint64_t inode = r.inode; close(r.directory_fd);
+    assert(qb_grant_add(f.broker, user_y, &project, &c) == 0 && project == 100002);
+    restart(&f); /* grants are journal state: replayed, not re-read from the policy */
+    assert(ensure_uuid(&f, user_x, geteuid(), &r) == 0 && r.project == 100000 && r.inode == inode);
+    close(r.directory_fd);
+    assert(qb_grant_add(f.broker, user_x, &project, &c) < 0 && errno == EEXIST);
+    /* Revoked users are never granted again. */
+    assert(qb_revoke(f.broker, user_x) == 0);
+    assert(qb_grant_add(f.broker, user_x, &project, &c) < 0 && errno == EEXIST);
+    assert(ensure_uuid(&f, user_x, geteuid(), &r) < 0 && errno == EACCES);
+    assert(qb_grant_add(f.broker, user_z, &project, &c) == 0 && project == 100003);
+    size = journal_size(&f);
+    assert(qb_grant_add(f.broker, user_w, &project, &c) < 0 && errno == ENOSPC); /* range exhausted */
+    assert(journal_size(&f) == size);
+    assert(ensure_uuid(&f, user_y, geteuid(), &r) == 0 && r.project == 100002); close(r.directory_fd);
+    /* No request frame reaches the operator operation. */
+    const char add[] = "ADD/1 f3000000-0000-4000-8000-0000000000f3\n";
+    assert(qb_ensure(f.broker, geteuid(), add, sizeof(add) - 1, &r) < 0 && errno == EPROTO);
+    /* A replayed grant of an existing user (or a reused id) is a damaged journal. */
+    qb_close(f.broker); f.broker = NULL;
+    int fd = openat(f.state, "journal", O_RDWR | O_CLOEXEC); assert(fd >= 0);
+    unsigned char record[256]; assert((size_t)event <= sizeof(record));
+    assert(pread(fd, record, (size_t)event, 0) == event); /* the first event: X's grant */
+    assert(pwrite(fd, record, (size_t)event, size) == event && fsync(fd) == 0);
+    assert(qb_open(f.root, f.state, &f.policy, &f.adapter, &f.broker) < 0 && errno == EILSEQ && !f.broker);
+    assert(ftruncate(fd, size) == 0 && fsync(fd) == 0); close(fd);
+    start(&f);
+    cleanup(&f);
+    /* Adding is disabled when the policy names no peer for added users. */
+    fixture_init(&f); f.policy.added_peer_uid = 0; bootstrap(&f);
+    assert(qb_grant_add(f.broker, user_x, &project, &c) < 0 && errno == EPERM);
+    cleanup(&f);
+}
+static void no_overcommit(void) {
+    struct fixture f; fixture_init(&f); f.policy.grant_count = 1; f.policy.reserve_bytes = MIB_;
+    bootstrap(&f);
+    uint32_t project; struct qb_capacity c; struct qb_receipt r;
+    fake_available = 4 * MIB_ + MIB_ / 2;
+    assert(qb_grant_add(f.broker, user_x, &project, &c) == 0 && project == 100000);
+    assert(c.available == 4 * MIB_ + MIB_ / 2 && c.reserve == MIB_ && c.committed == 2 * MIB_ && c.users == 2);
+    assert(qb_grant_add(f.broker, user_y, &project, &c) == 0 && c.committed == 3 * MIB_);
+    off_t size = journal_size(&f);
+    /* 4 pools x 1 MiB + 1 MiB reserve > 4.5 MiB free: refused, nothing written. */
+    assert(qb_grant_add(f.broker, user_z, &project, &c) < 0 && errno == EFBIG && c.committed == 4 * MIB_);
+    assert(journal_size(&f) == size);
+    /* Space a pool already uses is no longer promised (it is gone from the free space too). */
+    assert(ensure(&f, 0, &r) == 0 && r.project == 100002); close(r.directory_fd);
+    f.model.slots[2].value.bytes_used = MIB_;
+    assert(qb_grant_add(f.broker, user_z, &project, &c) == 0 && c.committed == 3 * MIB_ && c.users == 4);
+    /* A pool whose usage cannot be verified fails the check closed. */
+    size = journal_size(&f);
+    f.model.corrupt = 2;
+    assert(qb_grant_add(f.broker, user_w, &project, &c) < 0 && errno == EDQUOT);
+    f.model.corrupt = 0;
+    assert(journal_size(&f) == size);
+    /* Missing hard limits must not admit more users into an unenforced pool. */
+    f.model.slots[2].value.bytes_hard = 0;
+    assert(qb_grant_add(f.broker, user_w, &project, &c) < 0 && errno == EDQUOT);
+    assert(journal_size(&f) == size);
+    fake_available = 0;
+    cleanup(&f);
+}
+static void raise_limits(void) {
+    struct fixture f; fixture_init(&f); f.policy.grant_count = 2; bootstrap(&f);
+    const char *u0 = f.policy.grants[0].workspace;
+    struct qb_capacity c; struct qb_receipt r; struct qb_usage u;
+    assert(qb_raise(f.broker, u0, 2 * MIB_, 200, &c) < 0 && errno == ENOENT); /* not allocated */
+    assert(ensure(&f, 0, &r) == 0 && r.project == 100000); close(r.directory_fd);
+    off_t size = journal_size(&f);
+    /* Only increases, within the policy bounds; nothing is written on refusal. */
+    assert(qb_raise(f.broker, u0, MIB_ - 4096, 200, &c) < 0 && errno == EINVAL);
+    assert(qb_raise(f.broker, u0, 2 * MIB_, 99, &c) < 0 && errno == EINVAL);
+    assert(qb_raise(f.broker, u0, 2 * MIB_ + 1, 200, &c) < 0 && errno == EINVAL);
+    assert(qb_raise(f.broker, u0, UINT64_C(1099511627776) + 4096, 200, &c) < 0 && errno == EINVAL);
+    assert(qb_raise(f.broker, u0, 2 * MIB_, 10000001, &c) < 0 && errno == EINVAL);
+    assert(qb_raise(f.broker, "not-a-uuid", 2 * MIB_, 200, &c) < 0 && errno == EINVAL);
+    assert(qb_raise(f.broker, user_w, 2 * MIB_, 200, &c) < 0 && errno == EACCES);
+    assert(qb_raise(f.broker, u0, MIB_, 100, &c) == 0); /* already applied: no record, no write */
+    assert(journal_size(&f) == size && f.model.raise_calls == 0);
+    /* No overcommit on the new total: u0 2 MiB + u1 (never allocated) 1 MiB. */
+    fake_available = 3 * MIB_ - 4096;
+    assert(qb_raise(f.broker, u0, 2 * MIB_, 200, &c) < 0 && errno == EFBIG && c.committed == 3 * MIB_);
+    assert(journal_size(&f) == size && f.model.raise_calls == 0);
+    fake_available = 3 * MIB_;
+    assert(qb_raise(f.broker, u0, 2 * MIB_, 200, &c) == 0 && c.committed == 3 * MIB_);
+    fake_available = 0;
+    off_t event = journal_size(&f) - size; assert(event > 0);
+    assert(f.model.raise_calls == 1 && f.model.slots[0].value.bytes_hard == 2 * MIB_);
+    assert(ensure(&f, 0, &r) == 0 && r.bytes_hard == 2 * MIB_ && r.inodes_hard == 200); close(r.directory_fd);
+    assert(usage_of(&f, 0, &u) == 0 && u.bytes_hard == 2 * MIB_ && u.inodes_hard == 200);
+    /* Inodes alone may increase. */
+    assert(qb_raise(f.broker, u0, 2 * MIB_, 250, &c) == 0 && f.model.slots[0].value.inodes_hard == 250);
+    /* Failure after the durable record: the record stands, requests are denied until the
+     * operator repeats the same raise, which applies it without a new record. */
+    size = journal_size(&f);
+    f.model.fail_raise = 1;
+    assert(qb_raise(f.broker, u0, 3 * MIB_, 300, &c) < 0 && errno == EIO);
+    f.model.fail_raise = 0;
+    assert(journal_size(&f) == size + event);
+    assert(ensure(&f, 0, &r) < 0 && errno == EDQUOT && r.directory_fd == -1);
+    assert(usage_of(&f, 0, &u) < 0 && errno == EDQUOT);
+    restart(&f); /* replay keeps the recorded value; still denied until applied */
+    assert(ensure(&f, 0, &r) < 0 && errno == EDQUOT);
+    int calls = f.model.raise_calls;
+    assert(qb_raise(f.broker, u0, 3 * MIB_, 300, &c) == 0 && f.model.raise_calls == calls + 1);
+    assert(journal_size(&f) == size + event);
+    assert(ensure(&f, 0, &r) == 0 && r.bytes_hard == 3 * MIB_ && r.inodes_hard == 300); close(r.directory_fd);
+    /* An ignored write is caught by the readback. */
+    f.model.ignore_raise = 1;
+    assert(qb_raise(f.broker, u0, 4 * MIB_, 300, &c) < 0 && errno == EDQUOT);
+    f.model.ignore_raise = 0;
+    assert(qb_raise(f.broker, u0, 4 * MIB_, 300, &c) == 0);
+    restart(&f); /* restart replays to the same limits */
+    calls = f.model.raise_calls;
+    assert(ensure(&f, 0, &r) == 0 && r.bytes_hard == 4 * MIB_ && r.inodes_hard == 300); close(r.directory_fd);
+    assert(f.model.raise_calls == calls); /* no write at open/ensure */
+    /* Kernel limits above the journal (changed outside the broker): denied, never adopted. */
+    f.model.slots[0].value.bytes_hard = 8 * MIB_;
+    assert(ensure(&f, 0, &r) < 0 && errno == EDQUOT);
+    assert(qb_raise(f.broker, u0, 8 * MIB_, 300, &c) < 0 && errno == EDQUOT && f.model.raise_calls == calls);
+    f.model.slots[0].value.bytes_hard = 4 * MIB_;
+    /* Revoked users cannot be raised. */
+    assert(ensure(&f, 1, &r) == 0); close(r.directory_fd);
+    assert(qb_revoke(f.broker, f.policy.grants[1].workspace) == 0);
+    assert(qb_raise(f.broker, f.policy.grants[1].workspace, 2 * MIB_, 200, &c) < 0 && errno == EACCES);
+    /* A replayed record that does not increase is a damaged journal. */
+    qb_close(f.broker); f.broker = NULL;
+    size = journal_size(&f);
+    int fd = openat(f.state, "journal", O_RDWR | O_CLOEXEC); assert(fd >= 0);
+    unsigned char record[256];
+    off_t last_raise = size - 4 * event; /* ... raise(4 MiB), reserve(u1), directory(u1), revoke */
+    assert(pread(fd, record, (size_t)event, last_raise) == event);
+    assert(pwrite(fd, record, (size_t)event, size) == event && fsync(fd) == 0);
+    assert(qb_open(f.root, f.state, &f.policy, &f.adapter, &f.broker) < 0 && errno == EILSEQ);
+    assert(ftruncate(fd, size) == 0 && fsync(fd) == 0); close(fd);
+    start(&f);
+    cleanup(&f);
+    /* An adapter without a raise operation refuses before writing. */
+    fixture_init(&f); f.adapter.raise = NULL; bootstrap(&f);
+    assert(ensure(&f, 0, &r) == 0); close(r.directory_fd);
+    size = journal_size(&f);
+    assert(qb_raise(f.broker, f.policy.grants[0].workspace, 2 * MIB_, 200, &c) < 0 && errno == ENOTSUP);
+    assert(journal_size(&f) == size);
+    cleanup(&f);
+}
+static void shared_journal_users(void) {
+    /* The service model: no bootstrap users; every user is a journal grant. */
+    struct fixture f; fixture_init(&f); f.policy.grant_count = 0;
+    f.policy.layout = QB_LAYOUT_SHARED;
+    f.policy.access_gid = (uint32_t)getegid(); f.policy.content_uid = (uint32_t)geteuid();
+    assert(fchmod(f.root, 0710) == 0);
+    bootstrap(&f);
+    uint32_t project; struct qb_capacity c; struct qb_workspace_receipt w; struct qb_usage u;
+    char frame[96];
+    snprintf(frame, sizeof(frame), "WORKSPACE/1 %s %s\n", user_x, ws_a);
+    assert(qb_workspace(f.broker, geteuid(), frame, 86, &w) < 0 && errno == EACCES);
+    assert(qb_grant_add(f.broker, user_x, &project, &c) == 0 && project == 100000 && c.users == 1);
+    snprintf(frame, sizeof(frame), "USAGE/1 %s\n", user_x);
+    assert(qb_usage(f.broker, geteuid(), frame, 45, &u) < 0 && errno == ENOENT);
+    snprintf(frame, sizeof(frame), "WORKSPACE/1 %s %s\n", user_x, ws_a);
+    assert(qb_workspace(f.broker, geteuid(), frame, 86, &w) == 0 && w.project == 100000 && w.bytes_hard == MIB_);
+    close(w.directory_fd);
+    assert(qb_raise(f.broker, user_x, 2 * MIB_, 100, &c) == 0);
+    restart(&f);
+    assert(qb_workspace(f.broker, geteuid(), frame, 86, &w) == 0 && w.bytes_hard == 2 * MIB_ && w.inodes_hard == 100);
+    close(w.directory_fd);
+    snprintf(frame, sizeof(frame), "USAGE/1 %s\n", user_x);
+    assert(qb_usage(f.broker, geteuid(), frame, 45, &u) == 0 && u.bytes_hard == 2 * MIB_);
+    cleanup(&f);
+}
+static void uncertain_operator_sync(void) {
+    struct fixture f; fixture_init(&f); f.policy.grant_count = 0; bootstrap(&f);
+    struct stat s; assert(fstatat(f.state, "journal", &s, 0) == 0);
+    struct qb_capacity c; struct qb_receipt r; uint32_t project;
+    fail_sync_inode = (uint64_t)s.st_ino;
+    assert(qb_grant_add(f.broker, user_x, &project, &c) < 0 && errno == EIO);
+    assert(project == 0 && f.model.configure_calls == 0);
+    assert(qb_grant_add(f.broker, user_y, &project, &c) < 0 && errno == EIO);
+    restart(&f); /* complete record survived despite uncertain fsync: never grant twice */
+    assert(qb_grant_add(f.broker, user_x, &project, &c) < 0 && errno == EEXIST);
+    assert(ensure_uuid(&f, user_x, geteuid(), &r) == 0); close(r.directory_fd);
+    off_t size = journal_size(&f);
+    fail_sync_inode = (uint64_t)s.st_ino;
+    assert(qb_raise(f.broker, user_x, 2 * MIB_, 200, &c) < 0 && errno == EIO);
+    assert(f.model.raise_calls == 0 && journal_size(&f) > size);
+    assert(ensure_uuid(&f, user_x, geteuid(), &r) < 0 && errno == EIO);
+    restart(&f);
+    assert(ensure_uuid(&f, user_x, geteuid(), &r) < 0 && errno == EDQUOT);
+    size = journal_size(&f);
+    assert(qb_raise(f.broker, user_x, 2 * MIB_, 200, &c) == 0 && journal_size(&f) == size);
+    assert(ensure_uuid(&f, user_x, geteuid(), &r) == 0 && r.bytes_hard == 2 * MIB_);
+    close(r.directory_fd); cleanup(&f);
+}
 int main(void) {
     assert(geteuid() != 0); /* This harness refuses root, even accidentally. */
     umask(0077);
@@ -590,7 +852,8 @@ int main(void) {
         substitutions, mount_and_evidence, failure_and_capacity, interrupted, corrupt_state,
         uncertain_commit, truncated_live_state, substitution_during_adapter, exclusive_process_authority,
         concurrent_ten, revoke_fences_mutation, cached_revoke_truncated_journal,
-        cached_revoke_idempotency_and_mount_health, shared_layout, private_layout_receipt};
+        cached_revoke_idempotency_and_mount_health, shared_layout, private_layout_receipt,
+        journal_grants, no_overcommit, raise_limits, shared_journal_users, uncertain_operator_sync};
     const char *names[] = {"strict bounded protocol", "explicit protected policy/bootstrap",
         "allocation/retry/restart", "never adopt foreign tree", "substitution/symlink/retained FD",
         "mount/evidence fail closed", "unknown outcome/capacity", "interrupted provision/restart",
@@ -598,7 +861,12 @@ int main(void) {
         "mid-adapter substitution denied", "exclusive cross-process authority", "ten concurrent unique reservations",
         "durable revocation mutation fence", "cached revoke rejects lost durable state",
         "cached revoke idempotency/restart/mount health", "per-user pool: user dir, workspace subdirs, usage",
-        "private layout unchanged, receipt carries mount UUID"};
+        "private layout unchanged, receipt carries mount UUID",
+        "operator journal grants: fresh ids, duplicates/invalid refused, replay",
+        "no overcommit at add: outstanding pools + reserve <= free space",
+        "operator raise: increase only, record before set, readback, retry, replay",
+        "service model: zero bootstrap users, journal users, raised workspace receipts",
+        "operator uncertain journal sync: no mutation, poison, replay and same-request recovery"};
     _Static_assert(sizeof(tests)/sizeof(tests[0]) == sizeof(names)/sizeof(names[0]), "test names mismatch");
     for (size_t i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) { tests[i](); printf("ok %zu - %s\n", i+1, names[i]); }
     printf("%zu unprivileged core tests passed; ZERO real XFS quota tests executed\n", sizeof(tests)/sizeof(tests[0]));

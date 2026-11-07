@@ -4,6 +4,18 @@
  *   step-quota-broker --bootstrap  ONE-TIME: create the state journal (refuses unless state AND
  *                                  root are empty and the live mount matches the policy)
  *   step-quota-broker --serve      serve the fixed ENSURE protocol on the fixed socket
+ *   step-quota-broker --add-user UUID
+ *                                  OPERATOR: durably grant a new user pool (journal record, fresh
+ *                                  never reused project id, no-overcommit check)
+ *   step-quota-broker --raise-user UUID BYTES INODES
+ *                                  OPERATOR: raise one allocated user's hard limits (only up;
+ *                                  journal record, Q_XSETQLIM, readback, no-overcommit check)
+ *
+ * The two operator commands are the only ones taking values on the command line (a canonical
+ * UUID and canonical decimals, validated before anything is opened). They are never reachable
+ * over the gateway socket; they need the exclusive journal lock, so they refuse ("in use")
+ * while the service runs: stop it, run the command, start it. On failure, leave the service
+ * stopped, inspect the journal outcome, and retry only the same command when appropriate.
  *
  * Production build: fixed absolute paths, euid 0 required, real XFS adapter. No path, ID, limit,
  * principal or option comes from the environment or the command line; the only input is the
@@ -31,6 +43,7 @@
 #include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -46,7 +59,7 @@
 #define SOCKET_DIR "/run/step-quota-broker"
 #endif
 enum { EXIT_RUNTIME = 1, EXIT_REFUSED = 2 };
-enum command { CHECK, BOOTSTRAP, SERVE };
+enum command { CHECK, BOOTSTRAP, SERVE, ADD_USER, RAISE_USER };
 
 static void say(const char *what) { fprintf(stderr, "step-quota-broker: %s\n", what); }
 static int refuse(const char *what) {
@@ -198,6 +211,31 @@ static int fake_configure(void *v, int root, int dir, uint32_t project, uint64_t
     snprintf(text, sizeof(text), "%u\n", project);
     return fake_write(f->dir, name, text);
 }
+static int fake_raise(void *v, int root, int dir, uint32_t project, uint64_t bytes, uint64_t inodes) {
+    struct fake *f = v;
+    struct qb_observation o;
+    if (fake_observe(v, root, dir, project, &o) < 0) return -1;
+    if (o.project != project || !o.inherit || !o.bytes_hard || !o.inodes_hard ||
+        o.bytes_hard > bytes || o.inodes_hard > inodes) return deny(EINVAL);
+    if (faccessat(f->dir, "fail-raise", F_OK, AT_SYMLINK_NOFOLLOW) == 0) return deny(EIO);
+    char name[64], text[64];
+    snprintf(name, sizeof(name), "q%u", project);
+    snprintf(text, sizeof(text), "%llu %llu\n", (unsigned long long)bytes, (unsigned long long)inodes);
+    return fake_write(f->dir, name, text);
+}
+/* Test-only free space for the no-overcommit check: fake/available ("<bytes>\n") replaces
+ * f_bavail * f_frsize of every fstatvfs (linked with --wrap=fstatvfs); absent = real. */
+static int fake_space_dir = -1;
+int __real_fstatvfs(int fd, struct statvfs *v);
+int __wrap_fstatvfs(int fd, struct statvfs *v);
+int __wrap_fstatvfs(int fd, struct statvfs *v) {
+    int rc = __real_fstatvfs(fd, v);
+    char text[32];
+    if (rc == 0 && fake_space_dir >= 0 && fake_read(fake_space_dir, "available", text, sizeof(text)) > 0) {
+        v->f_frsize = 4096; v->f_bavail = strtoull(text, NULL, 10) / 4096;
+    }
+    return rc;
+}
 #endif
 
 /* systemd Type=notify readiness without libsystemd. */
@@ -245,12 +283,39 @@ fail: {
     int saved = errno; close(fd); errno = saved; return -1;
 }}
 
+/* Operator values: canonical lowercase UUID; canonical decimal (no sign/leading zero). */
+static int canonical_uuid(const char *s) {
+    if (!s || strlen(s) != 36) return 0;
+    for (size_t i = 0; i < 36; i++) {
+        int dash = i == 8 || i == 13 || i == 18 || i == 23;
+        if (dash ? s[i] != '-' : !((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f'))) return 0;
+    }
+    return 1;
+}
+static int decimal(const char *s, uint64_t *out) {
+    size_t n = s ? strlen(s) : 0;
+    if (!n || n > 19 || (s[0] == '0' && n > 1)) return -1;
+    uint64_t v = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] < '0' || s[i] > '9') return -1;
+        v = v * 10 + (uint64_t)(s[i] - '0');
+    }
+    *out = v;
+    return 0;
+}
+static void print_capacity(const struct qb_capacity *c) {
+    fprintf(stderr, "step-quota-broker: capacity: %u users promise %llu B + reserve %llu B, %llu B free\n",
+            c->users, (unsigned long long)c->committed, (unsigned long long)c->reserve,
+            (unsigned long long)c->available);
+}
 static int usage(void) {
 #ifdef QB_BROKER_TESTING
-    say("usage (TESTING build): step-quota-broker-fake --check|--bootstrap|--serve --trust-root DIR "
-        "--policy-dir DIR --broker-dir DIR --socket-dir DIR --fake-dir DIR");
+    say("usage (TESTING build): step-quota-broker-fake --check|--bootstrap|--serve|--add-user UUID|"
+        "--raise-user UUID BYTES INODES --trust-root DIR --policy-dir DIR --broker-dir DIR "
+        "--socket-dir DIR --fake-dir DIR");
 #else
-    say("usage: step-quota-broker --check|--bootstrap|--serve");
+    say("usage: step-quota-broker --check|--bootstrap|--serve | --add-user UUID | "
+        "--raise-user UUID BYTES INODES");
 #endif
     return EXIT_REFUSED;
 }
@@ -265,13 +330,23 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "--check")) command = CHECK;
     else if (!strcmp(argv[1], "--bootstrap")) command = BOOTSTRAP;
     else if (!strcmp(argv[1], "--serve")) command = SERVE;
+    else if (!strcmp(argv[1], "--add-user")) command = ADD_USER;
+    else if (!strcmp(argv[1], "--raise-user")) command = RAISE_USER;
     else return usage();
+    const int values = command == ADD_USER ? 1 : command == RAISE_USER ? 3 : 0;
+    if (argc < 2 + values) return usage();
+    const char *user = values ? argv[2] : NULL;
+    uint64_t raise_bytes = 0, raise_inodes = 0;
+    if (user && !canonical_uuid(user)) { errno = EINVAL; return refuse("user must be a canonical lowercase UUID"); }
+    if (command == RAISE_USER && (decimal(argv[3], &raise_bytes) < 0 || decimal(argv[4], &raise_inodes) < 0)) {
+        errno = EINVAL; return refuse("BYTES and INODES must be canonical decimal numbers");
+    }
     errno = 0;
 #ifdef QB_BROKER_TESTING
     const char *trust_root = NULL, *policy_dir = NULL, *broker_dir = NULL, *socket_dir = NULL,
                *fake_dir = NULL;
-    if (argc != 12) return usage();
-    for (int i = 2; i < argc; i += 2) {
+    if (argc != 12 + values) return usage();
+    for (int i = 2 + values; i < argc; i += 2) {
         const char **slot = !strcmp(argv[i], "--trust-root") ? &trust_root
                           : !strcmp(argv[i], "--policy-dir") ? &policy_dir
                           : !strcmp(argv[i], "--broker-dir") ? &broker_dir
@@ -286,7 +361,7 @@ int main(int argc, char **argv) {
     if (base < 0) return refuse("trust root");
     /* paths below are relative to the trust root, written absolute ("/policy") */
 #else
-    if (argc != 2) return usage();
+    if (argc != 2 + values) return usage();
     if (geteuid() != 0) return refuse("must run as root (installed system service)");
     const uid_t owner = 0;
     const char *policy_dir = POLICY_DIR, *broker_dir = BROKER_DIR, *socket_dir = SOCKET_DIR;
@@ -300,6 +375,10 @@ int main(int argc, char **argv) {
     unsigned int line = 0;
     errno = 0;
     if (qb_policy_load(pdir, POLICY_NAME, owner, &policy, &line) < 0) {
+        if (errno == EPROTONOSUPPORT)
+            return refuse("policy file is version 1 (user= lines); this broker reads version 2: users are "
+                          "operator journal grants (--add-user). See docs/native-quota-broker-service.md, "
+                          "Policy migration");
         char what[96];
         snprintf(what, sizeof(what), "policy file %s/%s (line %u)", policy_dir, POLICY_NAME, line);
         return refuse(what);
@@ -333,8 +412,8 @@ int main(int argc, char **argv) {
     memcpy(fake.uuid, policy.core.mount_uuid, 16);
     int fbase = open_chain(base, fake_dir, 0, owner, owner);
     if (fbase < 0) return refuse("fake directory");
-    fake.dir = fbase;
-    adapter = (struct qb_adapter){&fake, fake_mount, fake_observe, fake_configure};
+    fake.dir = fbase; fake_space_dir = fbase;
+    adapter = (struct qb_adapter){&fake, fake_mount, fake_observe, fake_configure, fake_raise};
     uint8_t live[16]; int enforced = 0;
     if (fake_mount(&fake, root, live, &enforced) < 0) return refuse("fake mount");
     if (memcmp(live, policy.core.mount_uuid, 16)) { errno = EXDEV; return refuse("mount UUID differs from policy"); }
@@ -356,6 +435,39 @@ int main(int argc, char **argv) {
         if (qb_open(root, state, &policy.core, &adapter, &broker) < 0)
             return refuse("open broker state (not bootstrapped, policy changed, in use or damaged)");
         if (command == CHECK) say("check passed: policy, directories, mount and state are consistent");
+    }
+    if (command == ADD_USER) {
+        struct qb_capacity c; uint32_t project = 0;
+        if (qb_grant_add(broker, user, &project, &c) < 0) {
+            int e = errno;
+            if (e == EFBIG) print_capacity(&c);
+            errno = e;
+            status = refuse(e == EEXIST ? "add-user: already a user (a user is never granted twice)"
+                          : e == EFBIG ? "add-user: overcommit (promised + reserve would exceed free space)"
+                          : e == ENOSPC ? "add-user: project id range or user limit exhausted"
+                          : "add-user");
+            goto out;
+        }
+        fprintf(stderr, "step-quota-broker: added user %s: project %u, pool %llu B / %llu inodes "
+                "(directory created at its first workspace)\n", user, project,
+                (unsigned long long)policy.core.bytes_hard, (unsigned long long)policy.core.inodes_hard);
+        print_capacity(&c);
+    } else if (command == RAISE_USER) {
+        struct qb_capacity c;
+        if (qb_raise(broker, user, raise_bytes, raise_inodes, &c) < 0) {
+            int e = errno;
+            if (e == EFBIG) print_capacity(&c);
+            errno = e;
+            status = refuse(e == EINVAL ? "raise-user: limits may only increase (and stay within policy bounds)"
+                          : e == ENOENT ? "raise-user: the user's pool is not allocated yet"
+                          : e == EACCES ? "raise-user: unknown or revoked user"
+                          : e == EFBIG ? "raise-user: overcommit (promised + reserve would exceed free space)"
+                          : "raise-user (if the record was written, repeat the same command to apply it)");
+            goto out;
+        }
+        fprintf(stderr, "step-quota-broker: raised user %s to %llu B / %llu inodes (recorded, set, read back)\n",
+                user, (unsigned long long)raise_bytes, (unsigned long long)raise_inodes);
+        if (c.users) print_capacity(&c);
     }
     if (command == SERVE) {
         int sdir = open_chain(base, socket_dir, 0, owner, owner);

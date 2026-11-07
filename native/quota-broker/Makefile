@@ -1,7 +1,7 @@
 CC ?= cc
 AR ?= ar
 CFLAGS ?= -std=c11 -O2 -g -Wall -Wextra -Werror -Wconversion -Wshadow -Wstrict-prototypes -D_FORTIFY_SOURCE=3 -fstack-protector-strong
-.PHONY: all test sanitize analyze clean acceptance acceptance-check acceptance-dry-run acceptance-wrapper-test service service-check service-dry-run service-script-test service-verify
+.PHONY: acceptance-sql-test all test sanitize analyze clean acceptance acceptance-check acceptance-dry-run acceptance-wrapper-test service service-check service-dry-run service-script-test service-verify
 all: libstep-quota-core.a libstep-quota-xfs.a libstep-quota-transport.a step-quota-broker step-quota-broker-fake
 
 # Installable service binary: real core + REAL xfs adapter + transport + policy loader, fixed
@@ -20,7 +20,7 @@ service-verify: step-quota-broker
 # FAKE-adapter TESTING build of the same main: refuses root, directories as arguments, no
 # quota/attribute syscalls. Used by test-broker and the TypeScript socket-client tests.
 step-quota-broker-fake: core.c transport.c policy.c broker-main.c core.h transport.h policy.h
-	$(CC) $(CFLAGS) -pthread -DQB_BROKER_TESTING core.c transport.c policy.c broker-main.c -o $@
+	$(CC) $(CFLAGS) -pthread -DQB_BROKER_TESTING core.c transport.c policy.c broker-main.c -Wl,--wrap=fstatvfs -o $@
 
 test-policy: policy.c policy.h core.h test-policy.c
 	$(CC) $(CFLAGS) policy.c test-policy.c -o $@
@@ -38,7 +38,7 @@ service-check: step-quota-broker
 	test -n "$$pinned" && test "$$pinned" = "$$actual" && test "$$unit_pinned" = "$$unit_actual"
 
 service-dry-run:
-	bash service/install-quota-broker.sh --dry-run --bytes-hard 16106127360 --inodes-hard 750000 --user 12345678-1234-4234-8234-000000000000
+	bash service/install-quota-broker.sh --dry-run --bytes-hard 16106127360 --inodes-hard 750000 --reserve-bytes 0 --user 12345678-1234-4234-8234-000000000000
 
 service-script-test:
 	bash service/test-install-script.sh
@@ -64,7 +64,7 @@ xfs.o: xfs.c xfs.h core.h
 libstep-quota-xfs.a: xfs.o
 	$(AR) rcs $@ $<
 
-test: test-core test-xfs test-transport test-policy test-broker
+test: test-core test-xfs test-transport test-policy test-broker acceptance-sql-test
 	./test-core
 	./test-xfs
 	./test-transport
@@ -75,17 +75,26 @@ test-xfs: xfs.c xfs.h core.c core.h test-xfs.c
 	$(CC) $(CFLAGS) -pthread -DQB_XFS_TESTING core.c xfs.c test-xfs.c -o $@
 
 test-core: core.c core.h test-core.c
-	$(CC) $(CFLAGS) -pthread core.c test-core.c -Wl,--wrap=fsync -o $@
+	$(CC) $(CFLAGS) -pthread core.c test-core.c -Wl,--wrap=fsync -Wl,--wrap=fstatvfs -o $@
 
 # Owner-run privileged acceptance binary: real core + REAL xfs adapter. Built
 # reproducibly (path-independent debug info) so its SHA-256 can be pinned in
 # acceptance/run-xfs-acceptance.sh. Never run it from this user-writable tree as
 # root; the owner installs a root-owned copy (docs/native-quota-xfs-acceptance.md).
 ACCEPTANCE_CFLAGS = $(CFLAGS) -ffile-prefix-map=$(CURDIR)=. -DQB_XFS_PRIVILEGED_ACCEPTANCE=1
-xfs-acceptance: core.c core.h xfs.c xfs.h xfs-acceptance.c
-	$(CC) $(ACCEPTANCE_CFLAGS) -pthread core.c xfs.c xfs-acceptance.c -Wl,--build-id=sha1 -o $@
+# The full-pool history check runs SQLite (the engine Store's WAL mode) in the writer child:
+# linked against the host runtime library libsqlite3.so.0 (no -dev header on this host; the
+# few declarations used are in acceptance/sqlite3-min.h).
+ACCEPTANCE_LIBS = -l:libsqlite3.so.0
+xfs-acceptance: core.c core.h xfs.c xfs.h xfs-acceptance.c acceptance/sqlite3-min.h
+	$(CC) $(ACCEPTANCE_CFLAGS) -pthread core.c xfs.c xfs-acceptance.c -Wl,--build-id=sha1 $(ACCEPTANCE_LIBS) -o $@
 
 acceptance: xfs-acceptance
+
+# Unprivileged self-test of the acceptance's writer-side SQLite code (same source, other main).
+acceptance-sql-test: core.c core.h xfs.c xfs.h xfs-acceptance.c acceptance/sqlite3-min.h
+	$(CC) $(CFLAGS) -Wno-unused-function -DQB_XFS_PRIVILEGED_ACCEPTANCE=1 -DQB_ACCEPTANCE_SQL_SELFTEST -pthread core.c xfs.c xfs-acceptance.c $(ACCEPTANCE_LIBS) -o test-acceptance-sql
+	d=$$(mktemp -d "$${TMPDIR:-/tmp}/qb-sql-XXXXXX") && ./test-acceptance-sql "$$d"; rc=$$?; rm -rf "$$d"; exit $$rc
 
 # Unprivileged: pinned hash in the wrapper must equal the built binary.
 acceptance-check: xfs-acceptance
@@ -105,7 +114,7 @@ sanitize:
 	$(MAKE) clean
 	$(MAKE) test CFLAGS='$(SAN_CFLAGS)'
 	# Acceptance binary: only its unprivileged refusal paths can run here.
-	$(CC) $(SAN_CFLAGS) -DQB_XFS_PRIVILEGED_ACCEPTANCE=1 -pthread core.c xfs.c xfs-acceptance.c -o xfs-acceptance-san
+	$(CC) $(SAN_CFLAGS) -DQB_XFS_PRIVILEGED_ACCEPTANCE=1 -pthread core.c xfs.c xfs-acceptance.c $(ACCEPTANCE_LIBS) -o xfs-acceptance-san
 	./xfs-acceptance-san; test $$? -eq 2
 	./xfs-acceptance-san --mount /nonexistent --writer-uid 995 --writer-gid 983; test $$? -eq 2
 	rm -f xfs-acceptance-san
@@ -127,4 +136,4 @@ analyze:
 	$(CC) $(CFLAGS) -DQB_BROKER_TESTING -fanalyzer -c policy.c -o /dev/null
 
 clean:
-	rm -f test-core test-xfs test-transport test-policy test-broker step-quota-broker step-quota-broker-fake step-quota-broker-san xfs-acceptance xfs-acceptance-san core.o xfs.o transport.o libstep-quota-core.a libstep-quota-xfs.a libstep-quota-transport.a
+	rm -f test-acceptance-sql test-core test-xfs test-transport test-policy test-broker step-quota-broker step-quota-broker-fake step-quota-broker-san xfs-acceptance xfs-acceptance-san core.o xfs.o transport.o libstep-quota-core.a libstep-quota-xfs.a libstep-quota-transport.a

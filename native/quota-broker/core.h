@@ -33,7 +33,17 @@ struct qb_policy {
      *   later request requires exactly those owners/modes; a changed or interrupted
      *   hand-over is denied, never adopted or repaired. */
     uint32_t layout, access_gid, content_uid, reserved;
+    /* Users added after bootstrap (qb_grant_add) are journal state, not policy: every added
+     * user's peer_uid is added_peer_uid (the service: gateway_uid); 0 disables adding. */
+    uint32_t added_peer_uid, reserved2;
+    /* No overcommit (qb_grant_add / qb_raise): the space still promised to every user pool
+     * (sum of hard - used, a never-allocated grant counts its full hard limit) plus
+     * reserve_bytes must fit in the filesystem's free space (fstatvfs of the root). */
+    uint64_t reserve_bytes;
 };
+#define QB_MAX_RESERVE_BYTES (UINT64_C(1) << 50)
+/* Journal events beyond the per-user ones (grant, reserve, directory, revoke): raises. */
+#define QB_MAX_RAISES 4096u
 #define QB_LAYOUT_PRIVATE 0u
 #define QB_LAYOUT_SHARED 1u
 struct qb_observation {
@@ -56,6 +66,12 @@ struct qb_adapter {
                    struct qb_observation *out);
     int (*configure)(void *, int mount_fd, int dir_fd, uint32_t project,
                      uint64_t bytes_hard, uint64_t inodes_hard);
+    /* Optional (NULL: qb_raise refuses ENOTSUP). Raise an ALREADY configured project's two
+     * hard limits to exactly these values: never lower either, never touch an unconfigured
+     * (zero-limit) project, set only the hard fields, then read both back. Idempotent: if
+     * the limits already equal the request nothing is written. */
+    int (*raise)(void *, int mount_fd, int dir_fd, uint32_t project,
+                 uint64_t bytes_hard, uint64_t inodes_hard);
 };
 struct qb_receipt {
     int directory_fd; /* owned by recipient; CLOSE it. Not a launch capability. */
@@ -100,4 +116,30 @@ struct qb_usage {
 };
 int qb_usage(struct qb *broker, uid_t authenticated_peer_uid, const void *frame, size_t length,
              struct qb_usage *out);
+
+/* ---- Operator-only pool operations. NOT request operations: the transport has no frame
+ * for them; only the root operator command (broker-main --add-user / --raise-user, which
+ * needs the exclusive journal lock, i.e. the service stopped) calls them. ---- */
+struct qb_capacity {
+    uint64_t available;  /* free bytes of the filesystem (f_bavail * f_frsize of the root) */
+    uint64_t reserve;    /* policy reserve_bytes */
+    uint64_t committed;  /* outstanding promise of every pool AFTER the operation */
+    uint32_t users;      /* grants counted (policy + journal, revoked included) */
+};
+/* Append a durable user grant (journal event) with a fresh, never reused project id taken
+ * from the policy range. EINVAL: not a canonical UUID; EEXIST: already a user (policy or
+ * journal, revoked included: no regrant); EPERM: policy added_peer_uid is 0; ENOSPC: id
+ * range or QB_MAX_GRANTS exhausted; EFBIG: no-overcommit check failed. Nothing is written
+ * on any refusal. The pool directory itself is still created by the first ENSURE. */
+int qb_grant_add(struct qb *broker, const char *user, uint32_t *project,
+                 struct qb_capacity *capacity);
+/* Raise one ALLOCATED user's pool. Both limits may only increase (EINVAL otherwise, nothing
+ * written); same bounds as the policy. Order: no-overcommit check (EFBIG), durable journal
+ * record, adapter raise (Q_XSETQLIM), independent readback. If anything after the record
+ * fails, the journal value stands and every request for that user is denied (EDQUOT) until
+ * the operator repeats the same raise, which then only applies + reads back (no new record).
+ * Repeating an already applied raise succeeds without writing. ENOENT: not allocated yet;
+ * EACCES: revoked; ENOSPC: QB_MAX_RAISES reached; ENOTSUP: adapter without raise. */
+int qb_raise(struct qb *broker, const char *user, uint64_t bytes_hard, uint64_t inodes_hard,
+             struct qb_capacity *capacity);
 #endif

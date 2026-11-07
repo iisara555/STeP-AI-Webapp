@@ -47,8 +47,8 @@ static char *slurp(const char *name) {
 static void policy(const char *override_key, const char *override_line, mode_t mode) {
     struct stat s; assert(fstatat(base_fd, "broker/root", &s, 0) == 0);
     char text[4096];
-    char lines[14][160];
-    snprintf(lines[0], 160, "version=1\n");
+    char lines[13][160];
+    snprintf(lines[0], 160, "version=2\n");
     snprintf(lines[1], 160, "epoch=00112233445566778899aabbccddeeff\n");
     snprintf(lines[2], 160, "mount_uuid=%s\n", mount_uuid);
     snprintf(lines[3], 160, "root_device=%llu\n", (unsigned long long)s.st_dev);
@@ -60,19 +60,26 @@ static void policy(const char *override_key, const char *override_line, mode_t m
     snprintf(lines[9], 160, "gateway_uid=%u\n", (unsigned)geteuid());
     snprintf(lines[10], 160, "gateway_gid=%u\n", (unsigned)getegid());
     snprintf(lines[11], 160, "workload_uid=%u\n", (unsigned)geteuid());
-    snprintf(lines[12], 160, "user=%s\n", grant0);
-    snprintf(lines[13], 160, "user=%s\n", grant1);
+    snprintf(lines[12], 160, "reserve_bytes=0\n");
     size_t used = (size_t)snprintf(text, sizeof(text), "# test policy (placeholder 15 GiB / 750000 inodes per user)\n");
-    for (int i = 0; i < 14; i++) {
+    for (int i = 0; i < 13; i++) {
         const char *l = lines[i];
         if (override_key && !strncmp(l, override_key, strlen(override_key))) l = override_line;
         used += (size_t)snprintf(text + used, sizeof(text) - used, "%s", l);
     }
     put("policy/policy", text, mode);
 }
-static int run_for(const char *command, const char *socket_dir, pid_t *spawned) {
-    const char *argv[] = {binary, command, "--trust-root", base, "--policy-dir", "/policy",
-                          "--broker-dir", "/broker", "--socket-dir", socket_dir, "--fake-dir", "/fake", NULL};
+static int run_values(const char *command, const char *v1, const char *v2, const char *v3,
+                      const char *socket_dir, pid_t *spawned) {
+    const char *argv[17]; int n = 0;
+    argv[n++] = binary; argv[n++] = command;
+    if (v1) argv[n++] = v1;
+    if (v2) argv[n++] = v2;
+    if (v3) argv[n++] = v3;
+    const char *rest[] = {"--trust-root", base, "--policy-dir", "/policy", "--broker-dir", "/broker",
+                          "--socket-dir", socket_dir, "--fake-dir", "/fake", NULL};
+    for (int i = 0; rest[i]; i++) argv[n++] = rest[i];
+    argv[n] = NULL;
     posix_spawn_file_actions_t actions;
     assert(posix_spawn_file_actions_init(&actions) == 0);
     char out[4200], err[4200];
@@ -86,7 +93,20 @@ static int run_for(const char *command, const char *socket_dir, pid_t *spawned) 
     int status; assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status));
     return WEXITSTATUS(status);
 }
+static int run_for(const char *command, const char *socket_dir, pid_t *spawned) {
+    return run_values(command, NULL, NULL, NULL, socket_dir, spawned);
+}
 static int run(const char *command) { return run_for(command, "/run0", NULL); }
+static int add_user(const char *user) { return run_values("--add-user", user, NULL, NULL, "/run0", NULL); }
+static int raise_user(const char *user, const char *bytes, const char *inodes) {
+    return run_values("--raise-user", user, bytes, inodes, "/run0", NULL);
+}
+static void expect_rc(int rc, int want, const char *message, const char *label) {
+    const char *err = slurp("err");
+    if (rc != want || (message && !strstr(err, message))) {
+        fprintf(stderr, "%s: rc=%d (want %d) stderr=%s\n", label, rc, want, err); assert(0);
+    }
+}
 static void expect_refused(const char *command, const char *message, const char *label) {
     int rc = run(command);
     const char *err = slurp("err");
@@ -178,12 +198,16 @@ static void usage_and_policy_refusals(void) {
     expect_refused("--check", "policy file", "missing policy");
     policy(NULL, NULL, 0664); expect_refused("--check", "policy file", "group-writable policy file");
     policy(NULL, NULL, 0640); expect_refused("--check", "policy file", "0640 policy file");
-    policy("version=", "version=1\ncolour=blue\n", 0644);
+    policy("version=", "version=2\ncolour=blue\n", 0644);
     expect_refused("--check", "line 3", "unknown key");
     policy("bytes_hard=", "bytes_hard=1\n", 0644); expect_refused("--check", "policy file", "byte limit range");
     policy("inodes_hard=", "inodes_hard=10000001\n", 0644); expect_refused("--check", "policy file", "inode range");
     policy("first_project=", "first_project=424242\n", 0644); expect_refused("--check", "policy file", "project range");
-    policy("user=", "", 0644); expect_refused("--check", "policy file", "no users");
+    /* Version 1 (users listed in the policy) is refused with a pointer to the migration. */
+    policy("version=", "version=1\n", 0644); expect_refused("--check", "version 1", "policy version 1");
+    policy("reserve_bytes=", "reserve_bytes=0\nuser=12345678-1234-4234-8234-000000000000\n", 0644);
+    expect_refused("--check", "Policy migration", "user= line");
+    policy("reserve_bytes=", "", 0644); expect_refused("--check", "policy file", "missing reserve");
     policy(NULL, NULL, 0644);
     assert(fchmodat(base_fd, "policy", 0775, 0) == 0);
     expect_refused("--check", "policy directory", "group-writable policy dir");
@@ -245,6 +269,33 @@ static void socket_refusals(void) {
     assert(unlinkat(base_fd, "run0/broker.sock", 0) == 0);
     int rc = run_for("--serve", "/missing", NULL);
     assert(rc == 2 && strstr(slurp("err"), "socket directory"));
+}
+static void operator_add_users(void) {
+    /* Strict operator values, refused before anything is opened. */
+    const char *argv[] = {binary, "--add-user", NULL};
+    posix_spawn_file_actions_t quiet;
+    assert(posix_spawn_file_actions_init(&quiet) == 0);
+    assert(posix_spawn_file_actions_addopen(&quiet, 2, "/dev/null", O_WRONLY, 0) == 0);
+    pid_t pid; int status;
+    assert(posix_spawn(&pid, binary, &quiet, NULL, (char **)argv, environ) == 0);
+    assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 2);
+    posix_spawn_file_actions_destroy(&quiet);
+    expect_rc(add_user("12345678-1234-4234-8234-00000000000G"), 2, "canonical", "non-canonical uuid");
+    expect_rc(add_user("../../etc/passwd"), 2, "canonical", "path as uuid");
+    expect_rc(raise_user(grant0, "01", "1"), 2, "decimal", "non-canonical decimal");
+    expect_rc(raise_user(grant0, "-1", "1"), 2, "decimal", "negative");
+    /* No overcommit against (fake) free space: 2 x 15 GiB fit exactly, a third does not. */
+    put("fake/available", "32212254720\n", 0600);
+    expect_rc(add_user(grant0), 0, "added user 12345678-1234-4234-8234-000000000000: project 100000", "add 0");
+    assert(strstr(slurp("err"), "capacity: 1 users promise 16106127360 B + reserve 0 B, 32212254720 B free"));
+    expect_rc(add_user(grant0), 2, "already a user", "duplicate add");
+    expect_rc(add_user(grant1), 0, "project 100001", "add 1");
+    expect_rc(add_user("12345678-1234-4234-8234-000000000002"), 2, "overcommit", "overcommit add");
+    assert(strstr(slurp("err"), "3 users promise 48318382080 B"));
+    assert(unlinkat(base_fd, "fake/available", 0) == 0);
+    expect_rc(raise_user(grant0, "21474836480", "1000000"), 2, "not allocated", "raise before allocation");
+    /* The policy is unchanged by adding users (users are journal state). */
+    assert(run("--check") == 0);
 }
 static const char *ws_a = "aaaaaaaa-0000-4000-8000-000000000001";
 static const char *ws_b = "bbbbbbbb-0000-4000-8000-000000000002";
@@ -324,6 +375,52 @@ static void serve_and_restart(void) {
     workspace("/run2", grant0, ws_a, reply, sizeof(reply)); expect_workspace(reply, 100000, ws_a, &again);
     stop(pid);
 }
+static void operator_raise(void) {
+    char reply[256], usage[64]; struct stat dir;
+    snprintf(usage, sizeof(usage), "USAGE/1 %s\n", grant0);
+    assert(mkdirat(base_fd, "run3", 0700) == 0);
+    pid_t pid = serve("/run3");
+    /* Never while the service holds the journal; never over the gateway socket. */
+    expect_rc(raise_user(grant0, "21474836480", "1000000"), 2, "in use", "raise while serving");
+    expect_rc(add_user("12345678-1234-4234-8234-000000000003"), 2, "in use", "add while serving");
+    char frame[96];
+    int n = snprintf(frame, sizeof(frame), "RAISE/1 %s 21474836480 1000000\n", grant0);
+    exchange("/run3", frame, (size_t)n, reply, sizeof(reply)); assert(!strcmp(reply, "DENIED/1\n"));
+    stop(pid);
+    expect_rc(raise_user(grant0, "16106123264", "1000000"), 2, "only increase", "lower bytes");
+    expect_rc(raise_user(grant0, "21474836480", "749999"), 2, "only increase", "lower inodes");
+    expect_rc(raise_user(grant0, "21474836481", "1000000"), 2, "only increase", "unaligned");
+    expect_rc(raise_user("12345678-1234-4234-8234-0000000000ff", "21474836480", "1000000"), 2, "unknown", "unknown user");
+    put("fake/available", "16106127360\n", 0600); /* grant1's untouched 15 GiB + 5 GiB more > free */
+    expect_rc(raise_user(grant0, "21474836480", "1000000"), 2, "overcommit", "overcommit raise");
+    assert(!strcmp(slurp("fake/q100000"), "16106127360 750000\n"));
+    assert(unlinkat(base_fd, "fake/available", 0) == 0);
+    /* Failure after the record: denied until the same raise is repeated. */
+    put("fake/fail-raise", "", 0600);
+    expect_rc(raise_user(grant0, "21474836480", "1000000"), 2, "repeat the same command", "failed raise");
+    assert(unlinkat(base_fd, "fake/fail-raise", 0) == 0);
+    assert(mkdirat(base_fd, "run4", 0700) == 0);
+    pid = serve("/run4");
+    ensure("/run4", grant0, reply, sizeof(reply)); assert(!strcmp(reply, "DENIED/1\n"));
+    stop(pid);
+    expect_rc(raise_user(grant0, "21474836480", "1000000"), 0, "raised user", "repeat applies");
+    assert(!strcmp(slurp("fake/q100000"), "21474836480 1000000\n"));
+    expect_rc(raise_user(grant0, "21474836480", "1000000"), 0, "raised user", "already applied");
+    /* Restart replays to the same limits: receipts and usage report them. */
+    assert(mkdirat(base_fd, "run5", 0700) == 0);
+    pid = serve("/run5");
+    ensure("/run5", grant0, reply, sizeof(reply));
+    assert(fstatat(base_fd, "broker/root/p100000", &dir, AT_SYMLINK_NOFOLLOW) == 0);
+    char expected[200];
+    snprintf(expected, sizeof(expected), "OK/2 100000 %llu %llu 21474836480 1000000 %s\n",
+             (unsigned long long)dir.st_dev, (unsigned long long)dir.st_ino, mount_uuid);
+    if (strcmp(reply, expected)) { fprintf(stderr, "reply %s expected %s", reply, expected); assert(0); }
+    exchange("/run5", usage, 45, reply, sizeof(reply));
+    assert(!strcmp(reply, "USAGE/1 100000 12884901888 21474836480 600000 1000000\n"));
+    ensure("/run5", grant1, reply, sizeof(reply)); expect_ok(reply, 100001, &dir); /* others unchanged */
+    stop(pid);
+    assert(run("--check") == 0);
+}
 int main(int argc, char **argv) {
     assert(geteuid() != 0);
     assert(argc == 2); binary = argv[1];
@@ -331,10 +428,12 @@ int main(int argc, char **argv) {
     umask(077);
     fixture();
     void (*tests[])(void) = {usage_and_policy_refusals, directory_and_mount_refusals, bootstrap_once,
-                             socket_refusals, serve_and_restart};
+                             socket_refusals, operator_add_users, serve_and_restart, operator_raise};
     const char *names[] = {"usage and policy file refusals", "directory/identity/mount refusals",
                            "one-time bootstrap bound to policy", "socket directory refusals",
-                           "served per-user pool, workspaces, usage, restart"};
+                           "operator add-user: journal grants, duplicates, no overcommit",
+                           "served per-user pool, workspaces, usage, restart",
+                           "operator raise-user: only up, in-use refusal, retry, replay to receipts"};
     for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
         tests[i](); printf("ok %zu - %s\n", i + 1, names[i]);
     }

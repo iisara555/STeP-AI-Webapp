@@ -2,8 +2,8 @@
 # Owner-run installer for the native quota broker system service (step-quota-broker).
 #
 # Run ONLY the root-owned installed copy (see docs/native-quota-broker-service.md):
-#   /usr/local/libexec/step-quota-broker/install --dry-run  --bytes-hard N --inodes-hard N --user UUID...
-#   sudo /usr/local/libexec/step-quota-broker/install --install --bytes-hard N --inodes-hard N --user UUID...
+#   /usr/local/libexec/step-quota-broker/install --dry-run  --bytes-hard N --inodes-hard N --reserve-bytes N --user UUID...
+#   sudo /usr/local/libexec/step-quota-broker/install --install --bytes-hard N --inodes-hard N --reserve-bytes N --user UUID...
 #   sudo /usr/local/libexec/step-quota-broker/install --uninstall [--purge-empty]
 #
 # It executes nothing an unprivileged user can modify: it refuses unless this script, the
@@ -32,7 +32,7 @@ umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export LC_ALL=C
 
-readonly BIN_SHA256=b9676c20683f1c64a297161dc0145a1265b031aff381bdad9d1ab64ad04b3162
+readonly BIN_SHA256=1274e38e3be4e43893416384756fd308fff77db3baf8c33ea26dd83990d207f3
 readonly UNIT_SHA256=2d86101468b2af0622680ffa5e1004ba1ef55239a82192a6e16f4f7082e39394
 readonly INSTALL_DIR=/usr/local/libexec/step-quota-broker
 readonly SELF_INSTALLED=$INSTALL_DIR/install
@@ -51,19 +51,20 @@ readonly FIRST_PROJECT=100000 LAST_PROJECT=199999
 readonly TOOLS="findmnt stat sha256sum install systemctl getent xfs_quota od mktemp mv chmod rmdir id df"
 
 usage() {
-    echo "usage: $0 --dry-run|--install --bytes-hard BYTES --inodes-hard N --user UUID [--user UUID...]" >&2
+    echo "usage: $0 --dry-run|--install --bytes-hard BYTES --inodes-hard N --reserve-bytes N --user UUID [--user UUID...]" >&2
     echo "       $0 --uninstall [--purge-empty]" >&2
     exit 2
 }
 die() { echo "REFUSED: $*" >&2; exit 2; }
 
-MODE='' BYTES='' INODES='' PURGE=0
+MODE='' BYTES='' INODES='' RESERVE='' PURGE=0
 GRANTS=()
 while (($#)); do
     case $1 in
     --dry-run|--install|--uninstall) [[ -z $MODE ]] || usage; MODE=${1#--} ;;
     --bytes-hard) (($# >= 2)) || usage; [[ -z $BYTES ]] || usage; BYTES=$2; shift ;;
     --inodes-hard) (($# >= 2)) || usage; [[ -z $INODES ]] || usage; INODES=$2; shift ;;
+    --reserve-bytes) (($# >= 2)) || usage; [[ -z $RESERVE ]] || usage; RESERVE=$2; shift ;;
     --user) (($# >= 2)) || usage; GRANTS+=("$2"); shift ;;
     --purge-empty) PURGE=1 ;;
     *) usage ;;
@@ -72,7 +73,7 @@ while (($#)); do
 done
 [[ -n $MODE ]] || usage
 if [[ $MODE == uninstall ]]; then
-    [[ -z $BYTES && -z $INODES && ${#GRANTS[@]} == 0 ]] || usage
+    [[ -z $BYTES && -z $INODES && -z $RESERVE && ${#GRANTS[@]} == 0 ]] || usage
 else
     (( ! PURGE )) || usage
     # Same bounds as the native policy parser (policy.c); it re-validates everything.
@@ -81,6 +82,9 @@ else
     fi
     if ! [[ $INODES =~ ^[1-9][0-9]{0,7}$ ]] || (( INODES > 10000000 )); then
         die "--inodes-hard must be 1..10000000 (placeholder: 750000 per user)"
+    fi
+    if ! [[ $RESERVE =~ ^(0|[1-9][0-9]{0,15})$ ]] || (( RESERVE > 1125899906842624 )); then
+        die "--reserve-bytes must be a canonical decimal in 0..1125899906842624 (choose protected headroom)"
     fi
     (( ${#GRANTS[@]} >= 1 && ${#GRANTS[@]} <= 512 )) || die "need 1..512 --user UUIDs (one quota pool per user)"
     declare -A seen=()
@@ -126,18 +130,19 @@ if [[ $MODE == dry-run ]]; then
     echo "Gateway $GATEWAY_NAME: expected $GATEWAY_UID:$GATEWAY_GID, found $(getent passwd "$GATEWAY_NAME" | cut -d: -f3,4)"
     echo "Workload $WORKLOAD_NAME: expected $WORKLOAD_UID:$WORKLOAD_GID, found $(getent passwd "$WORKLOAD_NAME" | cut -d: -f3,4)"
     avail=$(df --output=avail -B1 -- "$MOUNT" 2>/dev/null | tail -n 1 | tr -d ' ')
-    echo "Capacity: ${#GRANTS[@]} users x $BYTES = $(( ${#GRANTS[@]} * BYTES )) bytes committed; ${avail:-?} available (a real run REFUSES overcommit)"
+    echo "Capacity: ${#GRANTS[@]} users x $BYTES = $(( ${#GRANTS[@]} * BYTES )) bytes committed + reserve $RESERVE; ${avail:-?} available (a real run REFUSES overcommit)"
     echo "Mount $MOUNT: $(findmnt -n -o TARGET,FSTYPE,OPTIONS,UUID --mountpoint "$MOUNT" 2>/dev/null || echo 'NOT A MOUNT POINT (a real run would REFUSE)')"
     for p in "$POLICY_DIR" "$BROKER_DIR" "$UNIT_DST"; do
         [[ -e $p ]] && echo "EXISTS: $p (a real --install would REFUSE; fresh hosts only)"
     done
     cat <<EOF
 Policy that --install would write to $POLICY_DIR/policy (root 0644):
-  version=1  epoch=<16 random bytes>  mount_uuid=<UUID of $MOUNT>
+  version=2  epoch=<16 random bytes>  mount_uuid=<UUID of $MOUNT>
   root_device/root_inode=<of $BROKER_DIR/root after creation>
   bytes_hard=$BYTES  inodes_hard=$INODES  first_project=$FIRST_PROJECT  last_project=$LAST_PROJECT
   gateway_uid=$GATEWAY_UID  gateway_gid=$GATEWAY_GID  workload_uid=$WORKLOAD_UID
-$(printf '  user=%s\n' "${GRANTS[@]}")
+  reserve_bytes=$RESERVE
+  # users are durable journal grants, never policy lines
 Steps of a real --install (root only):
   1. refuse unless uid 0, this file is $SELF_INSTALLED, it/binary/unit are root-owned
      (chain not group/other-writable), and binary+unit match the pins
@@ -146,7 +151,7 @@ Steps of a real --install (root only):
      (census needs root; not run in a dry run)
   3. install -d root:root 0755 $BROKER_DIR; root:$GATEWAY_GID 0710 root/; root:root 0700 state/
   4. write the policy via mktemp + chmod 0644 + mv -T (root-owned $POLICY_DIR 0755)
-  5. $BIN --bootstrap; $BIN --check
+  5. $BIN --bootstrap; $BIN --add-user UUID (each initial user); $BIN --check
   6. install -m 0644 unit to $UNIT_DST; systemctl daemon-reload; systemctl enable --now $UNIT_NAME
   7. require $SOCKET root:$GATEWAY_GID 0660 in a root:$GATEWAY_GID 0710 directory
 Undo: sudo $SELF_INSTALLED --uninstall   (keeps policy/state/p<ID>; add --purge-empty only if
@@ -176,6 +181,7 @@ if [[ $MODE == uninstall ]]; then
         echo "no $UNIT_DST; nothing to stop"
     fi
     if (( PURGE )); then
+        [[ ! -s $BROKER_DIR/state/journal ]] || die "state journal contains grants/events; NOT purging (ids never recycled)"
         if [[ -d $BROKER_DIR/root ]] && [[ -n $(ls -A -- "$BROKER_DIR/root") ]]; then
             die "$BROKER_DIR/root contains allocated project directories; NOT purging (ids are never recycled; see docs)"
         fi
@@ -212,7 +218,7 @@ done
 avail=$(df --output=avail -B1 -- "$MOUNT" | tail -n 1 | tr -d ' ')
 [[ $avail =~ ^[0-9]+$ ]] || die "could not read available space of $MOUNT"
 committed=$(( ${#GRANTS[@]} * BYTES ))
-(( committed <= avail )) || die "overcommit: ${#GRANTS[@]} users x $BYTES = $committed bytes > $avail available on $MOUNT"
+(( committed <= avail && RESERVE <= avail - committed )) || die "overcommit: ${#GRANTS[@]} users x $BYTES = $committed bytes + reserve $RESERVE > $avail available on $MOUNT"
 echo "capacity: ${#GRANTS[@]} users x $BYTES = $committed bytes committed of $avail available"
 # Census: no existing project quota record (usage or limits) inside the broker range.
 report=$(xfs_quota -x -c 'report -p -b -i -n -N' "$MOUNT") || die "xfs_quota report failed"
@@ -248,7 +254,7 @@ tmp=$(mktemp -- "$POLICY_DIR/.policy.XXXXXXXX")
 {
     echo "# step-quota-broker policy, written by $SELF_INSTALLED on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "# Immutable after bootstrap: the state manifest binds every value below."
-    echo "version=1"
+    echo "version=2"
     echo "epoch=$epoch"
     echo "mount_uuid=$fsuuid"
     echo "root_device=$dev"
@@ -260,13 +266,14 @@ tmp=$(mktemp -- "$POLICY_DIR/.policy.XXXXXXXX")
     echo "gateway_uid=$GATEWAY_UID"
     echo "gateway_gid=$GATEWAY_GID"
     echo "workload_uid=$WORKLOAD_UID"
-    printf 'user=%s\n' "${GRANTS[@]}"
+    echo "reserve_bytes=$RESERVE"
 } >"$tmp"
 chmod 0644 -- "$tmp"
 mv -f -T -- "$tmp" "$POLICY_DIR/policy"
 echo "wrote $POLICY_DIR/policy (sha256 $(hash_of "$POLICY_DIR/policy"))"
 
 "$BIN" --bootstrap
+for g in "${GRANTS[@]}"; do "$BIN" --add-user "$g"; done
 "$BIN" --check
 
 install -o root -g root -m 0644 -- "$UNIT_SRC" "$UNIT_DST"; created+=("$UNIT_DST")

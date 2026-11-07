@@ -35,21 +35,34 @@ int qb_request(const void *frame, size_t length, char workspace[37]) {
     return 0;
 }
 
-/* Local ABI journal version 1, never portable/importable state. No automatic
- * migration/repair. Every byte is canonicalized, including structure padding. */
+/* Local ABI journal version 2, never portable/importable state. No automatic
+ * migration/repair. Every byte is canonicalized, including structure padding.
+ * Event kinds (one fixed-size record each):
+ *   1 RESERVE    project = id about to get its directory; device = inode = 0
+ *   2 DIRECTORY  project; device/inode of the created p<ID>
+ *   3 REVOKE     project = device = inode = 0
+ *   4 GRANT      operator-added user; project = its fresh id (next in range); device = inode = 0
+ *   5 RAISE      project; device = new bytes_hard, inode = new inodes_hard (both >= previous) */
+#define QB_MANIFEST_VERSION 2
+#define QB_MAX_EVENTS ((uint64_t)QB_MAX_GRANTS * 4 + QB_MAX_RAISES)
 struct manifest { uint64_t version; struct qb_policy policy; };
 struct event {
     uint32_t version, kind, project, reserved;
     uint64_t device, inode;
     char workspace[40];
 };
-struct allocation { uint32_t project; uint64_t device, inode; int revoked; };
+struct allocation {
+    uint32_t project, granted; /* granted: id reserved by a GRANT event (0 for policy users) */
+    uint64_t device, inode;
+    uint64_t bytes_hard, inodes_hard; /* current (journal) limits of this user's pool */
+    int revoked;
+};
 struct qb {
     int root, state, journal, poisoned;
     uint64_t mount_id;
     off_t end;
-    uint32_t next;
-    struct qb_policy policy;
+    uint32_t next, raises;
+    struct qb_policy policy; /* grants[] = policy users, then journal (GRANT) users */
     struct qb_adapter adapter;
     struct allocation allocations[QB_MAX_GRANTS];
     pthread_mutex_t mutex;
@@ -59,14 +72,17 @@ static int nonzero(const uint8_t *p, size_t n) {
     for (size_t i = 0; i < n; i++) if (p[i]) return 1;
     return 0;
 }
+static int limits_ok(uint64_t bytes, uint64_t inodes) {
+    return bytes >= 4096 && bytes <= UINT64_C(1099511627776) && !(bytes % 4096) &&
+           inodes && inodes <= 10000000;
+}
 static int policy_copy(struct qb_policy *out, const struct qb_policy *p) {
     if (!p || !nonzero(p->epoch, 16) || !nonzero(p->mount_uuid, 16) ||
-        !p->root_inode || !p->root_device ||
-        p->bytes_hard < 4096 || p->bytes_hard > UINT64_C(1099511627776) ||
-        p->bytes_hard % 4096 || !p->inodes_hard || p->inodes_hard > 10000000 ||
+        !p->root_inode || !p->root_device || !limits_ok(p->bytes_hard, p->inodes_hard) ||
         p->first_project < 100000 || p->last_project > 199999 ||
-        p->first_project > p->last_project || !p->grant_count || p->grant_count > QB_MAX_GRANTS ||
-        p->reserved || (p->layout != QB_LAYOUT_PRIVATE && p->layout != QB_LAYOUT_SHARED) ||
+        p->first_project > p->last_project || p->grant_count > QB_MAX_GRANTS ||
+        p->reserved || p->reserved2 || p->reserve_bytes > QB_MAX_RESERVE_BYTES ||
+        (p->layout != QB_LAYOUT_PRIVATE && p->layout != QB_LAYOUT_SHARED) ||
         (p->layout == QB_LAYOUT_PRIVATE && (p->access_gid || p->content_uid)) ||
         (p->layout == QB_LAYOUT_SHARED && (!p->access_gid || !p->content_uid ||
                                            p->access_gid == UINT32_MAX || p->content_uid == UINT32_MAX)))
@@ -79,6 +95,7 @@ static int policy_copy(struct qb_policy *out, const struct qb_policy *p) {
     out->first_project = p->first_project; out->last_project = p->last_project;
     out->grant_count = p->grant_count;
     out->layout = p->layout; out->access_gid = p->access_gid; out->content_uid = p->content_uid;
+    out->added_peer_uid = p->added_peer_uid; out->reserve_bytes = p->reserve_bytes;
     for (uint32_t i = 0; i < p->grant_count; i++) {
         if (!uuid(p->grants[i].workspace)) return deny(EINVAL);
         for (uint32_t j = 0; j < i; j++)
@@ -180,7 +197,7 @@ static int read_full(int fd, void *buffer, size_t size, off_t offset) {
 }
 int qb_bootstrap(int state_fd, const struct qb_policy *policy) {
     struct manifest m;
-    memset(&m, 0, sizeof(m)); m.version = 1;
+    memset(&m, 0, sizeof(m)); m.version = QB_MANIFEST_VERSION;
     if (policy_copy(&m.policy, policy) < 0 || protected_fd(state_fd, 1) < 0 || empty_dir(state_fd) < 0)
         return -1;
     int fd = beneath(state_fd, "manifest", O_WRONLY | O_CREAT | O_EXCL, 0600);
@@ -199,6 +216,17 @@ static int grant_index(struct qb *b, const char *workspace) {
     for (uint32_t i = 0; i < b->policy.grant_count; i++)
         if (!strcmp(workspace, b->policy.grants[i].workspace)) return (int)i;
     return deny(EACCES);
+}
+/* Journal user (GRANT): appended to the in-memory user set with its reserved id. */
+static void add_grant(struct qb *b, const char *user, uint32_t project) {
+    uint32_t i = b->policy.grant_count++;
+    memset(&b->policy.grants[i], 0, sizeof(b->policy.grants[i]));
+    b->policy.grants[i].peer_uid = b->policy.added_peer_uid;
+    memcpy(b->policy.grants[i].workspace, user, 37);
+    struct allocation *a = &b->allocations[i];
+    memset(a, 0, sizeof(*a));
+    a->granted = project;
+    a->bytes_hard = b->policy.bytes_hard; a->inodes_hard = b->policy.inodes_hard;
 }
 static int mount_check(struct qb *b) {
     struct stat s;
@@ -222,9 +250,13 @@ static int mount_check(struct qb *b) {
 static int replay(struct qb *b) {
     struct stat s;
     if (fstat(b->journal, &s) < 0) return -1;
-    if (s.st_size < 0 || (uint64_t)s.st_size > QB_MAX_GRANTS * 3 * sizeof(struct event) ||
+    if (s.st_size < 0 || (uint64_t)s.st_size > QB_MAX_EVENTS * sizeof(struct event) ||
         s.st_size % (off_t)sizeof(struct event)) return deny(EILSEQ);
     b->next = b->policy.first_project;
+    for (uint32_t i = 0; i < b->policy.grant_count; i++) {
+        b->allocations[i].bytes_hard = b->policy.bytes_hard;
+        b->allocations[i].inodes_hard = b->policy.inodes_hard;
+    }
     for (off_t off = 0; off < s.st_size; off += (off_t)sizeof(struct event)) {
         struct event e, canonical;
         if (read_full(b->journal, &e, sizeof(e), off) < 0 || !uuid(e.workspace)) return deny(EILSEQ);
@@ -233,13 +265,25 @@ static int replay(struct qb *b) {
         canonical.device = e.device; canonical.inode = e.inode;
         memcpy(canonical.workspace, e.workspace, 37);
         if (memcmp(&canonical, &e, sizeof(e))) return deny(EILSEQ);
+        if (e.kind == 4) { /* GRANT: a new user, never one already known, with the next id */
+            if (grant_index(b, e.workspace) >= 0 || !b->policy.added_peer_uid ||
+                b->policy.grant_count >= QB_MAX_GRANTS || e.project != b->next ||
+                e.project > b->policy.last_project || e.device || e.inode) return deny(EILSEQ);
+            add_grant(b, e.workspace, b->next++);
+            continue;
+        }
         int index = grant_index(b, e.workspace);
         if (index < 0) return deny(EILSEQ);
         struct allocation *a = &b->allocations[index];
         if (e.kind == 1) {
-            if (a->project || a->revoked || e.project != b->next ||
-                e.project > b->policy.last_project || e.device || e.inode) return deny(EILSEQ);
-            a->project = b->next++;
+            if (a->project || a->revoked || e.device || e.inode) return deny(EILSEQ);
+            if (a->granted) {
+                if (e.project != a->granted) return deny(EILSEQ);
+            } else {
+                if (e.project != b->next || e.project > b->policy.last_project) return deny(EILSEQ);
+                b->next++;
+            }
+            a->project = e.project;
         } else if (e.kind == 2) {
             if (!a->project || a->project != e.project || a->inode || a->revoked ||
                 !e.inode || e.device != b->policy.root_device) return deny(EILSEQ);
@@ -247,6 +291,12 @@ static int replay(struct qb *b) {
         } else if (e.kind == 3) {
             if (a->revoked || e.project || e.device || e.inode) return deny(EILSEQ);
             a->revoked = 1;
+        } else if (e.kind == 5) { /* RAISE: only an allocated, unrevoked pool, only upwards */
+            if (!a->inode || a->revoked || e.project != a->project || !limits_ok(e.device, e.inode) ||
+                e.device < a->bytes_hard || e.inode < a->inodes_hard ||
+                (e.device == a->bytes_hard && e.inode == a->inodes_hard) ||
+                b->raises >= QB_MAX_RAISES) return deny(EILSEQ);
+            a->bytes_hard = e.device; a->inodes_hard = e.inode; b->raises++;
         } else return deny(EILSEQ);
     }
     b->end = s.st_size;
@@ -257,7 +307,7 @@ int qb_open(int root_fd, int state_fd, const struct qb_policy *policy,
     if (!out) return deny(EINVAL);
     *out = NULL;
     struct manifest expected, actual;
-    memset(&expected, 0, sizeof(expected)); expected.version = 1;
+    memset(&expected, 0, sizeof(expected)); expected.version = QB_MANIFEST_VERSION;
     if (policy_copy(&expected.policy, policy) < 0 || !adapter || !adapter->mount ||
         !adapter->observe || !adapter->configure) return deny(EINVAL);
     if (protected_root(&expected.policy, root_fd) < 0 || protected_fd(state_fd, 1) < 0) return -1;
@@ -297,12 +347,12 @@ void qb_close(struct qb *b) {
     pthread_mutex_destroy(&b->mutex);
     free(b);
 }
-static int append(struct qb *b, uint32_t kind, int index, uint32_t project,
-                  uint64_t device, uint64_t inode) {
+static int append_for(struct qb *b, uint32_t kind, const char *user, uint32_t project,
+                      uint64_t device, uint64_t inode) {
     struct event e;
     memset(&e, 0, sizeof(e)); e.version = 1; e.kind = kind;
     e.project = project; e.device = device; e.inode = inode;
-    memcpy(e.workspace, b->policy.grants[index].workspace, 37);
+    memcpy(e.workspace, user, 37);
     struct stat s;
     if (b->poisoned || protected_fd(b->journal, 0) < 0 || fstat(b->journal, &s) < 0 ||
         s.st_size != b->end || write_full(b->journal, &e, sizeof(e), b->end) < 0 ||
@@ -313,14 +363,20 @@ static int append(struct qb *b, uint32_t kind, int index, uint32_t project,
     b->end += (off_t)sizeof(e);
     return 0;
 }
-static int observed(struct qb *b, int fd, uint32_t project, int fresh) {
+static int append(struct qb *b, uint32_t kind, int index, uint32_t project,
+                  uint64_t device, uint64_t inode) {
+    return append_for(b, kind, b->policy.grants[index].workspace, project, device, inode);
+}
+/* fresh: must be blank. Otherwise must carry exactly this user's project, inheritance and
+ * CURRENT (journal) limits; a raise recorded but not yet applied is denied (EDQUOT). */
+static int observed(struct qb *b, int fd, const struct allocation *a, uint32_t project, int fresh) {
     struct qb_observation o;
     memset(&o, 0, sizeof(o));
     if (b->adapter.observe(b->adapter.context, b->root, fd, project, &o) < 0) return -1;
     if (fresh) {
         if (o.project || o.inherit || o.bytes_hard || o.inodes_hard) return deny(EEXIST);
-    } else if (o.project != project || o.inherit != 1 || o.bytes_hard != b->policy.bytes_hard ||
-               o.inodes_hard != b->policy.inodes_hard) return deny(EDQUOT);
+    } else if (o.project != project || o.inherit != 1 || o.bytes_hard != a->bytes_hard ||
+               o.inodes_hard != a->inodes_hard) return deny(EDQUOT);
     return 0;
 }
 /* Shared layout only, fresh provisioning only: p<ID> is still broker-owned 0700 and
@@ -357,7 +413,10 @@ static int ensure_locked(struct qb *b, int index, struct qb_receipt *out) {
     if (a->revoked) return deny(EACCES);
     if (mount_check(b) < 0) return -1;
     int fresh = !a->project;
-    if (fresh) {
+    if (fresh && a->granted) { /* operator-added user: its id was reserved by the GRANT */
+        if (append(b, 1, index, a->granted, 0, 0) < 0) return -1;
+        a->project = a->granted;
+    } else if (fresh) {
         if (b->next > b->policy.last_project) return deny(ENOSPC);
         if (append(b, 1, index, b->next, 0, 0) < 0) return -1;
         a->project = b->next++;
@@ -378,14 +437,14 @@ static int ensure_locked(struct qb *b, int index, struct qb_receipt *out) {
         if (empty_dir(fd) < 0 || fsync(fd) < 0 ||
             append(b, 2, index, a->project, (uint64_t)s.st_dev, (uint64_t)s.st_ino) < 0) goto done;
         a->device = (uint64_t)s.st_dev; a->inode = (uint64_t)s.st_ino;
-        if (observed(b, fd, a->project, 1) < 0 || mount_check(b) < 0 ||
+        if (observed(b, fd, a, a->project, 1) < 0 || mount_check(b) < 0 ||
             b->adapter.configure(b->adapter.context, b->root, fd, a->project,
                                  b->policy.bytes_hard, b->policy.inodes_hard) < 0 || fsync(fd) < 0) goto done;
         if (b->policy.layout == QB_LAYOUT_SHARED && hand_over_user(b, fd) < 0) goto done;
     } else if (a->device != (uint64_t)s.st_dev || a->inode != (uint64_t)s.st_ino) {
         errno = ESTALE; goto done;
     }
-    if (observed(b, fd, a->project, 0) < 0 || mount_check(b) < 0) goto done;
+    if (observed(b, fd, a, a->project, 0) < 0 || mount_check(b) < 0) goto done;
     /* Detect accidental protected-parent substitution during an adapter call.
      * This check is NOT a launch fence; a launcher must consume the retained FD
      * while holding the same authority, never turn the receipt into a pathname. */
@@ -399,7 +458,7 @@ static int ensure_locked(struct qb *b, int index, struct qb_receipt *out) {
         current_mount != b->mount_id) { errno = ESTALE; goto done; }
     out->directory_fd = fd; out->project = a->project;
     out->device = a->device; out->inode = a->inode;
-    out->bytes_hard = b->policy.bytes_hard; out->inodes_hard = b->policy.inodes_hard;
+    out->bytes_hard = a->bytes_hard; out->inodes_hard = a->inodes_hard;
     memcpy(out->mount_uuid, b->policy.mount_uuid, 16);
     result = 0;
 done:
@@ -477,7 +536,7 @@ static int workspace_locked(struct qb *b, int index, const char *workspace, stru
     if (mount_id != b->mount_id || (uint64_t)s.st_dev != b->policy.root_device) { errno = EXDEV; goto done; }
     if (fresh && (empty_dir(fd) < 0 || hand_over_workspace(b, fd) < 0)) goto done;
     /* The workspace must carry the user's project + inheritance (XFS PROJINHERIT). */
-    if (observed(b, fd, user.project, 0) < 0 || mount_check(b) < 0 ||
+    if (observed(b, fd, &b->allocations[index], user.project, 0) < 0 || mount_check(b) < 0 ||
         same_name(b, user.directory_fd, workspace, (uint64_t)s.st_ino) < 0) goto done;
     out->directory_fd = fd; out->project = user.project; out->device = user.device;
     out->user_inode = user.inode; out->inode = (uint64_t)s.st_ino;
@@ -509,6 +568,24 @@ int qb_workspace(struct qb *b, uid_t peer, const void *frame, size_t length, str
     int saved = errno; pthread_mutex_unlock(&b->mutex); errno = saved;
     return result;
 }
+/* Open an allocated user's p<ID> and require it is the recorded directory (identity, mount,
+ * owner/mode). Never creates. */
+static int open_pool(struct qb *b, const struct allocation *a) {
+    char name[16];
+    int n = snprintf(name, sizeof(name), "p%u", a->project);
+    if (n < 0 || (size_t)n >= sizeof(name)) return deny(EOVERFLOW);
+    int fd = beneath(b->root, name, O_RDONLY | O_DIRECTORY, 0);
+    if (fd < 0) return -1;
+    struct stat s; uint64_t mount_id;
+    if (project_dir(&b->policy, fd, 0) < 0 || identity(fd, &s, &mount_id) < 0) goto fail;
+    if ((uint64_t)s.st_ino != a->inode || (uint64_t)s.st_dev != a->device || mount_id != b->mount_id) {
+        errno = ESTALE; goto fail;
+    }
+    return fd;
+fail: {
+    int saved = errno; close(fd); errno = saved;
+    return -1;
+}}
 static int usage_locked(struct qb *b, int index, struct qb_usage *out) {
     struct allocation *a = &b->allocations[index];
     if (b->poisoned) return deny(EIO);
@@ -516,21 +593,13 @@ static int usage_locked(struct qb *b, int index, struct qb_usage *out) {
     if (!a->project) return deny(ENOENT); /* never allocates */
     if (!a->inode) return deny(EOWNERDEAD);
     if (mount_check(b) < 0) return -1;
-    char name[16];
-    int n = snprintf(name, sizeof(name), "p%u", a->project);
-    if (n < 0 || (size_t)n >= sizeof(name)) return deny(EOVERFLOW);
-    int fd = beneath(b->root, name, O_RDONLY | O_DIRECTORY, 0);
+    int fd = open_pool(b, a);
     if (fd < 0) return -1;
     int result = -1;
-    struct stat s; uint64_t mount_id;
     struct qb_observation o; memset(&o, 0, sizeof(o));
-    if (project_dir(&b->policy, fd, 0) < 0 || identity(fd, &s, &mount_id) < 0) goto done;
-    if ((uint64_t)s.st_ino != a->inode || (uint64_t)s.st_dev != a->device || mount_id != b->mount_id) {
-        errno = ESTALE; goto done;
-    }
     if (b->adapter.observe(b->adapter.context, b->root, fd, a->project, &o) < 0) goto done;
-    if (o.project != a->project || o.inherit != 1 || o.bytes_hard != b->policy.bytes_hard ||
-        o.inodes_hard != b->policy.inodes_hard) { errno = EDQUOT; goto done; }
+    if (o.project != a->project || o.inherit != 1 || o.bytes_hard != a->bytes_hard ||
+        o.inodes_hard != a->inodes_hard) { errno = EDQUOT; goto done; }
     out->project = a->project;
     out->bytes_used = o.bytes_used; out->inodes_used = o.inodes_used;
     out->bytes_hard = o.bytes_hard; out->inodes_hard = o.inodes_hard;
@@ -553,6 +622,108 @@ int qb_usage(struct qb *b, uid_t peer, const void *frame, size_t length, struct 
         if ((uint64_t)peer == b->policy.grants[index].peer_uid) result = usage_locked(b, index, out);
         else errno = EACCES;
     }
+    int saved = errno; pthread_mutex_unlock(&b->mutex); errno = saved;
+    return result;
+}
+
+/* ---- operator-only pool operations ---- */
+/* No overcommit. Outstanding promise of every user (policy and journal, revoked included):
+ * a pool with a directory promises hard - min(used, hard) (its usage is read through the
+ * adapter; failure to verify any pool fails the whole check); a pool without a directory
+ * promises its full hard limit (0 if revoked: it can never allocate). `changed` (or -1)
+ * uses `changed_bytes` as that user's new limit; `adding` counts one more fresh pool. */
+static int capacity(struct qb *b, int changed, uint64_t changed_bytes, int adding, struct qb_capacity *out) {
+    struct qb_capacity c; memset(&c, 0, sizeof(c));
+    for (uint32_t i = 0; i < b->policy.grant_count; i++) {
+        const struct allocation *a = &b->allocations[i];
+        uint64_t hard = (int)i == changed ? changed_bytes : a->bytes_hard, promised = hard;
+        c.users++;
+        if (!a->project && a->revoked) promised = 0;
+        else if (a->inode) {
+            int fd = open_pool(b, a);
+            if (fd < 0) return -1;
+            struct qb_observation o; memset(&o, 0, sizeof(o));
+            int rc = b->adapter.observe(b->adapter.context, b->root, fd, a->project, &o);
+            int saved = errno; close(fd); errno = saved;
+            if (rc < 0) return -1;
+            if (o.project != a->project || o.inherit != 1 || !o.bytes_hard || !o.inodes_hard ||
+                o.bytes_hard > a->bytes_hard ||
+                o.inodes_hard > a->inodes_hard) return deny(EDQUOT);
+            promised = hard - (o.bytes_used < hard ? o.bytes_used : hard);
+        }
+        c.committed += promised; /* <= 512 x 1 TiB: no overflow */
+    }
+    if (adding) { c.users++; c.committed += b->policy.bytes_hard; }
+    struct statvfs v;
+    if (fstatvfs(b->root, &v) < 0) return -1;
+    if (v.f_frsize && v.f_bavail > UINT64_MAX / v.f_frsize) c.available = UINT64_MAX;
+    else c.available = (uint64_t)v.f_bavail * v.f_frsize;
+    c.reserve = b->policy.reserve_bytes;
+    if (out) *out = c;
+    if (c.committed > c.available || c.available - c.committed < c.reserve) return deny(EFBIG);
+    return 0;
+}
+static int grant_locked(struct qb *b, const char *user, uint32_t *project, struct qb_capacity *cap) {
+    if (b->poisoned) return deny(EIO);
+    if (!b->policy.added_peer_uid) return deny(EPERM);
+    if (grant_index(b, user) >= 0) return deny(EEXIST);
+    if (b->policy.grant_count >= QB_MAX_GRANTS || b->next > b->policy.last_project) return deny(ENOSPC);
+    if (mount_check(b) < 0 || capacity(b, -1, 0, 1, cap) < 0) return -1;
+    if (append_for(b, 4, user, b->next, 0, 0) < 0) return -1;
+    if (project) *project = b->next;
+    add_grant(b, user, b->next++);
+    return 0;
+}
+int qb_grant_add(struct qb *b, const char *user, uint32_t *project, struct qb_capacity *cap) {
+    if (project) *project = 0;
+    if (cap) memset(cap, 0, sizeof(*cap));
+    if (!b || !user || !uuid(user)) return deny(EINVAL);
+    int error = pthread_mutex_lock(&b->mutex);
+    if (error) return deny(error);
+    int result = grant_locked(b, user, project, cap);
+    int saved = errno; pthread_mutex_unlock(&b->mutex); errno = saved;
+    return result;
+}
+static int raise_locked(struct qb *b, int index, uint64_t bytes, uint64_t inodes, struct qb_capacity *cap) {
+    struct allocation *a = &b->allocations[index];
+    if (b->poisoned) return deny(EIO);
+    if (a->revoked) return deny(EACCES);
+    if (!a->project) return deny(ENOENT);
+    if (!a->inode) return deny(EOWNERDEAD);
+    if (!b->adapter.raise) return deny(ENOTSUP);
+    if (bytes < a->bytes_hard || inodes < a->inodes_hard) return deny(EINVAL); /* never lower */
+    int record = bytes != a->bytes_hard || inodes != a->inodes_hard;
+    if (record && b->raises >= QB_MAX_RAISES) return deny(ENOSPC);
+    if (mount_check(b) < 0) return -1;
+    int fd = open_pool(b, a);
+    if (fd < 0) return -1;
+    int result = -1;
+    struct qb_observation o; memset(&o, 0, sizeof(o));
+    if (b->adapter.observe(b->adapter.context, b->root, fd, a->project, &o) < 0) goto done;
+    /* The kernel may lag the journal (an unapplied raise), never lead it. */
+    if (o.project != a->project || o.inherit != 1 || !o.bytes_hard || !o.inodes_hard ||
+        o.bytes_hard > a->bytes_hard || o.inodes_hard > a->inodes_hard) { errno = EDQUOT; goto done; }
+    if (!record && o.bytes_hard == bytes && o.inodes_hard == inodes) { result = 0; goto done; }
+    if (record) {
+        if (capacity(b, index, bytes, 0, cap) < 0 ||
+            append(b, 5, index, a->project, bytes, inodes) < 0) goto done;
+        a->bytes_hard = bytes; a->inodes_hard = inodes; b->raises++;
+    }
+    if (mount_check(b) < 0 ||
+        b->adapter.raise(b->adapter.context, b->root, fd, a->project, bytes, inodes) < 0 ||
+        observed(b, fd, a, a->project, 0) < 0 || mount_check(b) < 0) goto done;
+    result = 0;
+done: {
+    int saved = errno; close(fd); errno = saved;
+    return result;
+}}
+int qb_raise(struct qb *b, const char *user, uint64_t bytes, uint64_t inodes, struct qb_capacity *cap) {
+    if (cap) memset(cap, 0, sizeof(*cap));
+    if (!b || !user || !uuid(user) || !limits_ok(bytes, inodes)) return deny(EINVAL);
+    int error = pthread_mutex_lock(&b->mutex);
+    if (error) return deny(error);
+    int index = grant_index(b, user), result = -1;
+    if (index >= 0) result = raise_locked(b, index, bytes, inodes, cap);
     int saved = errno; pthread_mutex_unlock(&b->mutex); errno = saved;
     return result;
 }

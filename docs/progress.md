@@ -1,5 +1,28 @@
 # Progress
 
+## Root-local per-user pool operations recovered — not installed
+
+- Salvaged the interrupted quota-pool-operations worktree without reset. Added
+  durable journal grants and raise-only limits, byte-capacity admission plus an
+  explicit reserve, retry/replay and operator CLI commands. No gateway mutation
+  protocol. Version-2 policy/manifest refuses legacy state; read-only TS parser and
+  fixtures, fresh installer and pins updated together. Nonempty grant journals
+  cannot be purged merely because no workspace exists yet.
+- Native all/test/analyze/sanitize pass (24 core tests; raise fault injection),
+  SQLite RLIMIT_FSIZE history/recovery self-test passes, stub installer/wrapper
+  lifecycles and offline unit checks pass. npm check/test/db/engine pass
+  (118/29/320 tests). Both root binaries reproduce byte-for-byte in scratch;
+  [exact hashes and remaining gates](native-quota-broker-service.md).
+- New real-XFS harness checks add/raise, overcommit, shared-pool SQLite preservation
+  and recovery are prepared but **not run**. Old owner-run PASS does not accept
+  the new binary. SQLite model observed extended I/O error 778, not SQLITE_FULL;
+  already-committed rows remain intact in that model. Exact Node runtime/UI,
+  raised-user gateway expectations, separate protected launcher, revoke/spawn,
+  rollback witness/restore and populated-v1 migration remain explicit gates.
+- No root/sudo/real quotas/install/host changes, no push, no edits to parallel
+  launcher/driver work. Production gateway refusal remains; real data is still in
+  Supabase.
+
 ## Bounded native broker Unix transport on 83b0c88 — not installed
 
 - New isolated worktree `/home/itsara/projects/step-native-quota-broker-transport`,

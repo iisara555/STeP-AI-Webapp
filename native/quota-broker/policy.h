@@ -8,14 +8,15 @@
  *   # comment            (only at the start of a line)
  *   <empty line>
  *   key=value            (no spaces, tabs, CR, NUL; lowercase keys)
- * Required exactly once: version (=1), epoch (32 lowercase hex, not all zero),
+ * Required exactly once: version (=2), epoch (32 lowercase hex, not all zero),
  * mount_uuid (canonical lowercase UUID, not all zero), root_device, root_inode,
- * bytes_hard, inodes_hard, first_project, last_project, gateway_uid,
- * gateway_gid, workload_uid. user=<canonical UUID> 1..QB_MAX_GRANTS times,
- * unique: one per-user quota pool (subject) per line; the gateway maps its user
- * ids to these UUIDs (the broker never sees gateway user names). Unknown/duplicate/missing keys and out-of-range values are refused.
+ * bytes_hard, inodes_hard, reserve_bytes (0..QB_MAX_RESERVE_BYTES), first_project,
+ * last_project, gateway_uid, gateway_gid, workload_uid. Unknown/duplicate/missing keys and
+ * out-of-range values are refused (EINVAL). A version 1 file (version=1 or any user= line)
+ * is refused with EPROTONOSUPPORT: users are no longer policy but operator journal grants
+ * (qb_grant_add); see docs/native-quota-broker-service.md "Policy migration".
  * The result is the core QB_LAYOUT_SHARED policy: access_gid = gateway_gid,
- * content_uid = workload_uid, every user grant's peer_uid = gateway_uid. */
+ * content_uid = workload_uid, no bootstrap grants, added_peer_uid = gateway_uid. */
 #define QB_POLICY_MAX_BYTES 32768
 #define QB_POLICY_MAX_LINE 128
 struct qb_service_policy {

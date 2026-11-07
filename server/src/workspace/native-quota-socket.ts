@@ -167,7 +167,7 @@ export type BrokerPolicy = {
   gatewayUid: number;
   gatewayGid: number;
   workloadUid: number;
-  users: string[];
+  reserveBytes: number;
 };
 const KEYS = [
   'version',
@@ -177,6 +177,7 @@ const KEYS = [
   'root_inode',
   'bytes_hard',
   'inodes_hard',
+  'reserve_bytes',
   'first_project',
   'last_project',
   'gateway_uid',
@@ -189,7 +190,6 @@ export function parseBrokerPolicy(text: string): BrokerPolicy {
   };
   if (text.length === 0 || text.length > 32768 || !text.endsWith('\n')) invalid(0);
   const values = new Map<string, string>();
-  const users: string[] = [];
   const lines = text.slice(0, -1).split('\n');
   lines.forEach((line, i) => {
     if (line.length > 128) invalid(i + 1);
@@ -197,11 +197,7 @@ export function parseBrokerPolicy(text: string): BrokerPolicy {
     const m = /^([a-z_]+)=([\x21-\x7e]+)$/.exec(line);
     if (!m) return invalid(i + 1);
     const [, key, value] = m as unknown as [string, string, string];
-    if (key === 'user') {
-      if (!CanonicalUuid.safeParse(value).success || users.includes(value) || users.length >= 512)
-        invalid(i + 1);
-      users.push(value);
-    } else if ((KEYS as readonly string[]).includes(key) && !values.has(key)) values.set(key, value);
+    if ((KEYS as readonly string[]).includes(key) && !values.has(key)) values.set(key, value);
     else invalid(i + 1);
   });
   const num = (key: string, min: number, max: number) => {
@@ -214,7 +210,7 @@ export function parseBrokerPolicy(text: string): BrokerPolicy {
     if (!v || !/^[1-9][0-9]{0,19}$/.test(v) || BigInt(v) > MAX_U64) return invalid(0);
     return v;
   };
-  if (values.size !== KEYS.length || users.length === 0 || values.get('version') !== '1') invalid(0);
+  if (values.size !== KEYS.length || values.get('version') !== '2') invalid(0);
   if (!/^[0-9a-f]{32}$/.test(values.get('epoch')!) || /^0+$/.test(values.get('epoch')!)) invalid(0);
   const mountUuid = values.get('mount_uuid')!;
   if (!CanonicalUuid.safeParse(mountUuid).success || !/[1-9a-f]/.test(mountUuid)) invalid(0);
@@ -231,13 +227,9 @@ export function parseBrokerPolicy(text: string): BrokerPolicy {
     gatewayUid: num('gateway_uid', 1, 2147483646),
     gatewayGid: num('gateway_gid', 1, 2147483646),
     workloadUid: num('workload_uid', 1, 2147483646),
-    users,
+    reserveBytes: num('reserve_bytes', 0, 1125899906842624),
   };
-  if (
-    policy.firstProjectId > policy.lastProjectId ||
-    policy.lastProjectId - policy.firstProjectId + 1 < users.length
-  )
-    invalid(0);
+  if (policy.firstProjectId > policy.lastProjectId) invalid(0);
   return policy;
 }
 /** Read the fixed root-owned policy file (production owner 0). Refuses links, foreign owners, other modes. */

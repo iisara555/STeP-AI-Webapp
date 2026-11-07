@@ -1,308 +1,220 @@
-# Native quota broker — installable system service (per-user pools), NOT yet installed
+# Native quota broker — per-user pools and root-local operations
 
-Status: **prepared, unprivileged evidence only.** Nothing was installed, run as root or
-enabled. The production gateway entry is unchanged and still refuses to start
-(`refuseUnsafeGateway()`); no gateway composition uses the broker yet.
+Status: **prepared, unprivileged evidence only; not installed or enabled.**
+The production gateway still refuses startup (`refuseUnsafeGateway()`). Nothing
+in this increment enables it, changes sudoers, installs software, or executes a
+real quota mutation. Real data remains in Supabase.
 
-## What changed in this increment
+## Owner decision and capacity
 
-| Part                                                                                     | Files                                                                             |
-| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Per-user pool in the core (`QB_LAYOUT_SHARED`), workspace directories, usage             | `native/quota-broker/core.{c,h}`                                                  |
-| Usage readback in the real adapter (`d_bcount`×512, `d_icount`)                          | `native/quota-broker/xfs.c`                                                       |
-| Request dispatch `ENSURE/1`, `WORKSPACE/1`, `USAGE/1`; replies `OK/2`, `OK/3`, `USAGE/1` | `native/quota-broker/transport.{c,h}`                                             |
-| Strict root-owned policy file loader                                                     | `native/quota-broker/policy.{c,h}`                                                |
-| Service main program (`--check`, `--bootstrap`, `--serve`)                               | `native/quota-broker/broker-main.c`                                               |
-| Hardened system unit + unprivileged validation                                           | `native/quota-broker/service/step-quota-broker.service`, `service/verify-unit.sh` |
-| Owner install/uninstall script + stubbed lifecycle test                                  | `service/install-quota-broker.sh`, `service/test-install-script.sh`               |
-| Gateway socket client, policy reader, usage levels                                       | `server/src/workspace/native-quota-socket.ts`                                     |
-| Broker-mode manager composition (`brokerQuotaBoundary`)                                  | `server/src/workspace/native-quota.ts`                                            |
-| Runtime writes `conversations.json` 0640 (gateway group via setgid)                      | `server/src/workspace/runtime-main.ts`                                            |
+One user has one XFS project and a **15 GiB shared pool**, not 15 GiB per workspace.
+All that user's workspace directories inherit that project's id and hard limits.
+The target is 50 users now and 300 after the SSD upgrade; these are capacity
+planning targets, not users provisioned by this change. The inode example remains
+750000 per user. Limits already granted are never lowered.
 
-## Owner decision: one quota pool per user (2026-11-07)
-
-- One XFS project id per **user**, hard limits are install-time policy values
-  (placeholder 15 GiB = `16106127360` bytes and `750000` inodes per user). Every
-  workspace of that user is a subdirectory of the user's project directory and
-  inherits its project id (XFS `PROJINHERIT`), so all of them share the pool.
-- Capacity: 50 users × 15 GiB = 750 GiB on the current 954 G SSD; no overcommit.
-  The installer refuses when `users × bytes_hard` exceeds the space available on
-  `/mnt/step-work` at install time. A bigger SSD is needed for the 300-user target
-  (`QB_MAX_GRANTS` is now 512 so the format allows it).
-- The sandbox still binds **only one workspace directory** (`--bind-fd` of
-  `p<ID>/<workspace-uuid>`), never the user directory.
-
-## Directory layout and ownership (decision + trade-offs)
+Root-local add/raise admission requires:
 
 ```text
-/mnt/step-work/step-ai-broker            root:root     0755
-├── state/                               root:root     0700   manifest + journal (core)
-└── root/                                root:itsara   0710   traverse only for the gateway group
-    └── p<ID>/       (one per user)      root:itsara   0750   quota project + PROJINHERIT
-        └── <workspace-uuid>/            step-runner:itsara 02750   bound into ONE sandbox
-            ├── files/                   step-runner:itsara 02750
-            └── snapshots/               step-runner:itsara 02750
+sum(each pool's hard bytes minus min(used bytes, hard bytes)) + reserve_bytes
+    <= current filesystem free bytes (fstatvfs on the pinned broker root)
 ```
 
-Why:
+Never-allocated grants count their full limit. Revoked allocated pools still
+count; revoked unallocated grants cannot allocate and promise zero. Every
+allocated pool must be independently observable with nonzero hard limits,
+correct project/inheritance and limits not above the journal. A pending raise
+can leave kernel limits below the journal; its full journal promise still counts.
+Unknown usage, identity/mount failure, or missing limits denies admission.
 
-- **The user directory stays root-owned and never workload-writable.** The quota
-  boundary (its project id and inheritance flag) can only be changed by its owner
-  outside a user namespace; root ownership removes even that path. Workloads never
-  see it (only their own workspace directory is mounted).
-- **Workspace directories belong to step-runner** because the runtime must write
-  `workspace.sqlite`, `conversations.json`, `files/` and `snapshots/` directly in it.
-- **The gateway group (itsara, gid 1000, no other members — the installer checks)**
-  can traverse `root/` (0710, cannot list it), read `p<ID>` (0750) and read the
-  workspace directory (02750). Setgid makes new runtime files group `itsara`; the
-  runtime now writes `conversations.json` 0640 (explicit chmod) so the gateway can
-  list a stopped workspace's conversations. The gateway can open each directory
-  `O_DIRECTORY|O_NOFOLLOW` to re-verify identity and pin it at launch, but it can
-  write nothing inside the pool.
-- Nobody else can traverse `root/`, so "other" permission bits inside it are
-  unreachable for every other local user.
+This is byte-capacity admission, not a guarantee against unrelated root writers,
+filesystem metadata overhead or future host changes. Choose protected headroom
+explicitly using `--reserve-bytes`; the dry-run test uses zero only as an example.
+Physical inode capacity is not reserved by this check.
 
-Trade-offs / residuals (all fail closed):
-
-- step-runner owns the workspace directory and its files. Outside a user namespace
-  a file owner can change `fsx_projid` and escape the quota (measured in the XFS
-  acceptance). Enforcement therefore still depends on every workload launch using
-  `--unshare-user --disable-userns`, and **the current sudoers rule lets itsara run
-  `/usr/bin/bwrap` as step-runner with arbitrary arguments**. An exclusive launcher
-  that enforces those flags is still required (gate below).
-- If the workload changes its workspace directory mode/owner, the broker denies
-  that workspace from then on (never repaired); the gateway then cannot start it.
-- A crash between creating a directory and handing it over leaves a directory the
-  broker denies forever (`EPERM`); the user's other workspaces are unaffected.
-- `/mnt/step-work` itself is owned by itsara, so the gateway account can rename
-  `step-ai-broker` away (denial of service). It cannot create a root-owned
-  substitute; the broker detects identity changes (policy `root_device/root_inode`)
-  at its next start. Making `/mnt/step-work` root-owned is a recommended host change.
-
-## Protocol (one request per connection, write EOF, exact bytes)
-
-Requests (the peer must be the gateway uid by `SO_PEERCRED`, checked before any read):
+## Ownership and protocol
 
 ```text
-ENSURE/1 <user-uuid>\n                          46 bytes  ensure the user's pool
-WORKSPACE/1 <user-uuid> <workspace-uuid>\n      86 bytes  ensure pool + workspace directory
-USAGE/1 <user-uuid>\n                           45 bytes  usage of an existing pool, never allocates
+/mnt/step-work/step-ai-broker                  root:root    0755
+├── state/                                    root:root    0700  manifest + journal
+└── root/                                     root:itsara  0710
+    └── p<ID>/                                root:itsara  0750  project + PROJINHERIT
+        └── <workspace-uuid>/                 step-runner:itsara 02750
 ```
 
-Replies (anything else, or a partial reply, is a failure):
+The workload cannot write the pool boundary. Its sandbox must bind only its own
+workspace, never the user pool. Exact owner/mode and directory identity drift is
+denied, never repaired. A partially provisioned directory is not adopted.
+
+Gateway requests (one exact frame, then EOF, peer checked with `SO_PEERCRED`):
 
 ```text
-DENIED/1\n
-OK/2 <project> <device> <inode> <bytes_hard> <inodes_hard> <mount-uuid>\n
-OK/3 <project> <device> <user-inode> <workspace-inode> <bytes_hard> <inodes_hard> <mount-uuid>\n
-USAGE/1 <project> <bytes_used> <bytes_hard> <inodes_used> <inodes_hard>\n
+ENSURE/1 <user-uuid>\n
+WORKSPACE/1 <user-uuid> <workspace-uuid>\n
+USAGE/1 <user-uuid>\n
 ```
 
-This is the smallest extension that lets the gateway build its receipt without
-inventing evidence: every value is what the core just verified under its mutex
-(project + inheritance read back, both hard limits read back, live mount UUID and
-project enforcement checked against the fixed policy). No paths (directories are
-the fixed `p<project>/<workspace-uuid>` names), no errno, no FDs, no `SCM_RIGHTS`.
-The TS side (`brokerQuotaBoundary`) then opens `p<ID>` and the workspace directory
-with `O_RDONLY|O_DIRECTORY|O_NOFOLLOW` and requires on the **descriptor** the
-replied device/inode plus exact owner/group/mode (root/itsara 0750 and
-step-runner/itsara 02750); the launch pin re-checks the workspace inode again
-inside admission.
+Replies remain `OK/2`, `OK/3`, `USAGE/1`, or `DENIED/1`. The gateway has **no add
+or raise request**. `USAGE/1` never allocates and reads the user's current journal
+limits and kernel usage. The existing socket API's `usageLevel()` returns `ok`,
+`warning` at 80%, `critical` at 95%, and `full` at/over 100%; the worse of bytes
+and inodes decides. This API is tested; HTTP/UI warnings and upload refusal are
+not wired into production.
 
-The mapping from a gateway user id (e.g. a Google-derived id) to the broker's
-user UUID is an explicit trusted option (`userUuidFor`), never a request field. An
-unmapped user fails (`NATIVE_QUOTA_NO_USER_POOL`); a mapped user that is not in the
-policy is denied by the broker.
+## Policy migration
 
-## Policy file `/etc/step-quota-broker/policy` (root 0644)
-
-Readable by the gateway (it contains no secret) so `readBrokerPolicy()` can supply
-the expected mount UUID, limits, range and principals. Strict `key=value` lines,
-`#` comments; unknown/duplicate/missing keys, whitespace, non-canonical numbers or
-UUIDs and out-of-range values are refused with the line number. The broker refuses
-the file unless it is a regular file owned by root with mode exactly 0600 or 0644,
-one link, ≤ 32 KiB, in a root-owned directory chain not group/other-writable.
+Service policy is now **version 2**, with `reserve_bytes` required and **no
+`user=` lines**. All users are root-local journal grants, so adding one does not
+edit immutable policy. Required keys:
 
 ```text
-version=1
-epoch=<32 hex>                 # random at install
-mount_uuid=<filesystem UUID of /mnt/step-work>
-root_device=<st_dev of root/>   root_inode=<st_ino of root/>
-bytes_hard=16106127360          # placeholder 15 GiB per user, owner's choice
-inodes_hard=750000              # placeholder, owner's choice
-first_project=100000            last_project=199999   # excludes the old test id 424242
-gateway_uid=1000  gateway_gid=1000  workload_uid=995
-user=<uuid>                     # one line per user pool, 1..512
+version=2
+epoch=<32 lowercase hex, nonzero>
+mount_uuid=<canonical nonzero filesystem UUID>
+root_device=<device of root/>
+root_inode=<inode of root/>
+bytes_hard=16106127360
+inodes_hard=750000
+reserve_bytes=<operator-chosen headroom in bytes>
+first_project=100000
+last_project=199999
+gateway_uid=1000
+gateway_gid=1000
+workload_uid=995
 ```
 
-The core manifest binds **every** value at bootstrap: any later edit (including
-adding a user or raising a limit) makes `--check`/`--serve` refuse. That is
-deliberate until the operator RAISE / onboarding operations exist (gates below).
+All lines are strict canonical `key=value` (the placeholders above must be
+replaced); no inline comments. File ownership/mode/link/size and ancestor trust
+checks are unchanged. Both native and TS readers reject version 1 and `user=`.
+The native manifest ABI is also version 2. **There is no automatic migration of
+an existing version-1 manifest/journal. Do not delete/rebootstrap existing state
+or recycle project ids.** Existing populated installations need a separately
+reviewed offline migration/restore tool; that is not implemented here. The fresh
+installer refuses existing paths.
 
-## Service program and unit
+## Operator commands and recovery
 
-- `step-quota-broker --check | --bootstrap | --serve` (production build: fixed
-  paths, euid 0 only, real XFS adapter compiled with
-  `QB_XFS_PRIVILEGED_ACCEPTANCE=1`, `no_new_privs`, `close_range(3, …)`). `--serve`
-  **never bootstraps**: an empty/lost state must not restart allocation silently.
-  `--bootstrap` refuses unless root/ and state/ are empty and the live mount matches.
-- Socket: systemd creates `/run/step-quota-broker` 0700; the broker binds
-  `broker.sock` relative to the pinned directory, makes it root:itsara 0660,
-  listens, then makes the directory root:itsara 0710. A leftover socket refuses.
-  Readiness is `sd_notify READY=1` (Type=notify).
-- Unit hardening: `ProtectSystem=strict`, `ReadWritePaths=/mnt/step-work/step-ai-broker`
-  only (+ the RuntimeDirectory), `ProtectHome`, `PrivateTmp`, `PrivateDevices`,
-  `PrivateNetwork`, `RestrictAddressFamilies=AF_UNIX`, `IPAddressDeny=any`,
-  `NoNewPrivileges`, `CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_FOWNER
-CAP_FSETID` (quotactl; hand-over chown; chmod 02750 of a directory root no longer
-  owns, with a group root is not in), `RestrictNamespaces`, `MemoryDenyWriteExecute`,
-  `SystemCallFilter=@system-service quotactl quotactl_fd` minus
-  `@resources @mount @swap @reboot @raw-io @module @debug @cpu-emulation @obsolete
-@clock @setuid`, `UMask=0077`, `LimitNOFILE=256`, `TasksMax=4`, `MemoryMax=64M`,
-  `RestartPreventExitStatus=2`. `RestrictSUIDSGID` is **not** set: it would forbid
-  the setgid hand-over mode.
-- `bash native/quota-broker/service/verify-unit.sh` →
-  `systemd-analyze verify` clean for this unit, and
-  `systemd-analyze security --offline` **exposure 1.6 OK** (threshold 2.0). Remaining
-  ✗ items: runs as root, CAP_SYS_ADMIN/CHOWN/FOWNER/FSETID, `@chown`/quotactl
-  allowed, no PrivateUsers, AF_UNIX allowed, no RestrictSUIDSGID — each required.
+Production binary: fixed paths, euid 0, real XFS adapter. Only these additional
+root-local operations take caller values (canonical UUID and bounded decimals):
 
-## Pool full: behaviour and the chat-history decision
+```text
+step-quota-broker --add-user UUID
+step-quota-broker --raise-user UUID BYTES INODES
+```
 
-Defined behaviour: when a user's pool reaches either hard limit, writes inside
-**that user's** workspaces fail with `ENOSPC` (XFS project quota reports `ENOSPC`,
-not `EDQUOT`); other users' projects are unaffected (separate projects; proven per
-project by the XFS acceptance). `USAGE/1` lets the gateway warn at 80 % and 95 %
-(`usageLevel()` → `warning` / `critical` / `full`; the worse of bytes and inodes
-decides).
+Stop the service first; both commands require its exclusive journal lock and
+refuse while it is running. No gateway mapping or authority is derived from a
+command supplied over the socket.
 
-Chat history (`<workspace>/workspace.sqlite`) — options evaluated:
+- **Add:** capacity check, then fsynced GRANT record reserving a fresh id. The pool
+  directory is created only by first ENSURE/WORKSPACE. Duplicate or revoked users
+  are never granted again. No ids are reused; 512 grants maximum.
+- **Raise:** allocated, unrevoked pools only; neither hard limit may decrease.
+  Capacity check precedes a fsynced RAISE record; then set only XFS block/inode
+  hard fields and independently read both back. Maximum 4096 raises per journal.
+  An identical, already-applied request is a no-write success.
+- **Interrupted raise:** durable record may lead kernel state. ENSURE/WORKSPACE
+  and USAGE deny that pool until the operator repeats the same raise. Replay does
+  not mutate quotas. If journal fsync was uncertain, the live broker is poisoned;
+  reopen and inspect. A complete GRANT may have survived even if add reported an
+  error (a duplicate on retry is not evidence of a new grant). A torn journal is
+  refused, never truncated or repaired automatically.
+- Keep the service stopped on an operator failure; inspect the exact error before
+  retry/restart. Service `--check` verifies policy, mount and journal, **not every
+  allocated pool's live limits**; it is not proof an interrupted raise was applied.
+- Uninstall keeps policy/state/pools. `--purge-empty` now refuses even an
+  unallocated grant if the journal is nonempty, preserving id reservations.
 
-1. **Outside the pool** (separate directory/project): history writes keep working
-   when files fill the pool, but history then needs its own bound, or one user can
-   fill the shared disk through history; a second project per user doubles ids,
-   census and hand-over paths and still has a "history pool full" case.
-2. **Inside the pool with reserved headroom**: XFS cannot reserve space for one file
-   inside a project, so headroom could only be emulated by refusing new uploads
-   above a threshold in the gateway — advisory, not enforced.
-3. **Inside the pool, fail closed (chosen).** SQLite commits atomically: a write
-   that hits `ENOSPC` fails with `SQLITE_FULL` and rolls back; already committed
-   history stays intact and readable. The new turn fails with a clear error, never
-   a silent partial save. Usage warnings at 80/95 % give the user time to delete
-   files; the gateway should additionally refuse new uploads at `critical`.
+The installer writes a v2 policy, bootstraps once, calls `--add-user` for each
+initial `--user`, checks, then enables the service. Failure is not rolled back;
+inspect the retained journal before doing anything further.
 
-**Not yet proven:** the SQLite/runtime behaviour on a real full XFS project (that
-earlier history stays readable and the error reaches the UI as a clear message),
-and the gateway upload refusal at `critical`. Both need an owner-run privileged
-acceptance step (real XFS) and gateway/UI wiring.
+## Build, pins and owner handoff
 
-## Tests (all unprivileged)
-
-- native: `make -C native/quota-broker clean all test analyze sanitize`
-  - `test-core` 19 (2 new: per-user pool/workspaces/usage; private layout unchanged)
-  - `test-xfs` seam incl. usage readback/overflow; `test-transport` incl. USAGE/WORKSPACE
-  - `test-policy` 4 groups (format, values, 512 users, file owner/mode/link/size)
-  - `test-broker` 5 groups against the FAKE-adapter main: usage/policy refusals,
-    directory/identity/mount refusals, one-time bootstrap bound to policy, socket
-    refusals, served per-user pool + workspaces + usage + restart
-  - `-fanalyzer` clean for policy.c and both broker-main builds; ASan/UBSan pass;
-    sanitized service binary refusal paths (exit 2)
-- `bash native/quota-broker/service/test-install-script.sh` (15 checks, stubbed
-  privileged tools), `service/verify-unit.sh`, shellcheck clean
-- TS `server/test/workspace-quota-broker.test.ts` (6): socket client against a real
-  broker process; bounded/exact client (malformed, oversize, partial, silent,
-  absent); policy reader; end to end manager → broker → pinned start in
-  `p<ID>/<workspace-uuid>` incl. two workspaces sharing one project, conversations,
-  usage levels, rename+substitute refusal; fail-closed (unmapped/unknown user,
-  changed mode, broker down); production entry still refused.
-
-The fake adapter performs no quota syscalls; it models inheritance and usage in
-files. Mocked success is not enforcement evidence.
-
-## Remaining gates before the gateway may use the broker (do not enable)
-
-1. **Owner install** of this service (commands below) and a real `--check`.
-2. **Re-run the XFS acceptance** with the current core (its binary hash changed:
-   the core gained the shared layout/usage; the recorded PASS is for `c2246ba2…`).
-3. **Operator RAISE** of a user's limit (never lower, never reuse ids): journal
-   event + adapter set + readback, and policy/manifest handling. Not implemented.
-4. **User onboarding**: the user list is fixed at bootstrap. Adding users needs a
-   protected append-only grant operation. Not implemented.
-5. **Exclusive launcher**: enforce `--unshare-user --disable-userns` and the single
-   workspace bind for every step-runner launch (the sudoers rule is too broad).
-6. **Revocation-through-spawn fence**: `qb_revoke` is not serialized with the
-   gateway's admission/spawn.
-7. **Pool-full acceptance** on real XFS (history intact, clear error) and gateway/UI
-   wiring of `usage()` (80/95 % warnings, upload refusal at critical).
-8. **Anti-rollback witness** for the state journal and restore procedure.
-9. Gateway composition + an explicit documented real mode in `main.ts`, after all of
-   the above; production stays fail-closed until then.
-
-## Owner commands
-
-See the "Exact owner commands" section at the end (hashes pinned for this commit).
-
-## Exact owner commands
-
-Build as itsara in this worktree and compare the hashes first (reproducible build):
+Build unprivileged from `/home/itsara/projects/quota-pool-operations`:
 
 ```sh
-cd /home/itsara/projects/step-quota-broker-service/native/quota-broker
-export TMPDIR=/home/itsara/.hermes/cache/scratch
-make clean service service-check          # must print pinned == actual for binary and unit
-sha256sum step-quota-broker service/step-quota-broker.service service/install-quota-broker.sh
+make -C native/quota-broker clean all acceptance
+make -C native/quota-broker service-check acceptance-check
 ```
 
-Expected:
+Reproducible binary SHA-256 values (independent scratch-directory builds were
+byte-identical):
 
 ```text
-b9676c20683f1c64a297161dc0145a1265b031aff381bdad9d1ab64ad04b3162  step-quota-broker
+1274e38e3be4e43893416384756fd308fff77db3baf8c33ea26dd83990d207f3  step-quota-broker
 2d86101468b2af0622680ffa5e1004ba1ef55239a82192a6e16f4f7082e39394  service/step-quota-broker.service
-a4b4c18af60c5ad253f8c5b3d51f61a865989c10e9a7b1725c92cef18b7c9abd  service/install-quota-broker.sh
+b623274e8d9397ce36042c80422f8a5bf904084ad66b6ee1f9985e6fcaec633a  service/install-quota-broker.sh
+874a5a809c5464ffa60f00d310287ee73f9e0ca57f60157c151850f11b1dea70  xfs-acceptance
+08bdda340e51ee91af9a84caabf16388ff465d9f3923c4db82590042b9166d54  acceptance/run-xfs-acceptance.sh
 ```
 
-Install root-owned copies, verify the **installed** copies, preview, then install.
-Replace the `--user` values with the real per-user UUIDs (one per user, ≤ 512) and the
-limits with the owner's final choice (placeholders shown):
-
-```sh
-sudo install -d -o root -g root -m 0755 /usr/local/libexec/step-quota-broker
-sudo install -o root -g root -m 0755 step-quota-broker /usr/local/libexec/step-quota-broker/step-quota-broker
-sudo install -o root -g root -m 0644 service/step-quota-broker.service /usr/local/libexec/step-quota-broker/step-quota-broker.service
-sudo install -o root -g root -m 0755 service/install-quota-broker.sh /usr/local/libexec/step-quota-broker/install
-sha256sum /usr/local/libexec/step-quota-broker/*     # must equal the three hashes above
-/usr/local/libexec/step-quota-broker/install --dry-run --bytes-hard 16106127360 --inodes-hard 750000 --user <uuid-1> --user <uuid-2>
-sudo /usr/local/libexec/step-quota-broker/install --install --bytes-hard 16106127360 --inodes-hard 750000 --user <uuid-1> --user <uuid-2>
-systemctl status step-quota-broker.service --no-pager
-ls -la /run/step-quota-broker/          # broker.sock root:itsara srw-rw----, dir root:itsara drwx--x---
-```
-
-Expected end of `--install`: `census: no quota record in 100000..199999`,
-`capacity: …`, `bootstrapped: …`, `check passed: …`, then
-`INSTALLED: step-quota-broker.service active; socket /run/step-quota-broker/broker.sock (root:1000 0660, dir 0710)`.
-Any `REFUSED:` line means nothing further was done (exit 2); a failure after creating
-directories prints what was created and the undo command.
-
-Undo:
-
-```sh
-sudo /usr/local/libexec/step-quota-broker/install --uninstall                 # stop, disable, remove unit; keeps policy/state/pools
-sudo /usr/local/libexec/step-quota-broker/install --uninstall --purge-empty   # only if no user pool was ever allocated
-sudo rm -r /usr/local/libexec/step-quota-broker
-```
-
-The XFS acceptance must be re-run with the current core before relying on the
-service (same commands as `docs/native-quota-xfs-acceptance.md`, new pins):
+Only the owner may install root-owned copies. The installer requires its exact
+installed path `/usr/local/libexec/step-quota-broker/install`, a trusted root-owned
+ancestor chain, and matching binary/unit pins. Its options are:
 
 ```text
-3f711f7e07237b4ac06b28d0280fe01a3b305cc2ad01970fddd34518ebe3a323  xfs-acceptance
-afd397b91d430c222a435b32c64dfa41a3f9155c1dd4d01360d46174b601cce2  run (acceptance/run-xfs-acceptance.sh)
+install --dry-run|--install --bytes-hard 16106127360 --inodes-hard 750000 --reserve-bytes N --user UUID [--user UUID...]
+install --uninstall [--purge-empty]
 ```
+
+These are **not commands executed during this recovery**. Do not enable the
+gateway after installing this service. See `native-quota-xfs-acceptance.md` for
+the separate owner-run acceptance; installed acceptance copies still have the
+old `c2246ba2…09ae` binary and must be replaced by the owner before testing this
+increment. The current wrapper correctly reports that mismatch in dry-run.
+
+## Verification and remaining increments
+
+Unprivileged verification:
+
+- Native `all`, `test`, `analyze`, `sanitize` pass: 24 core tests, XFS syscall seam
+  (including 17 raise fault points), transport, 5 policy groups, 7 fake-broker
+  groups, and SQLite self-test. Sanitized root binaries exercise refusals only.
+- Installer lifecycle and acceptance wrapper lifecycle pass with stubs; no real
+  quota, mount, loop, installation or systemd service mutation. Offline unit
+  validation passes (exposure 1.6).
+- `npm run check`, `npm test` (118), `npm run test:db` (29), and
+  `npm run test:engine` (320) pass. The check retains the existing 17 upstream
+  engine diagnostics noted by the server type checker.
+- The SQLite self-test uses real SQLite 3.46.1 plus `RLIMIT_FSIZE`, **not XFS**:
+  200 committed history rows retain checksum/integrity, 20 small writes reported
+  success remain present after reopen, the 6 MiB write fails with extended code
+  778 (disk I/O error), and succeeds after lifting the limit. Do not promise only
+  `SQLITE_FULL`: full-disk SQLite failures can surface as extended I/O errors.
+
+Remaining work, split into explicit gates:
+
+1. **Owner-run real XFS acceptance and real root-service check.** Harness now adds
+   service-model add/raise, no-overcommit refusal, shared-pool SQLite exhaustion
+   from another workspace, committed-history verification and write recovery.
+   None of these new root paths was executed. The prior recorded PASS covers
+   only the older private-layout binary, not this increment.
+2. **Gateway per-user raised-limit expectations.** Socket receipts carry raised
+   limits, but the existing manager boundary still compares against its configured
+   exact default limits and safely refuses a raised user. A trusted per-user
+   expectation policy and tests are needed; do not loosen it to accept arbitrary
+   larger receipts. The parser update here is read-only v2 compatibility only.
+3. **Protected launcher and revocation-through-spawn fence.** Integrate/review the
+   separate launcher work, retire the broad sudoers bwrap permission, enforce user
+   namespaces and one-workspace binds, then perform owner host acceptance. Those
+   files were not touched here. `/mnt/step-work` root ownership also remains a
+   recommended host hardening step against gateway rename denial-of-service.
+4. **History/runtime/UI behaviour.** Wire 80/95/full warnings and upload refusal;
+   show explicit write/start failures without silent partial saves. The acceptance
+   uses the Store schema/WAL setup via the system C SQLite library, not the exact
+   Node runtime or browser UI. A fresh Store's index-rebuild writes may prevent
+   startup while full even when old rows are readable; this is measured, not
+   disguised as successful startup.
+5. **Anti-rollback witness, offline v1 migration and restore procedure.** Well-formed
+   journal rollback after restart is not detected by the current journal alone.
+6. Only after those gates: explicit production composition and owner approval.
+   Production refusal remains unconditional until then.
 
 ## สรุปภาษาไทยแบบง่าย
 
-- เตรียมโปรแกรม broker ให้ติดตั้งเป็น service ของระบบได้แล้ว แต่ **ยังไม่ได้ติดตั้ง** และ gateway จริงยังปิดอยู่
-- โควตาเป็นแบบ "ต่อผู้ใช้": ผู้ใช้หนึ่งคนได้พื้นที่หนึ่งก้อน (ค่าตัวอย่าง 15 GiB / 750000 ไฟล์) ทุก workspace ของคนนั้นใช้ก้อนเดียวกัน
-- gateway ถามปริมาณที่ใช้ไปได้ เพื่อเตือนที่ 80% และ 95%
-- ถ้าพื้นที่เต็ม เฉพาะผู้ใช้คนนั้นเขียนไม่ได้ ประวัติแชทที่บันทึกแล้วไม่หาย (ต้องทดสอบจริงบน XFS อีกครั้ง)
-- ยังไม่ทำ: การเพิ่มโควตา (RAISE), การเพิ่มผู้ใช้ใหม่หลังติดตั้ง, launcher ที่บังคับ sandbox
+กู้งานเดิมไว้แล้ว เพิ่มผู้ใช้และเพิ่มพื้นที่แบบไม่ลดของเดิมได้ทางคำสั่งของ root
+เท่านั้น ผู้ใช้หนึ่งคนยังแชร์พื้นที่ 15 GiB ระหว่างหลาย workspace การทดสอบแบบ
+ไม่ใช้ root ผ่าน แต่ **ยังไม่ได้ทดสอบชุดใหม่กับ XFS จริงและยังไม่ได้ติดตั้ง**
+gateway จริงยังปิดอยู่ และข้อมูลจริงยังอยู่ใน Supabase ต้องผ่านการทดสอบจริง
+และเชื่อม launcher/การแจ้งเตือนก่อนใช้งานจริง

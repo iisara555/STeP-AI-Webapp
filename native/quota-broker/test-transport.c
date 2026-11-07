@@ -62,7 +62,7 @@ static void setup(struct fixture *f, int denied, int revoked) {
         .bytes_hard=1048576, .inodes_hard=100, .first_project=100000, .last_project=100001, .grant_count=1};
     policy.epoch[0]=19; policy.mount_uuid[0]=42; policy.grants[0].peer_uid=(uint32_t)geteuid();
     memcpy(policy.grants[0].workspace, request+9, 36);
-    struct qb_adapter adapter = {&f->model, mount_fake, observe_fake, configure_fake};
+    struct qb_adapter adapter = {&f->model, mount_fake, observe_fake, configure_fake, NULL};
     assert(qb_bootstrap(f->state, &policy) == 0);
     assert(qb_open(f->root, f->state, &policy, &adapter, &f->broker) == 0);
     if (revoked == 1) assert(qb_revoke(f->broker, policy.grants[0].workspace) == 0);
@@ -181,6 +181,11 @@ int main(void) {
     memcpy(bad, request, 46); memcpy(bad+46, request, 46);
     exchange(&f, bad, 92, "DENIED/1\n");
     exchange(&f, "REVOKE/1 12345678-1234-4234-8234-000000000000\n", 46, "DENIED/1\n");
+    /* Operator-only pool operations have no frame on the gateway socket. */
+    exchange(&f, "ADD/1 12345678-1234-4234-8234-0000000000aa\n", 43, "DENIED/1\n");
+    exchange(&f, "GRANT/1 12345678-1234-4234-8234-0000000000aa\n", 45, "DENIED/1\n");
+    exchange(&f, "RAISE/1 12345678-1234-4234-8234-000000000000 2097152 200\n", 57, "DENIED/1\n");
+    exchange(&f, usage, 45, "USAGE/1 100000 0 1048576 0 100\n"); /* limits unchanged */
     exchange(&f, "{\"path\":\"/etc\",\"uid\":0,\"project\":100000,\"limit\":1}", 48, "DENIED/1\n");
     exchange(&f, "ENSURE/1 12345678-1234-4234-8234-000000000001\n", 46, "DENIED/1\n");
     int fd=connect_client(&f);

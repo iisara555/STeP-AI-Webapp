@@ -22,6 +22,7 @@ struct fake {
     int bad_uuid, bad_version, bad_id, bad_flags, unenforced, readonly, not_xfs;
     int absent, quota_errno; /* absent: real-XFS ENOENT for an all-zero dquot */
     int quota_fd, attr_fd;
+    uint64_t want_blocks, want_inodes; /* expected Q_XSETQLIM values (0: provisioning 8192/100) */
 };
 static int fault(struct fake *f) {
     f->calls++;
@@ -70,7 +71,8 @@ static int fake_quota(void *v, int fd, unsigned int op, uint32_t id, void *arg) 
         assert(id == 100000 && q->d_id == id && q->d_version == 1);
         assert(q->d_flags == FS_PROJ_QUOTA);
         assert(q->d_fieldmask == (FS_DQ_BHARD | FS_DQ_IHARD));
-        assert(q->d_blk_hardlimit == 8192 && q->d_ino_hardlimit == 100);
+        assert(q->d_blk_hardlimit == (f->want_blocks ? f->want_blocks : 8192));
+        assert(q->d_ino_hardlimit == (f->want_inodes ? f->want_inodes : 100));
         if (!f->ignore_quota) f->dq = *q;
         f->writes++;
     } else assert(0);
@@ -123,6 +125,60 @@ static void integration(int parent, struct qb_policy p) {
     close(root); close(state);
     assert(unlinkat(parent, "core-root", AT_REMOVEDIR) == 0);
     assert(unlinkat(parent, "core-state", AT_REMOVEDIR) == 0);
+}
+static int raise_to(struct qb_adapter *a, int fd, int dir, uint64_t bytes, uint64_t inodes) {
+    return a->raise(a->context, fd, dir, 100000, bytes, inodes);
+}
+/* Raise of an already configured project: only increases, only hard fields, readback. */
+static void raise_seam(int fd, const struct qb_policy *p) {
+    assert(mkdirat(fd, "raised", 0700) == 0);
+    int dir = openat(fd, "raised", O_RDONLY | O_DIRECTORY | O_CLOEXEC); assert(dir >= 0);
+    struct fake f = {0}; struct qb_xfs *x; struct qb_adapter a; struct qb_observation o;
+    open_fake(fd, p, &f, &x, &a);
+    assert(a.raise);
+    /* Never on an unconfigured (blank or absent) project or a directory of another project. */
+    assert(raise_to(&a, fd, dir, 8388608, 200) < 0 && f.writes == 0);
+    f.absent = 1; assert(raise_to(&a, fd, dir, 8388608, 200) < 0 && f.writes == 0); f.absent = 0;
+    assert(configure(&a, fd, dir) == 0 && f.writes == 2);
+    f.attr.fsx_projid = 100001; assert(raise_to(&a, fd, dir, 8388608, 200) < 0 && f.writes == 2);
+    f.attr.fsx_projid = 100000; f.attr.fsx_xflags &= ~(unsigned)FS_XFLAG_PROJINHERIT;
+    assert(raise_to(&a, fd, dir, 8388608, 200) < 0 && f.writes == 2);
+    f.attr.fsx_xflags |= FS_XFLAG_PROJINHERIT;
+    /* Never lower, never outside the policy bounds; equal is a no-op without a write. */
+    assert(raise_to(&a, fd, dir, 4194304 - 4096, 200) < 0 && f.writes == 2);
+    assert(raise_to(&a, fd, dir, 8388608, 99) < 0 && f.writes == 2);
+    assert(raise_to(&a, fd, dir, 8388608 + 512, 200) < 0 && f.writes == 2);
+    assert(raise_to(&a, fd, dir, UINT64_C(1099511627776) + 4096, 200) < 0 && f.writes == 2);
+    assert(raise_to(&a, fd, dir, 4194304, 100) == 0 && f.writes == 2);
+    assert(a.raise(a.context, fd, dir, 99999, 8388608, 200) < 0 && f.writes == 2);
+    f.want_blocks = 16384; f.want_inodes = 200;
+    int before = f.calls;
+    assert(raise_to(&a, fd, dir, 8388608, 200) == 0 && f.writes == 3);
+    int raise_calls = f.calls - before;
+    assert(a.observe(a.context, fd, dir, 100000, &o) == 0 && o.bytes_hard == 8388608 && o.inodes_hard == 200);
+    assert(f.dq.d_fieldmask == (FS_DQ_BHARD | FS_DQ_IHARD)); /* soft/rt untouched */
+    qb_xfs_close(x);
+    /* Every syscall of a raise can fail; no failure reports success. */
+    for (int i = 1; i <= raise_calls; i++) {
+        struct fsxattr attr = f.attr; struct fs_disk_quota dq = f.dq;
+        f = (struct fake){0}; open_fake(fd, p, &f, &x, &a);
+        f.attr = attr; f.dq = dq; f.dq.d_blk_hardlimit = 8192; f.dq.d_ino_hardlimit = 100;
+        f.want_blocks = 16384; f.want_inodes = 200; f.fail_at = i;
+        assert(raise_to(&a, fd, dir, 8388608, 200) < 0 && f.calls == i);
+        qb_xfs_close(x);
+    }
+    /* An ignored write is caught by the readback. */
+    struct fsxattr attr = f.attr;
+    f = (struct fake){0}; open_fake(fd, p, &f, &x, &a);
+    f.attr = attr; f.dq.d_blk_hardlimit = 8192; f.dq.d_ino_hardlimit = 100;
+    f.want_blocks = 16384; f.want_inodes = 200; f.ignore_quota = 1;
+    assert(raise_to(&a, fd, dir, 8388608, 200) < 0 && errno == EDQUOT && f.writes == 1);
+    /* Kernel limit above the request (changed elsewhere): refused, never lowered. */
+    f.ignore_quota = 0; f.dq.d_blk_hardlimit = 32768;
+    assert(raise_to(&a, fd, dir, 8388608, 200) < 0 && f.writes == 1);
+    qb_xfs_close(x);
+    close(dir); assert(unlinkat(fd, "raised", AT_REMOVEDIR) == 0);
+    printf("xfs raise seam: PASS (fault injection at %d raise calls)\n", raise_calls);
 }
 int main(void) {
     if (geteuid() == 0) { fputs("refuse root\n", stderr); return 1; }
@@ -224,6 +280,7 @@ int main(void) {
     uint8_t u[16]; int enforced = 0;
     assert(a.mount(a.context, fd, u, &enforced) == 0 && enforced == 1);
     qb_xfs_close(x);
+    raise_seam(fd, &p);
     integration(fd, p);
     close(fd); assert(rmdir(path) == 0);
     printf("xfs syscall seam: PASS (fault injection at %d configure calls; no real XFS mutation)\n", configure_calls);

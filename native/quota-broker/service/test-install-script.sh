@@ -64,7 +64,7 @@ fails=0
 ok() { echo "ok - $1"; }
 bad() { echo "not ok - $1"; fails=1; }
 run() { : >"$calls"; set +e; "$work/install/install" "$@" >"$work/out" 2>&1; rc=$?; set -e; }
-params=(--bytes-hard 16106127360 --inodes-hard 750000 --user "${UUIDS[0]}" --user "${UUIDS[1]}")
+params=(--bytes-hard 16106127360 --inodes-hard 750000 --reserve-bytes 0 --user "${UUIDS[0]}" --user "${UUIDS[1]}")
 nothing_created() { [[ ! -e $work/mnt/step-ai-broker && ! -e $work/etc/step-quota-broker && ! -e $work/systemd/step-quota-broker.service ]]; }
 
 echo 300000000000 >"$work/avail"
@@ -75,12 +75,19 @@ run --install --bytes-hard 16106127361 --inodes-hard 750000 --user "${UUIDS[0]}"
 [[ $rc == 2 ]] && grep -q 'multiple of 4096' "$work/out" && nothing_created && ok "unaligned byte limit refused" || bad "byte limit ($rc)"
 run --install --bytes-hard 16106127360 --inodes-hard 10000001 --user "${UUIDS[0]}"
 [[ $rc == 2 ]] && nothing_created && ok "inode limit out of range refused" || bad "inode limit ($rc)"
-run --install --bytes-hard 16106127360 --inodes-hard 750000 --user 12345678-1234-4234-8234-00000000000G
-[[ $rc == 2 ]] && nothing_created && ok "non-canonical user UUID refused" || bad "uuid ($rc)"
-run --install --bytes-hard 16106127360 --inodes-hard 750000 --user "${UUIDS[0]}" --user "${UUIDS[0]}"
+run --install --bytes-hard 16106127360 --inodes-hard 750000 --reserve-bytes 0 --user 12345678-1234-4234-8234-00000000000G
+[[ $rc == 2 ]] && grep -q "not a canonical lowercase UUID" "$work/out" && nothing_created && ok "non-canonical user UUID refused" || bad "uuid ($rc)"
+run --install --bytes-hard 16106127360 --inodes-hard 750000 --reserve-bytes 0 --user "${UUIDS[0]}" --user "${UUIDS[0]}"
 [[ $rc == 2 ]] && grep -q duplicate "$work/out" && ok "duplicate user refused" || bad "duplicate ($rc)"
 run --install --bytes-hard 16106127360 --inodes-hard 750000
-[[ $rc == 2 ]] && ok "no users refused" || bad "no users ($rc)"
+[[ $rc == 2 ]] && ok "missing reserve/users refused" || bad "no users ($rc)"
+
+run --install --bytes-hard 16106127360 --inodes-hard 750000 --reserve-bytes 0
+[[ $rc == 2 ]] && grep -q 'need 1..512' "$work/out" && nothing_created && ok "no users refused" || bad "no users ($rc)"
+run --install --bytes-hard 16106127360 --inodes-hard 750000 --reserve-bytes 1125899906842625 --user "${UUIDS[0]}"
+[[ $rc == 2 ]] && grep -q 'reserve-bytes' "$work/out" && nothing_created && ok "reserve out of range refused" || bad "reserve range ($rc)"
+run --install --bytes-hard 16106127360 --inodes-hard 750000 --reserve-bytes 300000000000 --user "${UUIDS[0]}"
+[[ $rc == 2 ]] && grep -q overcommit "$work/out" && nothing_created && ok "reserve included in pre-install admission" || bad "reserve capacity ($rc)"
 
 echo 30000000000 >"$work/avail" # < 2 x 15 GiB
 run --install "${params[@]}"
@@ -104,14 +111,14 @@ policy=$work/etc/step-quota-broker/policy
 read -r dev ino < <(/usr/bin/stat -c '%d %i' "$work/mnt/step-ai-broker/root")
 if [[ $rc == 0 && $(/usr/bin/stat -c %a "$policy") == 644 ]] &&
    grep -qx 'bytes_hard=16106127360' "$policy" && grep -qx 'inodes_hard=750000' "$policy" &&
-   grep -qx "user=${UUIDS[1]}" "$policy" && grep -qx "root_device=$dev" "$policy" &&
+   grep -qx 'version=2' "$policy" && grep -qx 'reserve_bytes=0' "$policy" && ! grep -q '^user=' "$policy" && grep -qx "root_device=$dev" "$policy" &&
    grep -qx "root_inode=$ino" "$policy" && grep -qx 'mount_uuid=6b52590c-aed0-4f2e-bcb1-204a09a49304' "$policy" &&
    grep -qE '^epoch=[0-9a-f]{32}$' "$policy" && grep -qx "gateway_gid=$gid" "$policy" &&
    [[ $(/usr/bin/stat -c %a "$work/mnt/step-ai-broker") == 755 ]] &&
    [[ $(/usr/bin/stat -c %a "$work/mnt/step-ai-broker/root") == 710 ]] &&
    [[ $(/usr/bin/stat -c %a "$work/mnt/step-ai-broker/state") == 700 ]] &&
    grep -q "^xfs_quota -x -c report -p -b -i -n -N $work/mnt$" "$calls" &&
-   diff <(grep -E '^(broker|systemctl)' "$calls") <(printf '%s\n' 'broker --bootstrap' 'broker --check' \
+   diff <(grep -E '^(broker|systemctl)' "$calls") <(printf '%s\n' 'broker --bootstrap' "broker --add-user ${UUIDS[0]}" "broker --add-user ${UUIDS[1]}" 'broker --check' \
         'systemctl daemon-reload' 'systemctl enable --now step-quota-broker.service' \
         'systemctl is-active --quiet step-quota-broker.service') >/dev/null &&
    cmp -s "$work/systemd/step-quota-broker.service" "$here/step-quota-broker.service"; then
@@ -130,6 +137,10 @@ run --uninstall --purge-empty
 [[ $rc == 2 && -d $work/mnt/step-ai-broker/root/p100000 && -f $policy ]] &&
     ok "purge refused once a user pool exists (ids never recycled)" || bad "purge with allocation ($rc)"
 rmdir "$work/mnt/step-ai-broker/root/p100000"
+printf 'grant\n' >"$work/mnt/step-ai-broker/state/journal"
+run --uninstall --purge-empty
+[[ $rc == 2 && -f $policy ]] && grep -q 'journal contains grants/events' "$work/out" &&
+    ok "purge refused for journal grants even before first workspace" || bad "purge with grant ($rc)"
 : >"$work/mnt/step-ai-broker/state/manifest"; : >"$work/mnt/step-ai-broker/state/journal"
 run --uninstall --purge-empty
 [[ $rc == 0 && ! -e $work/mnt/step-ai-broker && ! -e $work/etc/step-quota-broker ]] &&

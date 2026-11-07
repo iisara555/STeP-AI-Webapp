@@ -48,11 +48,11 @@ type Broker = {
 };
 const brokers: Broker[] = [];
 
-function policyText(base: string, users = Object.values(USERS)) {
+function policyText(base: string) {
   const root = statSync(join(base, 'broker/root'), { bigint: true });
   return [
     '# test policy',
-    'version=1',
+    'version=2',
     'epoch=00112233445566778899aabbccddeeff',
     `mount_uuid=${MOUNT_UUID}`,
     `root_device=${root.dev}`,
@@ -64,17 +64,21 @@ function policyText(base: string, users = Object.values(USERS)) {
     `gateway_uid=${uid}`,
     `gateway_gid=${gid}`,
     `workload_uid=${uid}`,
-    ...users.map((u) => `user=${u}`),
+    'reserve_bytes=0',
     '',
   ].join('\n');
 }
 function args(command: string, base: string) {
   return [command, '--trust-root', base, '--policy-dir', '/policy', '--broker-dir', '/broker'];
 }
-function run(base: string, command: string, socketDir = '/run0') {
-  return execFileSync(binary, [...args(command, base), '--socket-dir', socketDir, '--fake-dir', '/fake'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+function run(base: string, command: string, socketDir = '/run0', values: string[] = []) {
+  return execFileSync(
+    binary,
+    [command, ...values, ...args(command, base).slice(1), '--socket-dir', socketDir, '--fake-dir', '/fake'],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
 }
 async function serve(base: string, socketDir: string): Promise<ChildProcess> {
   mkdirSync(join(base, socketDir), { mode: 0o700 });
@@ -108,7 +112,10 @@ async function startBroker(): Promise<Broker> {
   const policyPath = join(base, 'policy/policy');
   writeFileSync(policyPath, policyText(base), { mode: 0o644 });
   chmodSync(policyPath, 0o644);
+  // Deterministic free-space seam: tests must not depend on host disk capacity.
+  writeFileSync(join(base, 'fake/available'), '1099511627776\n');
   run(base, '--bootstrap');
+  for (const user of Object.values(USERS)) run(base, '--add-user', '/run0', [user]);
   let child = await serve(base, '/run1');
   const broker: Broker = {
     base,
@@ -305,18 +312,18 @@ test('policy reader mirrors the native parser and refuses unsafe files', async (
   const broker = await startBroker();
   const policy = await readBrokerPolicy(broker.policyPath, uid);
   assert.deepEqual(
-    [policy.bytesHard, policy.inodesHard, policy.users, policy.workloadUid, policy.gatewayGid],
-    [BYTES, INODES, Object.values(USERS), uid, gid],
+    [policy.bytesHard, policy.inodesHard, policy.reserveBytes, policy.workloadUid, policy.gatewayGid],
+    [BYTES, INODES, 0, uid, gid],
   );
   await assert.rejects(readBrokerPolicy(broker.policyPath, uid + 1), /POLICY_UNSAFE/);
   const text = policyText(broker.base);
   for (const bad of [
     text + 'colour=blue\n',
-    text.replace('version=1', 'version=2'),
+    text.replace('version=2', 'version=1'),
     text.replace(`bytes_hard=${BYTES}`, 'bytes_hard=4097'),
     text.replace('first_project=100000', 'first_project=424242'),
-    text.replace(/user=.*\n/g, ''),
-    text.replace('version=1\n', 'version=1\nversion=1\n'),
+    text + `user=${USERS.alice}\n`,
+    text.replace('version=2\n', 'version=2\nversion=2\n'),
     text.slice(0, -1),
   ])
     assert.throws(() => parseBrokerPolicy(bad), /POLICY_INVALID/);

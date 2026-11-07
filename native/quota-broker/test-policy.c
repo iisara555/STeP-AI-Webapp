@@ -16,7 +16,7 @@
 /* Placeholder policy values (15 GiB / 750000 inodes per user); the owner chooses real ones at install. */
 static const char valid[] =
     "# step-quota-broker policy\n"
-    "version=1\n"
+    "version=2\n"
     "epoch=0123456789abcdef0123456789abcdef\n"
     "mount_uuid=6b52590c-aed0-4f2e-bcb1-204a09a49304\n"
     "root_device=66306\n"
@@ -24,13 +24,12 @@ static const char valid[] =
     "\n"
     "bytes_hard=16106127360\n"
     "inodes_hard=750000\n"
+    "reserve_bytes=107374182400\n"
     "first_project=100000\n"
     "last_project=199999\n"
     "gateway_uid=1000\n"
     "gateway_gid=1000\n"
-    "workload_uid=995\n"
-    "user=12345678-1234-4234-8234-000000000000\n"
-    "user=12345678-1234-4234-8234-000000000001\n";
+    "workload_uid=995\n";
 
 static int parse(const char *text, struct qb_service_policy *p, unsigned int *line) {
     return qb_policy_parse(text, strlen(text), p, line);
@@ -61,17 +60,11 @@ static void accepts_valid(void) {
     const uint8_t mount[16] = {0x6b, 0x52, 0x59, 0x0c, 0xae, 0xd0, 0x4f, 0x2e,
                                0xbc, 0xb1, 0x20, 0x4a, 0x09, 0xa4, 0x93, 0x04};
     assert(!memcmp(p.core.mount_uuid, mount, 16));
-    assert(p.core.grant_count == 2 && p.core.grants[1].peer_uid == 1000);
-    assert(!strcmp(p.core.grants[1].workspace, "12345678-1234-4234-8234-000000000001"));
-    assert(p.core.grants[0].workspace[36] == 0 && p.core.grants[0].workspace[39] == 0);
-    /* maximum grant count and limits on the boundaries */
-    char big[QB_POLICY_MAX_BYTES];
-    int n = snprintf(big, sizeof(big), "%.*s", (int)(strstr(valid, "user=") - valid), valid);
-    for (int i = 0; i < QB_MAX_GRANTS; i++)
-        n += snprintf(big + n, sizeof(big) - (size_t)n, "user=12345678-1234-4234-8234-%012d\n", i);
-    assert(parse(big, &p, NULL) == 0 && p.core.grant_count == QB_MAX_GRANTS);
-    n += snprintf(big + n, sizeof(big) - (size_t)n, "user=12345678-1234-4234-8234-%012d\n", 999);
-    assert(parse(big, &p, NULL) < 0 && errno == EINVAL);
+    /* Users are journal state: none in the policy; every added user is a gateway grant. */
+    assert(p.core.grant_count == 0 && p.core.added_peer_uid == 1000);
+    assert(p.core.reserve_bytes == UINT64_C(107374182400));
+    assert(parse_with("reserve_bytes=107374182400\n", "reserve_bytes=0\n", NULL) == 0);
+    assert(parse_with("reserve_bytes=107374182400\n", "reserve_bytes=1125899906842624\n", NULL) == 0);
     assert(parse_with("bytes_hard=16106127360\n", "bytes_hard=4096\n", NULL) == 0);
     assert(parse_with("bytes_hard=16106127360\n", "bytes_hard=1099511627776\n", NULL) == 0);
     assert(parse_with("inodes_hard=750000\n", "inodes_hard=10000000\n", NULL) == 0);
@@ -82,21 +75,21 @@ static void refuses_format(void) {
     assert(qb_policy_parse(valid, strlen(valid) - 1, &p, &line) < 0); /* no final newline */
     assert(qb_policy_parse(NULL, 1, &p, &line) < 0 && qb_policy_parse(valid, 0, &p, &line) < 0);
     struct { const char *from, *to; unsigned int line; } cases[] = {
-        {"version=1\n", "colour=blue\nversion=1\n", 2},     /* unknown key */
-        {"version=1\n", "Version=1\n", 2},                  /* keys are lowercase/exact */
-        {"version=1\n", "version = 1\n", 2},                /* no spaces */
-        {"version=1\n", "version=1 \n", 2},
-        {"version=1\n", "version=1\r\n", 2},
-        {"version=1\n", "version=1\t\n", 2},
-        {"version=1\n", " # indented comment\nversion=1\n", 2},
-        {"version=1\n", "version\n", 2},
-        {"version=1\n", "version=2\n", 2},
-        {"version=1\n", "version=1\nversion=1\n", 3},       /* duplicate */
-        {"workload_uid=995\n", "workload_uid=995\nworkload_uid=995\n", 15},
-        {"user=12345678-1234-4234-8234-000000000001\n", "user=12345678-1234-4234-8234-000000000000\n", 16},
-        {"version=1\n", "", 0},                             /* missing */
+        {"version=2\n", "colour=blue\nversion=2\n", 2},     /* unknown key */
+        {"version=2\n", "Version=2\n", 2},                  /* keys are lowercase/exact */
+        {"version=2\n", "version = 2\n", 2},                /* no spaces */
+        {"version=2\n", "version=2 \n", 2},
+        {"version=2\n", "version=2\r\n", 2},
+        {"version=2\n", "version=2\t\n", 2},
+        {"version=2\n", " # indented comment\nversion=2\n", 2},
+        {"version=2\n", "version\n", 2},
+        {"version=2\n", "version=3\n", 2},
+        {"version=2\n", "version=02\n", 2},
+        {"version=2\n", "version=2\nversion=2\n", 3},       /* duplicate */
+        {"workload_uid=995\n", "workload_uid=995\nworkload_uid=995\n", 16},
+        {"version=2\n", "", 0},                             /* missing */
         {"epoch=0123456789abcdef0123456789abcdef\n", "", 0},
-        {"user=12345678-1234-4234-8234-000000000000\nuser=12345678-1234-4234-8234-000000000001\n", "", 0},
+        {"reserve_bytes=107374182400\n", "", 0},
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         line = 1234;
@@ -111,7 +104,7 @@ static void refuses_format(void) {
     char longline[QB_POLICY_MAX_LINE + 40];
     memset(longline, 'a', sizeof(longline)); longline[0] = '#';
     longline[QB_POLICY_MAX_LINE + 1] = '\n'; longline[QB_POLICY_MAX_LINE + 2] = 0;
-    assert(parse_with("version=1\n", longline, NULL) < 0);
+    assert(parse_with("version=2\n", longline, NULL) < 0);
 }
 static void refuses_values(void) {
     const char *bad[][2] = {
@@ -146,22 +139,37 @@ static void refuses_values(void) {
         {"gateway_uid=1000\n", "gateway_uid=4294967295\n"},
         {"gateway_gid=1000\n", "gateway_gid=0\n"},
         {"workload_uid=995\n", "workload_uid=0\n"},
-        {"user=12345678-1234-4234-8234-000000000001\n", "user=12345678-1234-4234-8234-00000000000g\n"},
-        {"user=12345678-1234-4234-8234-000000000001\n", "user=../../etc/passwd\n"},
+        {"reserve_bytes=107374182400\n", "reserve_bytes=1125899906842625\n"},
+        {"reserve_bytes=107374182400\n", "reserve_bytes=-1\n"},
+        {"reserve_bytes=107374182400\n", "reserve_bytes=0100\n"},
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         int r = parse_with(bad[i][0], bad[i][1], NULL);
         int expected_ok = !strcmp(bad[i][1], "first_project=150000\n");
         if ((r == 0) != expected_ok) { fprintf(stderr, "value case %zu: r=%d\n", i, r); assert(0); }
     }
-    /* first > last, and a range too small for every grant */
-    assert(parse_with("last_project=199999\n", "last_project=100000\n", NULL) < 0);
+    /* first > last is refused; a one-id range is valid (the range bounds journal grants). */
+    assert(parse_with("last_project=199999\n", "last_project=100000\n", NULL) == 0);
     char swapped[sizeof(valid) + 8];
     const char *f = strstr(valid, "first_project=100000\n"); assert(f);
     int n = snprintf(swapped, sizeof(swapped), "%.*sfirst_project=100002\nlast_project=100001\n%s",
                      (int)(f - valid), valid, strstr(valid, "gateway_uid="));
     struct qb_service_policy p;
     assert(n > 0 && qb_policy_parse(swapped, (size_t)n, &p, NULL) < 0);
+}
+/* The version 1 format (users in the policy) is refused with a distinct error so the
+ * service can point the operator at the migration; nothing of it is half-accepted. */
+static void refuses_version_1(void) {
+    static char v1[QB_POLICY_MAX_BYTES];
+    const char *at = strstr(valid, "version=2\n"); assert(at);
+    int n = snprintf(v1, sizeof(v1), "%.*sversion=1\n%s", (int)(at - valid), valid, at + 10);
+    assert(n > 0);
+    struct qb_service_policy p; unsigned int line = 0;
+    errno = 0;
+    assert(qb_policy_parse(v1, (size_t)n, &p, &line) < 0 && errno == EPROTONOSUPPORT && line == 2);
+    n = snprintf(v1, sizeof(v1), "%suser=12345678-1234-4234-8234-000000000000\n", valid);
+    errno = 0;
+    assert(qb_policy_parse(v1, (size_t)n, &p, &line) < 0 && errno == EPROTONOSUPPORT && line == 16);
 }
 static int remove_item(const char *p, const struct stat *s, int t, struct FTW *w) {
     (void)s; (void)t; (void)w; return remove(p);
@@ -180,7 +188,7 @@ static void load_file_protection(void) {
     struct qb_service_policy p; unsigned int line;
     uid_t me = geteuid();
     write_file(dir, "policy", valid, 0644);
-    assert(qb_policy_load(dir, "policy", me, &p, &line) == 0 && p.core.grant_count == 2);
+    assert(qb_policy_load(dir, "policy", me, &p, &line) == 0 && p.core.grant_count == 0);
     write_file(dir, "policy", valid, 0600);
     assert(qb_policy_load(dir, "policy", me, &p, &line) == 0);
     /* wrong owner (the production owner is root) */
@@ -212,7 +220,7 @@ static void load_file_protection(void) {
     memset(huge, '#', sizeof(huge) - 1); huge[sizeof(huge) - 2] = '\n';
     write_file(dir, "huge", huge, 0644);
     assert(qb_policy_load(dir, "huge", me, &p, &line) < 0 && errno == EFBIG);
-    write_file(dir, "unknown", "version=1\nextra=1\n", 0644);
+    write_file(dir, "unknown", "version=2\nextra=1\n", 0644);
     assert(qb_policy_load(dir, "unknown", me, &p, &line) < 0 && errno == EINVAL && line == 2);
     assert(qb_policy_load(dir, "missing", me, &p, &line) < 0 && errno == ENOENT);
     close(dir);
@@ -221,10 +229,11 @@ static void load_file_protection(void) {
 int main(void) {
     assert(geteuid() != 0);
     umask(0077);
-    accepts_valid(); puts("ok 1 - valid policy, boundaries, 512 users");
+    accepts_valid(); puts("ok 1 - valid policy (version 2), boundaries, no users in the policy");
     refuses_format(); puts("ok 2 - unknown/duplicate/missing keys and format refused with line");
     refuses_values(); puts("ok 3 - out-of-range and malformed values refused");
     load_file_protection(); puts("ok 4 - owner/mode/link/size protection of the policy file");
-    puts("4 policy tests passed");
+    refuses_version_1(); puts("ok 5 - version 1 (user= lines) refused for migration");
+    puts("5 policy tests passed");
     return 0;
 }

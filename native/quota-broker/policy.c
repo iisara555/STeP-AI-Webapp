@@ -11,10 +11,10 @@
 static int deny(int error) { errno = error; return -1; }
 
 enum key { VERSION, EPOCH, MOUNT_UUID, ROOT_DEVICE, ROOT_INODE, BYTES_HARD, INODES_HARD,
-           FIRST_PROJECT, LAST_PROJECT, GATEWAY_UID, GATEWAY_GID, WORKLOAD_UID, GRANT, KEYS };
+           RESERVE_BYTES, FIRST_PROJECT, LAST_PROJECT, GATEWAY_UID, GATEWAY_GID, WORKLOAD_UID, KEYS };
 static const char *const names[KEYS] = {
     "version", "epoch", "mount_uuid", "root_device", "root_inode", "bytes_hard", "inodes_hard",
-    "first_project", "last_project", "gateway_uid", "gateway_gid", "workload_uid", "user"};
+    "reserve_bytes", "first_project", "last_project", "gateway_uid", "gateway_gid", "workload_uid"};
 
 /* Decimal, no sign, no leading zero, no overflow, within [min, max]. */
 static int number(const char *s, size_t n, uint64_t min, uint64_t max, uint64_t *out) {
@@ -90,12 +90,17 @@ int qb_policy_parse(const char *text, size_t length, struct qb_service_policy *o
         enum key k = KEYS;
         for (int i = 0; i < KEYS; i++)
             if (strlen(names[i]) == key_length && !memcmp(names[i], start, key_length)) k = (enum key)i;
+        /* Version 1 listed the users (user=) in the policy; users are journal state now. */
+        if (k == KEYS && key_length == 4 && !memcmp(start, "user", 4)) return deny(EPROTONOSUPPORT);
         if (k == KEYS) return deny(EINVAL); /* unknown key */
-        if (k != GRANT && seen[k]) return deny(EINVAL); /* duplicate */
+        if (seen[k]) return deny(EINVAL); /* duplicate */
         seen[k]++;
         int bad = 0;
         switch (k) {
-        case VERSION: bad = number(value, value_length, 1, 1, &v[k]); break;
+        case VERSION:
+            if (value_length == 1 && value[0] == '1') return deny(EPROTONOSUPPORT); /* see docs */
+            bad = number(value, value_length, 2, 2, &v[k]);
+            break;
         case EPOCH:
             if (value_length != 32) { bad = 1; break; }
             for (size_t i = 0; i < 16; i++) {
@@ -114,28 +119,18 @@ int qb_policy_parse(const char *text, size_t length, struct qb_service_policy *o
             bad = number(value, value_length, 4096, UINT64_C(1099511627776), &v[k]) || v[k] % 4096;
             break;
         case INODES_HARD: bad = number(value, value_length, 1, 10000000, &v[k]); break;
+        case RESERVE_BYTES: bad = number(value, value_length, 0, QB_MAX_RESERVE_BYTES, &v[k]); break;
         case FIRST_PROJECT: case LAST_PROJECT:
             bad = number(value, value_length, 100000, 199999, &v[k]); break;
         case GATEWAY_UID: case GATEWAY_GID: case WORKLOAD_UID:
             bad = number(value, value_length, 1, 2147483646, &v[k]); break;
-        case GRANT: {
-            if (p.core.grant_count >= QB_MAX_GRANTS) { bad = 1; break; }
-            struct qb_grant *g = &p.core.grants[p.core.grant_count];
-            if (uuid(value, value_length, NULL, g->workspace)) { bad = 1; break; }
-            for (uint32_t i = 0; i < p.core.grant_count; i++)
-                if (!strcmp(p.core.grants[i].workspace, g->workspace)) bad = 1;
-            p.core.grant_count++;
-            break;
-        }
         default: bad = 1;
         }
         if (bad) return deny(EINVAL);
     }
     if (line) *line = 0;
     for (int i = 0; i < KEYS; i++) if (!seen[i]) return deny(EINVAL); /* missing */
-    if (v[FIRST_PROJECT] > v[LAST_PROJECT] ||
-        v[LAST_PROJECT] - v[FIRST_PROJECT] + 1 < p.core.grant_count) /* every grant can allocate */
-        return deny(EINVAL);
+    if (v[FIRST_PROJECT] > v[LAST_PROJECT]) return deny(EINVAL);
 #ifndef QB_BROKER_TESTING
     /* The workload must never be the gateway principal. Only the unprivileged FAKE-adapter
      * test build (which cannot chown to another uid) lets one test user play both. */
@@ -148,7 +143,9 @@ int qb_policy_parse(const char *text, size_t length, struct qb_service_policy *o
     p.workload_uid = (uint32_t)v[WORKLOAD_UID];
     p.core.layout = QB_LAYOUT_SHARED;
     p.core.access_gid = p.gateway_gid; p.core.content_uid = p.workload_uid;
-    for (uint32_t i = 0; i < p.core.grant_count; i++) p.core.grants[i].peer_uid = p.gateway_uid;
+    /* No bootstrap users: every user pool is an operator journal grant for the gateway. */
+    p.core.grant_count = 0; p.core.added_peer_uid = p.gateway_uid;
+    p.core.reserve_bytes = v[RESERVE_BYTES];
     *out = p;
     return 0;
 }

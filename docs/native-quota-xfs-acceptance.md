@@ -1,8 +1,8 @@
 # Native quota broker — owner-run XFS privileged acceptance
 
-Status: **prepared, NOT yet run.** Nothing here has been executed as root. The
-acceptance-enabled binary has only been compiled, analyzed and run on its
-unprivileged refusal paths. The production compile-time gate in `xfs.c` is unchanged
+Status: **current pool-operations binary NOT yet run as root.** The older
+private-layout binary passed an owner run (record preserved below); that is not
+evidence for this new binary. The current binary has only unprivileged evidence. The production compile-time gate in `xfs.c` is unchanged
 (default build still returns `ENOTSUP`). A PASS from this harness is evidence for
 gate 5 of `docs/native-quota-broker-xfs.md`. It does not approve production use.
 
@@ -43,7 +43,7 @@ gate 5 of `docs/native-quota-broker-xfs.md`. It does not approve production use.
   fstests-only `TEST_DEV`/`QA_CHECK_FS` variables or `--unsupported`, and none of
   those are used. The image is sparse.
 
-### Checks (exit 0 only if all 12 PASS)
+### Original checks (exit 0 only if every check PASS)
 
 Policy: 16 MiB bytes / 64 inodes per project, projects 100000–100003 (exactly
 four). Workspaces A–E are on the authenticated peer 4242.
@@ -70,20 +70,64 @@ escapes the quota. If the line says `ALLOWED`, the launcher must keep workloads
 inside a user namespace, as `process-driver.ts` does with `--unshare-user`. Record
 the observed value.
 
+## Added service-model checks (not yet run on real XFS)
+
+A separate broker root/state inside the scratch mount uses shared per-user pools,
+zero bootstrap users and projects 100010–100013. It checks:
+
+- `operator_add_user_journal_grant`: durable grants, fresh ids, duplicate/invalid
+  refusal without a record, lazy pool creation, inheritance/ownership and replay.
+- `operator_raise_limit_enforced_and_replayed`: lower/overcommit refusals,
+  durable raise, independent hard-limit readback, write beyond the old limit up to
+  the new limit, idempotent retry and restart receipts/usage.
+- `add_user_refused_on_overcommit`: outstanding promises plus reserve cannot fit;
+  journal unchanged and refused user cannot allocate.
+- `full_pool_keeps_sqlite_history_intact`: an unprivileged writer opens the Store
+  schema in WAL mode, commits 200 history rows, fills the shared pool through a
+  second workspace, then attempts large/small database writes. Original history
+  checksum/integrity and every successful small write must survive reopen;
+  another user's pool must still write; freeing the filler must allow a new
+  6 MiB database write and clean reopen.
+
+`INFO full_pool_details` measures USAGE readback and fresh Store startup while
+full. Store startup writes (including search-index rebuild) may fail even if
+previously committed rows are readable. This is **not** an end-to-end Node Store
+or UI test; it uses the system C SQLite library with the same schema/WAL setup.
+
+### SQLite ABI and unprivileged model
+
+`acceptance/sqlite3-min.h` declares only stable public entry points, opaque
+handles, the signed 64-bit integer type and constants used by the harness. Its
+prototypes/constants were compile-checked together with the official SQLite
+3.46.1 `sqlite3.h` from
+`https://www.sqlite.org/2024/sqlite-amalgamation-3460100.zip` (header SHA-256
+`89b62c671c5964e137409ce034941b7b05a3af2c9875aba41f47f9483d0c2515`).
+No conflicting declarations/macros were reported; `sizeof(sqlite3_int64)==8` was
+asserted. Linking uses `-l:libsqlite3.so.0`; the runtime reports 3.46.1. These
+checks are ABI evidence on this Linux host, not a bundled/pinned SQLite engine.
+The installed system library and loader must remain trusted root-owned files.
+
+`make acceptance-sql-test` runs the same SQL writer code unprivileged, modelling
+failed file growth via `RLIMIT_FSIZE`. It passes history checksum/integrity,
+success-reported writes after reopen, failed big write and recovery after lifting
+the limit. The observed failure is extended SQLite code 778 (I/O error), not
+`SQLITE_FULL`; a real full XFS pool may report differently. The test binary is
+ignored build output and is never committed or installed.
+
 ## Pinned values (this commit; build with `make -C native/quota-broker acceptance`)
 
 ```text
-c2246ba25f3c67bbbd1a5071e4b5d328de19cb67ec66782099363a09272309ae  xfs-acceptance   (= BIN_SHA256 in run)
-5aea009fbba42ac36dba917e23dbad7662bffc990163c22d5437a0b902d6ba65  run (acceptance/run-xfs-acceptance.sh)
+874a5a809c5464ffa60f00d310287ee73f9e0ca57f60157c151850f11b1dea70  xfs-acceptance   (= BIN_SHA256 in run)
+08bdda340e51ee91af9a84caabf16388ff465d9f3923c4db82590042b9166d54  run (acceptance/run-xfs-acceptance.sh)
 ```
 
 ## Exact owner commands
 
-Run from the worktree `/home/itsara/projects/step-xfs-privileged-acceptance` at the
+Run from the worktree `/home/itsara/projects/quota-pool-operations` at the
 commit named in the handoff:
 
 ```sh
-cd /home/itsara/projects/step-xfs-privileged-acceptance/native/quota-broker
+cd /home/itsara/projects/quota-pool-operations/native/quota-broker
 sudo install -d -o root -g root -m 0755 /usr/local/libexec/step-xfs-acceptance
 sudo install -o root -g root -m 0755 acceptance/run-xfs-acceptance.sh /usr/local/libexec/step-xfs-acceptance/run
 sudo install -o root -g root -m 0755 xfs-acceptance /usr/local/libexec/step-xfs-acceptance/xfs-acceptance
@@ -128,7 +172,8 @@ PASS project_ids_never_reused: A kept 100000 after restart; C (after B's revocat
 PASS nested_and_bind_mount_refused: ...
        lazy detach of the XFS mount -> refused with ESTALE
 PASS lazily_detached_mount_refused: ...
-RESULT: PASS (12 passed, 0 failed)
+PASS <the additional pool checks listed above>
+RESULT: PASS (<all checks passed>, 0 failed)
 <ts> ACCEPTANCE PASSED
 <ts> cleanup: unmounted ...; cleanup: detached /dev/loopN; cleanup: removing ...
 log: /var/tmp/step-xfs-acceptance.log
@@ -143,7 +188,7 @@ and `ls -d /var/tmp/step-xfs-acceptance.*` should print nothing. Send
 ## Unprivileged verification done (as itsara)
 
 ```sh
-make -C native/quota-broker clean all test analyze   # 17 core + xfs seam + transport; -fanalyzer incl. xfs-acceptance.c: clean
+make -C native/quota-broker clean all test analyze   # 24 core + xfs seam + transport/policy/broker + SQL model; analyzer clean
 make -C native/quota-broker sanitize                 # ASan+UBSan tests; sanitized acceptance binary refusal paths (exit 2)
 make -C native/quota-broker acceptance acceptance-check acceptance-dry-run acceptance-wrapper-test
 shellcheck -s bash native/quota-broker/acceptance/*.sh   # ShellCheck 0.11.0 (pip shellcheck-py in a scratch venv): clean
@@ -164,8 +209,9 @@ shellcheck -s bash native/quota-broker/acceptance/*.sh   # ShellCheck 0.11.0 (pi
 - Ubuntu's AppArmor userns restriction blocks unprivileged `uid_map`, so no
   fake-root namespace test is possible.
 
-Not verified: any real XFS behaviour, the mount or loop path, and the root-only
-code in `xfs-acceptance.c`. That is exactly what the owner run is for.
+Not verified for the current binary: real XFS behaviour, the mount/loop path,
+and the new root-only pool checks. The older owner result below remains limited
+to its recorded binary.
 
 ## สรุปภาษาไทยแบบง่าย
 
@@ -193,7 +239,10 @@ Not covered by this run: the broker is not yet installed as a root service, and 
 
 ## Pins changed after the passing run
 
-The core gained the per-user shared layout and usage readback
-(`docs/native-quota-broker-service.md`), so the acceptance binary hash changed to
-`3f711f7e…a323` (wrapper `afd397b9…cce2`). The PASS above is evidence for the old
-binary `c2246ba2…09ae`; re-run before treating the current core as accepted.
+The core first gained shared layout/usage and now journal grants, raises and
+capacity admission; the harness adds the pool/SQLite checks above. Current pins
+are in the Pinned values section. The PASS above remains evidence only for
+`c2246ba2…09ae`, not the current binary. The installed old binary was observed by
+unprivileged dry-run and correctly reports a pin mismatch against the new wrapper.
+The owner must replace the installed root-owned copies and rerun before treating
+the current core as accepted.
