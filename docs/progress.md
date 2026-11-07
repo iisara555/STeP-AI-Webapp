@@ -1,5 +1,88 @@
 # Progress
 
+## FD-based native XFS adapter on 0681439 — disabled, no privileged acceptance
+
+- Isolated `/home/itsara/projects/step-native-quota-broker-xfs`, branch
+  `feat/xfs-backend-0681439`; retained work before cherry-picking cached-revoke fix
+  `448bb00` as `4a9762a`. Original/reviewer worktrees untouched. Added `xfs.c/.h`,
+  syscall-seam/core-integration tests, native archive/build checks and
+  [ABI evidence, behavior and exact remaining gates](native-quota-broker-xfs.md).
+- Actual Linux FD ioctl/`quotactl_fd` implementation: copied fixed policy,
+  retained CLOEXEC mount FD, device/inode/mount-ID and current mountinfo membership,
+  writable XFS, filesystem UUID, project accounting AND enforcement, blank-state
+  checks, exact block/inode hard limits (512-byte ABI units) before project+inherit
+  assignment, fsync and independent readback. No caller paths/IDs/limits, path
+  fallback, quota toggle, recursion, rewrite/repair, rollback or ID reuse.
+- Default native constructor refuses `ENOTSUP` before any ioctl/quota call.
+  `QB_XFS_PRIVILEGED_ACCEPTANCE=1` source was compiled/analyzed only, never run.
+  Fake syscall constructor exists only in test builds, not the normal library.
+- Hardened build/test/analyzer and ASan/UBSan commands pass after core integration:
+  **17 core tests**, fake XFS adapter faults at **all 22 configure seam calls**,
+  ignored writes, malformed/foreign/unsupported evidence, retained FD targeting and
+  real core+adapter with fake syscalls. Tests refuse root; ZERO real XFS mutation,
+  quota/ioctl execution, root/sudo/Docker, installation or production changes.
+  App/DB/engine/browser suites were not rerun for this isolated native increment.
+- Local standards/spec self-review only; independent adapter review and privileged
+  acceptance remain required. Live journal-loss poisoning is NOT well-formed
+  rollback detection: an independent protected witness/restore procedure is still
+  missing. Protected transport/launcher, one authoritative allocator, approved
+  host policy/access, actual exhaustion/escape/mount/crash tests and explicit
+  deployment approval remain gates. Nothing is installed or enabled.
+
+## Cached revoke durability follow-up on 0681439 — unprivileged only
+
+- Isolated branch `fix/core-cached-revoke-durability` in
+  `/home/itsara/projects/step-native-quota-broker-revoke`; original core, backend and main
+  worktrees unchanged. `qb_revoke` now checks journal/mount health under the mutex before
+  acknowledging a cached deny. Detected journal loss poisons the authority, returning `EIO`
+  for repeat/new revokes and ensures, even if the expected journal size is restored.
+- TDD regression failed at the expected cached-success assertion before the fix: revoke an
+  unallocated grant, truncate its journal to zero and fsync, then retry revoke. It now passes.
+  Additional coverage verifies unchanged journal size on valid repeated revoke, restart denial,
+  and cached revoke refusal on synthetic mount UUID/enforcement mismatch.
+- `make -C native/quota-broker clean all test analyze` and
+  `make -C native/quota-broker sanitize` pass: **17/17** hardened and **17/17** ASan/UBSan
+  tests, static library build and GCC analyzer; `git diff --check` passes. No app code changed;
+  broad app/DB/engine/browser suites were not rerun for this isolated native fix.
+- The regression explicitly demonstrates that an empty well-formed rollback still permits
+  provisioning after restart: no external anti-rollback witness exists. The fix prevents a
+  false durable-revoke acknowledgment after detected live loss; it does not repair lost state.
+  Fake adapters only, ordinary UID, zero real quota/root/XFS operations; no merge or install.
+
+## Native quota broker core on c7ab8ce — not installed / no enforcement acceptance
+
+- Dedicated `/home/itsara/projects/step-native-quota-broker`, branch `work/native-quota-broker`;
+  inspected quota protocol `8f53906` and integration `c7ab8ce` read-only. Added a C11 core library
+  with strict fixed-size workspace-only protocol, copied fixed operator policy, permanent journaled
+  allocation, broker-owned fresh directory creation, real descriptor-relative openat2/statx/fsync and
+  persisted device/inode binding. No caller path/project/limit, tree adoption, recursive rewrite,
+  clear/recycle, automatic bootstrap/repair, daemon, installer or production composition.
+- A durable operator-only deny is serialized under the same mutex as actual synchronous adapter
+  mutation/read-back. Completed revocation prevents later mutations and survives restart; this does
+  **not** revoke existing FDs/workloads or fence a later launch. Receipts are not launch tokens.
+  Existing RuntimeManager creation and synthetic assembly are unchanged; no withDiskQuota wiring
+  or protected FD-consuming launcher is claimed. The native journal must not become a competing
+  allocator behind the TypeScript SQLite authority.
+- Native **15/15** unprivileged tests pass in hardened and ASan/UBSan builds; real GCC `-fanalyzer`
+  compilation and static library build pass. Coverage includes failed journal fsync with no mutation,
+  interrupted provisioning, no adoption/reuse, live/torn state loss, symlink/inode/rename substitution,
+  retained FD behavior, independent evidence mismatch, cross-process exclusion, ten concurrent unique
+  IDs and in-flight mutation/revocation ordering. Test harness refuses root; quota ioctls are a synthetic
+  adapter model only. Test-first failures reproduced absent core/API, live-truncation cached success and
+  mid-adapter directory substitution; all now pass. No kernel quota enforcement is credited.
+- Node **26.12.1**, existing local dependency copy, unchanged Harness `desktop-v0.6.20`/`90ee71c`:
+  app **118/118**, DB **29/29**, ungated engine **245/245** with `STEP_STEP_RUNNER_TESTS=0`;
+  check/build/engine-pin checks pass. Existing 17 upstream engine diagnostics and loader/localStorage/
+  build-size warnings remain. Relevant Cloud Workspace Playwright **2 desktop passed / 2 existing mobile
+  skips**, using the unchanged scripted fixture, existing user-local browser libraries and an ignored
+  focused config (only 8799/5175, no server reuse). The first focused-config attempt failed because its
+  webServer cwd resolved under `.local`; explicit checkout cwd corrected it. No host package install.
+- See [native core boundary and exact remaining privileged acceptance](native-quota-broker-core.md).
+  No real ioctl backend, protected transport/launcher/install, approved host quota/access/delegation policy,
+  anti-rollback witness, manager publication integration or actual byte/inode exhaustion/recovery yet.
+  No root/sudo/Docker/XFS mutation, real data/provider access, merge/deploy or Desktop-parity sign-off.
+  Local standards/spec review performed; independent parent security review remains required.
+
 ## RuntimeManager startup lifecycle follow-up on 62af7bb (synthetic only)
 
 - Test-first deferred empty-grant regression reproduces a cleanup-failed exit being overwritten as running

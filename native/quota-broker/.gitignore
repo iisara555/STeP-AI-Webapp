@@ -1,0 +1,4 @@
+/test-core
+/test-xfs
+/*.o
+/*.a
