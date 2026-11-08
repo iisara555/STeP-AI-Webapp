@@ -12,3 +12,7 @@ fixture-*/
 test-stop
 test-stop-sanitize
 host-probe-stop
+test-deadline-create
+test-deadline-stop
+test-deadline-create-sanitize
+test-deadline-stop-sanitize

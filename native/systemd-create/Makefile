@@ -24,6 +24,10 @@ test-create: test-create.c test-create.trace create.c create.h
 	$(CC) $(CFLAGS) $< -o $@
 test-stop: test-stop.c stop.c stop.h
 	$(CC) $(CFLAGS) $< -o $@
+test-deadline-create: test-deadline.c create.c create.h
+	$(CC) $(CFLAGS) $< -l:libsystemd.so.0 -o $@
+test-deadline-stop: test-deadline.c stop.c stop.h
+	$(CC) $(CFLAGS) -DTEST_STOP $< -l:libsystemd.so.0 -o $@
 test-keeper: test-keeper.c keeper.c
 	$(CC) $(CFLAGS) $< -o $@
 host-probe: host-probe.c create.c create.h
@@ -53,11 +57,13 @@ pin-check-phony: create.o stop.o
 	  case $$s:$$out in 0:*'pin-check: create.o has no test hook'*'pin-check: stop.o has no test hook'*'pin-check-negative: hooked, LTO and tool-failure builds refused'*) \
 	    echo 'pin-check-phony: pin-check and pin-check-negative ran despite same-named files';; \
 	  *) printf '%s\n' "$$out" >&2; echo 'FAIL: pin-check/pin-check-negative skipped or failed' >&2; exit 1;; esac
-test: test-create test-stop test-keeper test-link pin-check-phony
+test: test-create test-stop test-keeper test-link pin-check-phony test-deadline-create test-deadline-stop
 	./test-create
 	./test-stop
 	./test-keeper
 	./test-link
+	./test-deadline-create
+	./test-deadline-stop
 # Read-only queries of the live system bus (Get/GetUnit/GetUnitByInvocationID/
 # ListUnitsByPatterns/Introspect only; never Kill/Stop/StartTransientUnit).
 host-check: host-probe host-probe-stop
@@ -70,6 +76,8 @@ analyze:
 	$(CC) $(CFLAGS) -fanalyzer -c stop.c -o /dev/null
 	$(CC) $(CFLAGS) -fanalyzer -c test-stop.c -o /dev/null
 	$(CC) $(CFLAGS) -fanalyzer -c test-keeper.c -o /dev/null
+	$(CC) $(CFLAGS) -fanalyzer -c test-deadline.c -o /dev/null
+	$(CC) $(CFLAGS) -fanalyzer -DTEST_STOP -c test-deadline.c -o /dev/null
 	$(CC) $(CFLAGS) -fanalyzer -c host-probe.c -o /dev/null
 	$(CC) $(CFLAGS) -fanalyzer -c host-probe-stop.c -o /dev/null
 sanitize:
@@ -79,15 +87,19 @@ sanitize:
 	./test-stop-sanitize
 	$(CC) $(CFLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer test-keeper.c -o test-keeper-sanitize
 	./test-keeper-sanitize
+	$(CC) $(CFLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer test-deadline.c -l:libsystemd.so.0 -o test-deadline-create-sanitize
+	./test-deadline-create-sanitize
+	$(CC) $(CFLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -DTEST_STOP test-deadline.c -l:libsystemd.so.0 -o test-deadline-stop-sanitize
+	./test-deadline-stop-sanitize
 install install-check:
 	@printf '%s\n' 'REFUSED: production unavailable; exclusive authority/recovery, stop-journal reconciliation and host acceptance of stop, credential transition, runtime composition, host acceptance of the hardened unit, review and artifact pins missing' >&2
 	@exit 1
 clean:
-	rm -f *.o *.a step-container-keeper test-create test-keeper test-link test-sanitize test-keeper-sanitize test-stop test-stop-sanitize host-probe host-probe-stop pin-check pin-check-negative
+	rm -f test-deadline-create test-deadline-stop test-deadline-create-sanitize test-deadline-stop-sanitize *.o *.a step-container-keeper test-create test-keeper test-link test-sanitize test-keeper-sanitize test-stop test-stop-sanitize host-probe host-probe-stop pin-check pin-check-negative
 # Delete each guarded check in a scratch copy and require its check to fail:
 # mutations.json -> test-create; pin-mutations.json (pin-scan.sh, Makefile,
 # hook marker/#error) -> make pin-check-phony (runs pin-check and the negatives).
-MUTATION_LISTS = mutation/mutations.json mutation/pin-mutations.json mutation/stop-mutations.json mutation/reset-mutations.json
+MUTATION_LISTS = mutation/mutations.json mutation/pin-mutations.json mutation/stop-mutations.json mutation/reset-mutations.json mutation/deadline-mutations.json
 mutation:
 	@d=$$(mktemp -d) && s=0 && for l in $(MUTATION_LISTS); do \
 	  python3 mutation/run.py $(CURDIR)/../.. after $$l $$d/after.json >> $$d/log || s=1; done; \

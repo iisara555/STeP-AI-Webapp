@@ -64,7 +64,10 @@ journals exists yet; they are evidence, not authority.
    path, `Id` = our unit, `InvocationID` = ours, `ControlGroup` = ours,
    `ActiveState=active`, `Job=(0,"/")`. Every blocking call is capped at the
    time left of the 5 s attempt deadline (never above 2 s), as `budget()` in
-   create.c.
+   create.c. Connection/authentication/Hello readiness is included in that same
+   deadline, before GetBusId/owner calls; see [D1 connection deadline](README.md#connection-deadline-d1).
+   The real stalled-socket regression uses only a private unprivileged listener,
+   never this host's system bus.
 3. **`Unit.Kill("all", SIGKILL)`, then `Unit.Stop("fail")`.**
    - `Stop` alone sends SIGTERM (keeper `pause()`s → exits) and waits up to the
      default 90 s `TimeoutStopSec` for a workload that ignores SIGTERM, far past

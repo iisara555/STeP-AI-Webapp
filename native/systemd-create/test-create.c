@@ -127,12 +127,13 @@ int fixture_clock_gettime(clockid_t clk,struct timespec *ts) {
     ts->tv_sec=(time_t)(clock_us/1000000); ts->tv_nsec=(long)(clock_us%1000000)*1000; return 0;
 }
 int fixture_fsync(int fd) { if (hit("fsync")) { errno=EIO; return -1; } synced++; return fsync(fd); }
-int sd_bus_new(sd_bus **b) { assert(!bus_live); if (hit("new")) return -ENOMEM; *b=&bus; bus_live=1; return 0; }
+int sd_bus_new(sd_bus **b) { assert(!bus_live); if (hit("new")) return -ENOMEM; *b=&bus; bus.unused=0; bus_live=1; return 0; }
 int sd_bus_set_address(sd_bus *b,const char *a) { assert(b==&bus && !strcmp(a,"unix:path=/run/dbus/system_bus_socket")); return 0; }
 int sd_bus_set_bus_client(sd_bus *b,int x) { assert(b==&bus && x==1); return 0; }
-int sd_bus_start(sd_bus *b) { assert(b==&bus); return hit("start") ? -ECONNREFUSED:0; }
-int sd_bus_get_bus_id(sd_bus *b,sd_id128_t *id) { assert(b==&bus); memset(id->bytes,hit("busid") ? 0x12:0x11,16); return 0; }
 static uint64_t call_timeout_max, call_timeout_calls, call_timeout_now;
+int sd_bus_start(sd_bus *b) { assert(b==&bus && call_timeout_now>0); return hit("start") ? -ECONNREFUSED:0; }
+int sd_bus_is_ready(sd_bus *b) { assert(b==&bus); return bus.unused; }
+int sd_bus_get_bus_id(sd_bus *b,sd_id128_t *id) { assert(b==&bus); memset(id->bytes,hit("busid") ? 0x12:0x11,16); return 0; }
 int sd_bus_set_method_call_timeout(sd_bus *b,uint64_t t) {
     assert(b==&bus && t>0 && t<=2000000);
     call_timeout_now=t; call_timeout_calls++; if (call_timeout_calls>1 && t>call_timeout_max) call_timeout_max=t; return 0;
@@ -180,7 +181,7 @@ int sd_bus_message_append_array(sd_bus_message *m,char type,const void *p,size_t
     record("]"); return 0;
 }
 int sd_bus_call_async(sd_bus *b,sd_bus_slot **s,sd_bus_message *m,sd_bus_message_handler_t cb,void *ctx,uint64_t timeout) {
-    assert(b==&bus && m && m->kind==REQ && m->refs==1 && timeout==2000000 && cb && ctx);
+    assert(b==&bus && m && m->kind==REQ && m->refs==1 && timeout>0 && timeout<=2000000 && timeout<=((struct lsc *)ctx)->deadline-clock_us && cb && ctx);
     char buf[2048]={0}; assert(pread(((struct lsc *)ctx)->fd,buf,sizeof buf-1,0)>0 && !strcmp(buf,INTENT) && synced>0);
     sent++; if (hit("async")) return -EIO;
     call_slot.alive=1; *s=&call_slot; method_cb=cb; method_ctx=ctx; return 0;
@@ -306,7 +307,9 @@ static void q_signal(const char *sender,unsigned job,const char *path,const char
 }
 static void q_event(void) { q_signal(":1.42",7,JOB7,UNIT,"done"); }
 int sd_bus_process(sd_bus *b,sd_bus_message **r) {
-    assert(b==&bus && bus_live && !r); process_calls++; assert(process_calls<100000);
+    assert(b==&bus && bus_live && !r);
+    if (!bus.unused) { bus.unused=1; if (hit("ready-delay")) clock_us+=4000000; return 1; }
+    process_calls++; assert(process_calls<100000);
     if (process_fail) return -EIO;
     if (endless && qh==qt) { qh=qt=0; q_signal(":1.42",99,"/org/freedesktop/systemd1/job/99","other.service","done"); clock_us+=100000; }
     if (qh==qt) return 0;
@@ -393,7 +396,7 @@ static void test_authority_and_owner(void) {
 static void test_begin_faults(void) {
     static const struct { const char *f; int n; enum outcome o; } t[]={
         {"new",1,O_PRE}, {"start",1,O_PRE}, {"match",1,O_PRE}, {"Subscribe",1,O_PRE}, {"Subscribe-trailing",1,O_PRE},
-        {"fsync",1,O_PRE}, {"clock",1,O_INTENT}, {"fsync",2,O_JOB}, {"fsync",3,O_ANCHOR_LINE},
+        {"fsync",1,O_PRE}, {"clock",1,O_PRE}, {"fsync",2,O_JOB}, {"fsync",3,O_ANCHOR_LINE},
     };
     for (size_t i=0;i<sizeof t/sizeof *t;i++) {
         reset(t[i].f,t[i].n,0);
@@ -413,6 +416,9 @@ static struct lsc *pending(int fd) {
 }
 static void expect(struct lsc *s,int fd,enum lsc_status st,const char *journal) { assert(lsc_status(s)==st); journal_is(fd,journal); finish(s); close(fd); }
 static void test_dispatch(void) {
+    reset("ready-delay",1,0); int delayed_fd=journal_file(O_RDWR,"j"); struct lsc *delayed=pending(delayed_fd);
+    assert(delayed->deadline==6000000 && clock_us==5000000 && count("ready-delay")==1);
+    clock_us+=1000000; assert(lsc_poll(delayed)==-1); expect(delayed,delayed_fd,LSC_UNCERTAIN,INTENT);
     /* flood of other-unit signals that bypass the bus arg2 filter: 32 per poll */
     reset(NULL,0,0); bypass_arg2=1; int fd=journal_file(O_RDWR,"j"); struct lsc *s=pending(fd);
     for (int i=0;i<40;i++) q_signal(":1.42",(unsigned)(100+i),"/org/freedesktop/systemd1/job/100","other.service","failed");
@@ -455,10 +461,10 @@ static void test_dispatch(void) {
     reset("slow:MainPID",1,0); fd=journal_file(O_RDWR,"j"); s=pending(fd); q_reply(JOB7,0,0); q_event();
     assert(lsc_poll(s)==-1 && prop_queried("DropInPaths")==0 && prop_queried("Job")==0); expect(s,fd,LSC_UNCERTAIN,INTENT JOBLINE);
     /* per-call timeout is capped at the time left: 300 ms left -> no call may wait longer */
-    reset(NULL,0,0); fd=journal_file(O_RDWR,"j"); s=pending(fd); q_reply(JOB7,0,0); q_event(); clock_us+=4700000;
+    reset(NULL,0,0); fd=journal_file(O_RDWR,"j"); s=pending(fd); q_reply(JOB7,0,0); q_event(); clock_us+=4700000; call_timeout_max=0;
     assert(lsc_poll(s)==1 && call_timeout_calls>50 && call_timeout_max==300000); expect(s,fd,LSC_ANCHORED,INTENT JOBLINE ANCHOR);
-    reset("clock",2,0); standard(O_POLL0);
-    reset("clock",3,0); standard(O_JOB);
+    reset("clock",12,0); standard(O_POLL0);
+    reset("clock",13,0); standard(O_JOB);
     /* each blocking call of the readback-entry owner() and GetUnit is budgeted:
      * a slow GetNameOwner (3rd: readback entry) or GetConnectionUnixUser stops
      * the next call from being made at all; past the deadline, then exactly on it */

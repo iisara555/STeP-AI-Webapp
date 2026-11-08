@@ -2,6 +2,7 @@
 #include "stop.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +26,7 @@ extern int sd_bus_new(sd_bus **);
 extern int sd_bus_set_address(sd_bus *,const char *);
 extern int sd_bus_set_bus_client(sd_bus *,int);
 extern int sd_bus_start(sd_bus *);
+extern int sd_bus_is_ready(sd_bus *);
 extern int sd_bus_get_bus_id(sd_bus *,sd_id128_t *);
 extern int sd_bus_set_method_call_timeout(sd_bus *,uint64_t);
 extern sd_bus *sd_bus_unref(sd_bus *);
@@ -65,9 +67,15 @@ extern void sd_bus_error_free(sd_bus_error *);
 #endif
 __attribute__((used)) static const char lsc_test_hook_marker[]="lsc_test_hook_marker";
 static uid_t lsc_test_journal_uid=0, lsc_test_create_uid=0;
+static const char *lsc_test_bus_address="unix:path=/run/dbus/system_bus_socket";
+static uid_t lsc_test_peer_uid=0;
+#define BUS_ADDRESS lsc_test_bus_address
+#define PEER_UID lsc_test_peer_uid
 #define JOURNAL_UID lsc_test_journal_uid
 #define CREATE_UID lsc_test_create_uid
 #else
+#define BUS_ADDRESS "unix:path=/run/dbus/system_bus_socket"
+#define PEER_UID ((uid_t)0)
 #define JOURNAL_UID ((uid_t)0)
 #define CREATE_UID ((uid_t)0)
 #endif
@@ -96,6 +104,34 @@ static uint64_t now(void) {
     return (uint64_t)t.tv_sec*1000000+(uint64_t)t.tv_nsec/1000;
 }
 /* Same validators as create.c / create-reconcile.c. */
+/* start only queues Hello; GetBusId/ordinary calls may otherwise enter
+ * bus_ensure_running and wait for the independent 90 s auth timeout. Drive
+ * connection/auth/Hello nonblockingly before any such call. Recheck the
+ * absolute attempt deadline on every dispatch, including continuous traffic. */
+static int ready(sd_bus *bus,uint64_t deadline) {
+    for (;;) {
+        unsigned i;
+        for (i=0;i<DISPATCH_BOUND;i++) {
+            uint64_t t=now();
+            if (!t || t>=deadline) return 0;
+            int r=sd_bus_is_ready(bus);
+            if (r!=0) return r>0 ? 1:-1;
+            r=sd_bus_process(bus,NULL);
+            if (r<0) return -1;
+            if (!r) break;
+        }
+        uint64_t t=now(), until=0;
+        if (!t || t>=deadline) return 0;
+        int fd=sd_bus_get_fd(bus), events=sd_bus_get_events(bus);
+        if (fd<0 || events<0 || sd_bus_get_timeout(bus,&until)<0) return -1;
+        if (until>deadline) until=deadline;
+        uint64_t left=until>t ? until-t:0;
+        if (i==DISPATCH_BOUND) left=0; /* buffered work: yield, do not sleep */
+        struct timespec timeout={.tv_sec=(time_t)(left/1000000),.tv_nsec=(long)(left%1000000)*1000};
+        struct pollfd p={.fd=fd,.events=(short)events};
+        if (ppoll(&p,1,&timeout,NULL)<0 && errno!=EINTR) return -1;
+    }
+}
 static int hex(const char *p) {
     if (strnlen(p,33)!=32) return 0;
     int nz=0;
@@ -173,9 +209,9 @@ static int budget(struct las *s) {
 static enum las_reason owner(struct las *s) {
     struct ucred peer; socklen_t length=sizeof peer;
     int fd=sd_bus_get_fd(s->bus);
-    if (fd<0 || getsockopt(fd,SOL_SOCKET,SO_PEERCRED,&peer,&length)<0 || length!=sizeof peer || peer.uid!=0) return LAS_R_OWNER;
+    if (fd<0 || getsockopt(fd,SOL_SOCKET,SO_PEERCRED,&peer,&length)<0 || length!=sizeof peer || peer.uid!=PEER_UID) return LAS_R_OWNER;
     sd_id128_t id; char bus_id[33]; sd_bus_message *m=NULL; const char *name=NULL; uint32_t uid=1;
-    if (sd_bus_get_bus_id(s->bus,&id)<0) return LAS_R_OWNER;
+    if (sd_bus_is_ready(s->bus)<=0 || sd_bus_get_bus_id(s->bus,&id)<0) return LAS_R_OWNER;
     for (size_t i=0;i<16;i++) (void)snprintf(bus_id+2*i,3,"%02x",(unsigned)id.bytes[i]);
     if (strcmp(bus_id,s->c.bus_id)) return LAS_R_OWNER;
     if (!budget(s)) return LAS_R_DEADLINE;
@@ -316,12 +352,17 @@ int las_begin(struct las *s) {
     s->deadline=t+ATTEMPT_US;
     if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }
     if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }
-    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,"unix:path=/run/dbus/system_bus_socket")<0 ||
-        sd_bus_set_bus_client(s->bus,1)<0 || sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }
+    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,BUS_ADDRESS)<0 ||
+        sd_bus_set_bus_client(s->bus,1)<0) { r=LAS_R_BUS; goto fail; }
+    if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }
+    if (sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }
+    int connected=ready(s->bus,s->deadline);
+    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }
     /* 1. Before anything durable: a replaced/inactive/busy unit is refused with
      *    an empty stop journal (provably nothing attempted). */
     if ((r=owner(s)) || (r=verify(s,BEFORE))) goto fail;
     char match[512]; (void)snprintf(match,sizeof match,"type='signal',sender='%s',path='%s',interface='%s',member='JobRemoved',arg2='%s'",s->c.manager,MANAGER,MI,s->unit);
+    if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }
     if (sd_bus_add_match(s->bus,&s->match,match,removed,s)<0) { r=LAS_R_BUS; goto fail; }
     if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }
     if (sd_bus_call_method(s->bus,s->c.manager,MANAGER,MI,"Subscribe",NULL,&sub,"")<0 || sd_bus_message_at_end(sub,1)<=0) { r=LAS_R_BUS; goto fail; }

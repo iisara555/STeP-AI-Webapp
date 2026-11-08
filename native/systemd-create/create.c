@@ -2,6 +2,7 @@
 #include "create.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,7 @@ extern int sd_bus_new(sd_bus **);
 extern int sd_bus_set_address(sd_bus *,const char *);
 extern int sd_bus_set_bus_client(sd_bus *,int);
 extern int sd_bus_start(sd_bus *);
+extern int sd_bus_is_ready(sd_bus *);
 extern int sd_bus_get_bus_id(sd_bus *,sd_id128_t *);
 extern int sd_bus_set_method_call_timeout(sd_bus *,uint64_t);
 extern sd_bus *sd_bus_unref(sd_bus *);
@@ -65,11 +67,17 @@ extern int sd_bus_process(sd_bus *,sd_bus_message **);
  * refuse any object built with the hook (nm/strings both see it). */
 __attribute__((used)) static const char lsc_test_hook_marker[]="lsc_test_hook_marker";
 static const char *lsc_test_root="/";
+static const char *lsc_test_bus_address="unix:path=/run/dbus/system_bus_socket";
+static uid_t lsc_test_peer_uid=0;
+#define BUS_ADDRESS lsc_test_bus_address
+#define PEER_UID lsc_test_peer_uid
 static uid_t lsc_test_keeper_uid=0, lsc_test_journal_uid=0;
 #define TRUST_ROOT lsc_test_root
 #define KEEPER_UID lsc_test_keeper_uid
 #define JOURNAL_UID lsc_test_journal_uid
 #else
+#define BUS_ADDRESS "unix:path=/run/dbus/system_bus_socket"
+#define PEER_UID ((uid_t)0)
 #define TRUST_ROOT "/"
 #define KEEPER_UID ((uid_t)0)
 #define JOURNAL_UID ((uid_t)0)
@@ -127,6 +135,34 @@ static uint64_t now(void) {
     struct timespec t;
     if (clock_gettime(CLOCK_MONOTONIC,&t)<0) return 0;
     return (uint64_t)t.tv_sec*1000000+(uint64_t)t.tv_nsec/1000;
+}
+/* start only queues Hello; GetBusId/ordinary calls may otherwise enter
+ * bus_ensure_running and wait for the independent 90 s auth timeout. Drive
+ * connection/auth/Hello nonblockingly before any such call. Recheck the
+ * absolute attempt deadline on every dispatch, including continuous traffic. */
+static int ready(sd_bus *bus,uint64_t deadline) {
+    for (;;) {
+        unsigned i;
+        for (i=0;i<DISPATCH_BOUND;i++) {
+            uint64_t t=now();
+            if (!t || t>=deadline) return 0;
+            int r=sd_bus_is_ready(bus);
+            if (r!=0) return r>0 ? 1:-1;
+            r=sd_bus_process(bus,NULL);
+            if (r<0) return -1;
+            if (!r) break;
+        }
+        uint64_t t=now(), until=0;
+        if (!t || t>=deadline) return 0;
+        int fd=sd_bus_get_fd(bus), events=sd_bus_get_events(bus);
+        if (fd<0 || events<0 || sd_bus_get_timeout(bus,&until)<0) return -1;
+        if (until>deadline) until=deadline;
+        uint64_t left=until>t ? until-t:0;
+        if (i==DISPATCH_BOUND) left=0; /* buffered work: yield, do not sleep */
+        struct timespec timeout={.tv_sec=(time_t)(left/1000000),.tv_nsec=(long)(left%1000000)*1000};
+        struct pollfd p={.fd=fd,.events=(short)events};
+        if (ppoll(&p,1,&timeout,NULL)<0 && errno!=EINTR) return -1;
+    }
 }
 static int hex(const char *p) {
     if (strnlen(p,33)!=32) return 0;
@@ -189,12 +225,11 @@ static int keeper_safe(void) {
     }
     close(fd); return 1;
 }
-/* During readback, cap the next blocking call at the time left before the
+/* During begin and readback, cap the next blocking call at the time left before the
  * attempt deadline (and never above the 2 s per-call ceiling), so ~60
  * synchronous Gets cannot stall a caller far past 5 s. 0 = no budget left. */
 #define CALL_CEILING_US 2000000ULL
 static int budget(struct lsc *s) {
-    if (!s->readback) return 1;
     uint64_t t=now();
     if (!t || t>=s->deadline) return 0;
     uint64_t left=s->deadline-t;
@@ -203,9 +238,9 @@ static int budget(struct lsc *s) {
 static int owner(struct lsc *s) {
     struct ucred peer; socklen_t length=sizeof peer;
     int fd=sd_bus_get_fd(s->bus);
-    if (fd<0 || getsockopt(fd,SOL_SOCKET,SO_PEERCRED,&peer,&length)<0 || length!=sizeof peer || peer.uid!=0) return 0;
+    if (fd<0 || getsockopt(fd,SOL_SOCKET,SO_PEERCRED,&peer,&length)<0 || length!=sizeof peer || peer.uid!=PEER_UID) return 0;
     sd_id128_t id; char bus_id[33]; sd_bus_message *m=NULL; const char *name=NULL; uint32_t uid=1;
-    if (sd_bus_get_bus_id(s->bus,&id)<0) return 0;
+    if (sd_bus_is_ready(s->bus)<=0 || sd_bus_get_bus_id(s->bus,&id)<0) return 0;
     for (size_t i=0;i<16;i++) (void)snprintf(bus_id+2*i,3,"%02x",(unsigned)id.bytes[i]);
     if (strcmp(bus_id,s->c.bus_id)) return 0;
     if (!budget(s)) return 0;
@@ -317,20 +352,22 @@ int lsc_begin(struct lsc *s) {
     if (!s || s->state!=LSC_NEW) return -1;
     s->state=LSC_UNCERTAIN; /* consume even pre-enqueue failures; no repair/retry */
     sd_bus_message *m=NULL,*sub=NULL;
+    uint64_t t=now(); if (!t) goto fail;
+    s->deadline=t+5000000ULL;
     if (!held(s) || !keeper_safe() || sd_bus_new(&s->bus)<0 ||
-        sd_bus_set_address(s->bus,"unix:path=/run/dbus/system_bus_socket")<0 || sd_bus_set_bus_client(s->bus,1)<0 ||
-        sd_bus_start(s->bus)<0 || sd_bus_set_method_call_timeout(s->bus,2000000)<0 || !owner(s)) goto fail;
+        sd_bus_set_address(s->bus,BUS_ADDRESS)<0 || sd_bus_set_bus_client(s->bus,1)<0 ||
+        !budget(s) || sd_bus_start(s->bus)<0 || ready(s->bus,s->deadline)!=1 || !owner(s)) goto fail;
     char match[512]; (void)snprintf(match,sizeof match,"type='signal',sender='%s',path='%s',interface='%s',member='JobRemoved',arg2='%s'",s->c.manager,MANAGER,MI,s->unit);
-    if (sd_bus_add_match(s->bus,&s->match,match,removed,s)<0 ||
-        sd_bus_call_method(s->bus,s->c.manager,MANAGER,MI,"Subscribe",NULL,&sub,"")<0 || sd_bus_message_at_end(sub,1)<=0 || build(s,&m)<0) goto fail;
+    if (!budget(s) || sd_bus_add_match(s->bus,&s->match,match,removed,s)<0 ||
+        !budget(s) || sd_bus_call_method(s->bus,s->c.manager,MANAGER,MI,"Subscribe",NULL,&sub,"")<0 || sd_bus_message_at_end(sub,1)<=0 || build(s,&m)<0) goto fail;
     char line[1024];
     (void)snprintf(line,sizeof line,"INTENT v1 %llu %llu %s %s %s %s %s %s %s %s\n",(unsigned long long)s->c.entry.slot,(unsigned long long)s->c.entry.principal,
         s->c.entry.epoch,s->c.entry.boot,s->c.entry.user,s->c.entry.workspace,s->c.entry.launch,s->unit,s->c.bus_id,s->c.manager);
     struct stat st;
     if (fstat(s->fd,&st)<0 || st.st_size!=0 || journal(s,line)<0 || !held(s) || !owner(s)) goto fail;
-    uint64_t t=now(); if (!t) goto fail;
-    s->deadline=t+5000000; s->state=LSC_PENDING;
-    if (sd_bus_call_async(s->bus,&s->call,m,method_reply,s,2000000)<0) goto fail;
+    t=now(); if (!t || t>=s->deadline) goto fail;
+    uint64_t attempt_left=s->deadline-t; s->state=LSC_PENDING;
+    if (sd_bus_call_async(s->bus,&s->call,m,method_reply,s,attempt_left<CALL_CEILING_US ? attempt_left:CALL_CEILING_US)<0) goto fail;
     sd_bus_message_unref(m); sd_bus_message_unref(sub); return 0;
 fail:
     s->state=LSC_UNCERTAIN; sd_bus_message_unref(m); sd_bus_message_unref(sub); return -1;

@@ -133,10 +133,11 @@ int fixture_fsync(int fd) {
     if (hit("fsync")) { errno=EIO; return -1; }
     synced++; record("fsync;"); return fsync(fd);
 }
-int sd_bus_new(sd_bus **b) { assert(!bus_live); if (hit("new")) return -ENOMEM; *b=&bus; bus_live=1; return 0; }
+int sd_bus_new(sd_bus **b) { assert(!bus_live); if (hit("new")) return -ENOMEM; *b=&bus; bus.unused=0; bus_live=1; return 0; }
 int sd_bus_set_address(sd_bus *b,const char *a) { assert(b==&bus && !strcmp(a,"unix:path=/run/dbus/system_bus_socket")); return 0; }
 int sd_bus_set_bus_client(sd_bus *b,int x) { assert(b==&bus && x==1); return 0; }
-int sd_bus_start(sd_bus *b) { assert(b==&bus); return hit("start") ? -ECONNREFUSED:0; }
+int sd_bus_start(sd_bus *b) { assert(b==&bus && call_timeout_now>0); return hit("start") ? -ECONNREFUSED:0; }
+int sd_bus_is_ready(sd_bus *b) { assert(b==&bus); return bus.unused; }
 int sd_bus_get_bus_id(sd_bus *b,sd_id128_t *id) { assert(b==&bus); memset(id->bytes,hit("busid") ? 0x12:0x11,16); return 0; }
 int sd_bus_set_method_call_timeout(sd_bus *b,uint64_t t) {
     assert(b==&bus && t>0 && t<=2000000); call_timeout_now=t; call_timeouts++; if (t>call_timeout_max) call_timeout_max=t; return 0;
@@ -272,7 +273,9 @@ static void q_signal(const char *sender,unsigned job,const char *path,const char
 }
 static void q_event(void) { q_signal(":1.42",9,JOB9,UNIT,"done"); }
 int sd_bus_process(sd_bus *b,sd_bus_message **r) {
-    assert(b==&bus && bus_live && !r); process_calls++; assert(process_calls<100000);
+    assert(b==&bus && bus_live && !r);
+    if (!bus.unused) { bus.unused=1; if (hit("ready-delay")) clock_us+=4000000; return 1; }
+    process_calls++; assert(process_calls<100000);
     if (process_fail) return -EIO;
     if (endless && qh==qt) { qh=qt=0; q_signal(":1.42",99,"/org/freedesktop/systemd1/job/99","other.service","done"); clock_us+=100000; }
     if (qh==qt) return 0;
@@ -565,7 +568,7 @@ static void test_dispatch(void) {
     /* clock failures in poll: entry, post-readback */
     reset(NULL,0,0); f=journals(); s=pending(f); int in_begin=count("clock"); q_reply(JOB9,0,0); q_event();
     assert(las_poll(s)==1); int total=count("clock"); expect(s,f,LAS_STOPPED,LAS_R_NONE,STOPL KILLL JOBL STOPPEDL);
-    assert(in_begin==22 && total==in_begin+12); /* every blocking call reads the clock for its budget */
+    assert(in_begin==26 && total==in_begin+12); /* every blocking call reads the clock for its budget */
     reset("clock",in_begin+1,0); standard(O_SENT,LAS_R_DEADLINE);
     reset("clock",total,0); standard(O_JOB,LAS_R_DEADLINE);
     /* a clock failure at ANY read is terminal DEADLINE, never STOPPED */
@@ -576,6 +579,9 @@ static void test_dispatch(void) {
     }
 }
 static void test_api(void) {
+    reset("ready-delay",1,0); struct fds delayed_f=journals(); struct las *delayed=pending(delayed_f);
+    assert(delayed->deadline==6000000 && clock_us==5000000 && count("ready-delay")==1);
+    clock_us+=1000000; assert(las_poll(delayed)==-1); expect(delayed,delayed_f,LAS_UNCERTAIN,LAS_R_DEADLINE,STOPL KILLL);
     reset(NULL,0,0); struct fds f=journals(); struct las *s=opened(f); uint64_t us=1;
     assert(las_fd(NULL)==-1 && las_events(NULL)==-1 && las_timeout(NULL,&us)==-1 && las_status(NULL)==LAS_UNCERTAIN && las_reason(NULL)==LAS_R_NONE);
     assert(las_fd(s)==-1 && las_events(s)==-1 && las_timeout(s,&us)==-1 && las_poll(s)==-1 && las_status(s)==LAS_NEW);

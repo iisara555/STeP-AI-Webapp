@@ -69,6 +69,42 @@ workload inside it. It never starts a workload, parses commands or reads files.
   reservation, cancels a job or kills anything. `lsc_close` only drops local
   subscriptions.
 
+## Connection deadline (D1)
+
+The 5 s monotonic attempt deadline starts at `lsc_begin` entry, **before
+connection setup**, and is never restarted after authentication or before the
+create request. Method-call timeouts are set before `sd_bus_start`, but those
+timeouts alone do not bound sd-bus's separate authentication timeout (normally
+90 s). Both create and stop explicitly drive `sd_bus_is_ready` with bounded
+`sd_bus_process` batches and `ppoll` capped at the earlier of the bus timeout
+and the remaining attempt deadline, before any GetBusId/owner call. Interrupted
+waits recompute that remaining budget. Begin's synchronous calls and the async
+request also use the remaining budget (at most 2 s per call).
+
+`test-deadline.c` exercises both public open/begin APIs with real libsystemd
+against a private, listening but nonresponding Unix socket. The unprivileged
+address/peer trust seam exists only under the existing guarded `LSC_TESTING`
+include and marker; production still pins `/run/dbus/system_bus_socket`, uid 0
+and the keeper root `/`. Neither client connects to the real bus. The old code
+fails the 8 s watchdog; the fixed code returns UNCERTAIN in about 5 s with an
+empty journal and no mutation. The normal/analyzer/ASan+UBSan targets include
+both real-socket regressions. Fake FIFO fixtures also require readiness progress
+and a pre-start method timeout, and verify that 4 s spent becoming ready leaves
+only 1 s of the original attempt. `mutation/deadline-mutations.json` covers the
+readiness path, wait cap and deadline preservation alongside the existing lists.
+Verification: normal tests, GCC analyzer and ASan/UBSan passed; all 241 current
+mutation entries were killed across the full sweep and focused reruns. The full
+sweep initially reported S26 BUILD-FAIL after the new peer seam made its deleted
+UID check leave an unused variable; its mutation now explicitly consumes that
+variable, and the focused S26 rerun builds and fails the test as required. The
+nine final D1 mutations passed a separate rerun. Read-only host probes were
+updated for readiness/deadline setup and compiled/analyzed, but not run here.
+
+This fixes only the connection deadline. Bus GUID + manager unique owner do
+**not** establish a manager-reexec epoch: manager-reexec remains an explicit
+production identity blocker. No identity contract is widened; the libraries
+remain uninstalled and unlinked, with no real systemd mutation acceptance here.
+
 ## Single-use: exactly what is enforced
 
 - Per handle: `lsc_begin` runs once; any later call fails without sending.

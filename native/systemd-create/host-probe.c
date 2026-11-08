@@ -61,9 +61,9 @@ static int observe_tail(struct lsc *s) {
     sd_bus_message_unref(m); return ok;
 }
 int main(void) {
-    struct lsc s; memset(&s,0,sizeof s);
+    struct lsc s; memset(&s,0,sizeof s); s.deadline=now()+5000000ULL;
     if (sd_bus_new(&s.bus)<0 || sd_bus_set_address(s.bus,"unix:path=/run/dbus/system_bus_socket")<0 ||
-        sd_bus_set_bus_client(s.bus,1)<0 || sd_bus_start(s.bus)<0 || sd_bus_set_method_call_timeout(s.bus,2000000)<0) { puts("FAIL connect"); return 1; }
+        sd_bus_set_bus_client(s.bus,1)<0 || !budget(&s) || sd_bus_start(s.bus)<0 || ready(s.bus,s.deadline)!=1) { puts("FAIL connect"); return 1; }
     sd_id128_t id; sd_bus_message *m=NULL; const char *name=NULL;
     assert(sd_bus_get_bus_id(s.bus,&id)>=0);
     for (size_t i=0;i<16;i++) (void)snprintf(s.c.bus_id+2*i,3,"%02x",(unsigned)id.bytes[i]);

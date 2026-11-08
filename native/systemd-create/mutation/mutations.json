@@ -4,8 +4,8 @@
     "desc": "lsc_begin pre-INTENT owner() deleted",
     "before_find": "sd_bus_set_method_call_timeout(s->bus,2000000)<0 || !owner(s)) goto fail;",
     "before_repl": "sd_bus_set_method_call_timeout(s->bus,2000000)<0) goto fail;",
-    "after_find": "sd_bus_set_method_call_timeout(s->bus,2000000)<0 || !owner(s)) goto fail;",
-    "after_repl": "sd_bus_set_method_call_timeout(s->bus,2000000)<0) goto fail;"
+    "after_find": "ready(s->bus,s->deadline)!=1 || !owner(s)) goto fail;",
+    "after_repl": "ready(s->bus,s->deadline)!=1) goto fail;"
   },
   {
     "id": "F1b",

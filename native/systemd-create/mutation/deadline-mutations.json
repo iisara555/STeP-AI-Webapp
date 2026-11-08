@@ -1,0 +1,137 @@
+[
+  {
+    "id": "D1-create-ready",
+    "desc": "connection readiness ready",
+    "file": "create.c",
+    "after_find": "if (r!=0) return r>0 ? 1:-1;",
+    "after_repl": "if (r>=0) return 1;",
+    "build": [
+      "make",
+      "-s",
+      "test-create"
+    ],
+    "run": [
+      "./test-create"
+    ]
+  },
+  {
+    "id": "D1-create-prestart",
+    "desc": "pre-start method timeout removed",
+    "file": "create.c",
+    "after_find": "!budget(s) || sd_bus_start(s->bus)<0",
+    "after_repl": "sd_bus_start(s->bus)<0",
+    "build": [
+      "make",
+      "-s",
+      "test-create"
+    ],
+    "run": [
+      "./test-create"
+    ]
+  },
+  {
+    "id": "D1-create-poll-cap",
+    "desc": "connection readiness poll-cap",
+    "file": "create.c",
+    "after_find": "if (until>deadline) until=deadline;",
+    "after_repl": "if (until>deadline) until=UINT64_MAX;",
+    "build": [
+      "make",
+      "-s",
+      "test-deadline-create"
+    ],
+    "run": [
+      "./test-deadline-create"
+    ]
+  },
+  {
+    "id": "D1-create-budget",
+    "desc": "connection readiness budget",
+    "file": "create.c",
+    "after_find": "ready(s->bus,s->deadline)",
+    "after_repl": "ready(s->bus,UINT64_MAX)",
+    "build": [
+      "make",
+      "-s",
+      "test-deadline-create"
+    ],
+    "run": [
+      "./test-deadline-create"
+    ]
+  },
+  {
+    "id": "D1-stop-ready",
+    "desc": "connection readiness ready",
+    "file": "stop.c",
+    "after_find": "if (r!=0) return r>0 ? 1:-1;",
+    "after_repl": "if (r>=0) return 1;",
+    "build": [
+      "make",
+      "-s",
+      "test-stop"
+    ],
+    "run": [
+      "./test-stop"
+    ]
+  },
+  {
+    "id": "D1-stop-prestart",
+    "desc": "pre-start method timeout removed",
+    "file": "stop.c",
+    "after_find": "if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }\n    if (sd_bus_start(s->bus)<0)",
+    "after_repl": "if (sd_bus_start(s->bus)<0)",
+    "build": [
+      "make",
+      "-s",
+      "test-stop"
+    ],
+    "run": [
+      "./test-stop"
+    ]
+  },
+  {
+    "id": "D1-stop-poll-cap",
+    "desc": "connection readiness poll-cap",
+    "file": "stop.c",
+    "after_find": "if (until>deadline) until=deadline;",
+    "after_repl": "if (until>deadline) until=UINT64_MAX;",
+    "build": [
+      "make",
+      "-s",
+      "test-deadline-stop"
+    ],
+    "run": [
+      "./test-deadline-stop"
+    ]
+  },
+  {
+    "id": "D1-stop-budget",
+    "desc": "connection readiness budget",
+    "file": "stop.c",
+    "after_find": "ready(s->bus,s->deadline)",
+    "after_repl": "ready(s->bus,UINT64_MAX)",
+    "build": [
+      "make",
+      "-s",
+      "test-deadline-stop"
+    ],
+    "run": [
+      "./test-deadline-stop"
+    ]
+  },
+  {
+    "id": "D1-create-reset",
+    "desc": "deadline refreshed after readiness",
+    "file": "create.c",
+    "after_find": "uint64_t attempt_left=s->deadline-t; s->state=LSC_PENDING;",
+    "after_repl": "s->deadline=t+5000000ULL; uint64_t attempt_left=s->deadline-t; s->state=LSC_PENDING;",
+    "build": [
+      "make",
+      "-s",
+      "test-create"
+    ],
+    "run": [
+      "./test-create"
+    ]
+  }
+]

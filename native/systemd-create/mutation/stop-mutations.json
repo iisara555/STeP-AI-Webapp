@@ -221,8 +221,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "length!=sizeof peer || peer.uid!=0) return LAS_R_OWNER;",
-    "after_repl": "length!=sizeof peer) return LAS_R_OWNER;"
+    "after_find": "length!=sizeof peer || peer.uid!=PEER_UID) return LAS_R_OWNER;",
+    "after_repl": "length!=sizeof peer) return LAS_R_OWNER;\n    (void)PEER_UID;"
   },
   {
     "id": "S27",
@@ -860,8 +860,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "s)<0 || sd_bus_set_address(s->bus,\"unix:path=/run/dbus/system_bus_socket\")<0 ||\n        sd_bus_set_bus_client(s->bus,1)<0 || sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: a replaced/inactive/busy unit is refused wit",
-    "after_repl": "s)<0 || sd_bus_set_address(s->bus,\"unix:path=/run/dbus/system_bus_socket\")<0 ||\n        sd_bus_set_bus_client(s->bus,1)<0) { r=LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: a replaced/inactive/busy unit is refused wit"
+    "after_find": "    if (sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }",
+    "after_repl": "    (void)sd_bus_start(s->bus);"
   },
   {
     "id": "S101",
