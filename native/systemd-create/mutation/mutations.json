@@ -1,0 +1,374 @@
+[
+ {
+  "id": "F1a",
+  "desc": "lsc_begin pre-INTENT owner() deleted",
+  "before_find": "sd_bus_set_method_call_timeout(s->bus,2000000)<0 || !owner(s)) goto fail;",
+  "before_repl": "sd_bus_set_method_call_timeout(s->bus,2000000)<0) goto fail;",
+  "after_find": "sd_bus_set_method_call_timeout(s->bus,2000000)<0 || !owner(s)) goto fail;",
+  "after_repl": "sd_bus_set_method_call_timeout(s->bus,2000000)<0) goto fail;"
+ },
+ {
+  "id": "F1b",
+  "desc": "lsc_begin post-INTENT owner() deleted",
+  "before_find": "journal(s,line)<0 || !held(s) || !owner(s)) goto fail;",
+  "before_repl": "journal(s,line)<0 || !held(s)) goto fail;",
+  "after_find": "journal(s,line)<0 || !held(s) || !owner(s)) goto fail;",
+  "after_repl": "journal(s,line)<0 || !held(s)) goto fail;"
+ },
+ {
+  "id": "F1c",
+  "desc": "owner(): GetConnectionUnixUser uid==0 deleted",
+  "before_find": "&uid)>0 && uid==0 &&",
+  "before_repl": "&uid)>0 &&",
+  "after_find": "&uid)>0 && uid==0 &&",
+  "after_repl": "&uid)>0 &&"
+ },
+ {
+  "id": "F2",
+  "desc": "lsc_poll reply/event job correlation deleted",
+  "before_find": "if (s->receipt.job!=s->event_job || strcmp(s->job_path,s->event_path) || !observe(s)",
+  "before_repl": "if (!observe(s)",
+  "after_find": "if (s->receipt.job!=s->event_job || strcmp(s->job_path,s->event_path) || !observe(s))",
+  "after_repl": "if (!observe(s))"
+ },
+ {
+  "id": "F3a",
+  "desc": "ActiveState=='active' deleted",
+  "before_find": " || strcmp(state,\"active\")",
+  "before_repl": "",
+  "after_find": "{UI,\"ActiveState\",'s',\"active\",0}, ",
+  "after_repl": ""
+ },
+ {
+  "id": "F3b",
+  "desc": "ignore-other-units filter deleted",
+  "before_find": "    if (strcmp(unit,s->unit)) return 0;\n",
+  "before_repl": "",
+  "after_find": "    if (strcmp(unit,s->unit)) return 0;\n",
+  "after_repl": ""
+ },
+ {
+  "id": "F3c",
+  "desc": "duplicate-event rejection deleted",
+  "before_find": " || s->got_event) { s->state=LSC_UNCERTAIN;",
+  "before_repl": ") { s->state=LSC_UNCERTAIN;",
+  "after_find": " || s->got_event) { s->state=LSC_UNCERTAIN;",
+  "after_repl": ") { s->state=LSC_UNCERTAIN;"
+ },
+ {
+  "id": "F3d",
+  "desc": "post-readback deadline deleted",
+  "before_find": " || now()>=s->deadline) goto uncertain;",
+  "before_repl": ") goto uncertain;",
+  "after_find": "        t=now(); if (!t || t>=s->deadline) goto uncertain; /* readback is synchronous */\n",
+  "after_repl": ""
+ },
+ {
+  "id": "F3e",
+  "desc": "Subscribe reply at_end check deleted",
+  "before_find": " || sd_bus_message_at_end(sub,1)<=0",
+  "before_repl": "",
+  "after_find": " || sd_bus_message_at_end(sub,1)<=0",
+  "after_repl": ""
+ },
+ {
+  "id": "F3f",
+  "desc": "sd_bus_process<0 handling deleted",
+  "before_find": "if (r<0) goto uncertain; ",
+  "before_repl": "",
+  "after_find": "if (r<0) goto uncertain; ",
+  "after_repl": ""
+ },
+ {
+  "id": "F3g",
+  "desc": "flock deleted",
+  "before_find": "flock(s->fd,LOCK_EX|LOCK_NB)<0 || ",
+  "before_repl": "",
+  "after_find": "flock(s->fd,LOCK_EX|LOCK_NB)<0 || ",
+  "after_repl": ""
+ },
+ {
+  "id": "F3h",
+  "desc": "journal O_RDWR check deleted",
+  "before_find": " ||\n        (fcntl(c->journal_fd,F_GETFL)&O_ACCMODE)!=O_RDWR",
+  "before_repl": "",
+  "after_find": " ||\n        (fcntl(c->journal_fd,F_GETFL)&O_ACCMODE)!=O_RDWR",
+  "after_repl": ""
+ },
+ {
+  "id": "F3i",
+  "desc": "journal nlink>1 check deleted",
+  "before_find": " || st.st_nlink>1",
+  "before_repl": "",
+  "after_find": " || st.st_nlink!=1 || st.st_size ||",
+  "after_repl": " || st.st_size ||"
+ },
+ {
+  "id": "F3j",
+  "desc": "journal uid==root check deleted",
+  "before_find": " || st.st_uid!=uid",
+  "before_repl": " || (st.st_uid!=uid && 0)",
+  "after_find": " || st.st_uid!=JOURNAL_UID",
+  "after_repl": ""
+ },
+ {
+  "id": "A1",
+  "desc": "authority: lsc_open exclusive deleted",
+  "before_find": " || c->exclusive(c->context,&c->entry)!=1) return -1;",
+  "before_repl": ") return -1;",
+  "after_find": " || c->exclusive(c->context,&c->entry)!=1) return -1;",
+  "after_repl": ") return -1;"
+ },
+ {
+  "id": "A2",
+  "desc": "authority: lsc_begin entry held deleted",
+  "before_find": "if (!held(s) || !keeper_safe() || sd_bus_new",
+  "before_repl": "if (!keeper_safe() || sd_bus_new",
+  "after_find": "if (!held(s) || !keeper_safe() || sd_bus_new",
+  "after_repl": "if (!keeper_safe() || sd_bus_new"
+ },
+ {
+  "id": "A3",
+  "desc": "authority: lsc_begin post-INTENT held deleted",
+  "before_find": "journal(s,line)<0 || !held(s) || !owner(s)) goto fail;",
+  "before_repl": "journal(s,line)<0 || !owner(s)) goto fail;",
+  "after_find": "journal(s,line)<0 || !held(s) || !owner(s)) goto fail;",
+  "after_repl": "journal(s,line)<0 || !owner(s)) goto fail;"
+ },
+ {
+  "id": "A4",
+  "desc": "authority: lsc_poll entry held deleted",
+  "before_find": " || t>=s->deadline || !held(s)) goto uncertain;",
+  "before_repl": " || t>=s->deadline) goto uncertain;",
+  "after_find": " || t>=s->deadline || !held(s)) goto uncertain;",
+  "after_repl": " || t>=s->deadline) goto uncertain;"
+ },
+ {
+  "id": "A5",
+  "desc": "authority: readback entry held deleted",
+  "before_find": "if (!held(s) || !owner(s) || sd_bus_call_method",
+  "before_repl": "if (!owner(s) || sd_bus_call_method",
+  "after_find": "if (!held(s) || !owner(s) || sd_bus_call_method",
+  "after_repl": "if (!owner(s) || sd_bus_call_method"
+ },
+ {
+  "id": "A6",
+  "desc": "authority: readback exit held deleted",
+  "before_find": "return ok && held(s) && owner(s);",
+  "before_repl": "return ok && owner(s);",
+  "after_find": "return ok && held(s) && owner(s);",
+  "after_repl": "return ok && owner(s);"
+ },
+ {
+  "id": "A7",
+  "desc": "authority: post-ANCHOR held deleted",
+  "before_find": "if (journal(s,line)<0 || !held(s)) goto uncertain;",
+  "before_repl": "if (journal(s,line)<0) goto uncertain;",
+  "after_find": "if (journal(s,line)<0 || !held(s)) goto uncertain;",
+  "after_repl": "if (journal(s,line)<0) goto uncertain;"
+ },
+ {
+  "id": "O1",
+  "desc": "owner: readback entry owner() deleted",
+  "before_find": "if (!held(s) || !owner(s) || sd_bus_call_method",
+  "before_repl": "if (!held(s) || sd_bus_call_method",
+  "after_find": "if (!held(s) || !owner(s) || sd_bus_call_method",
+  "after_repl": "if (!held(s) || sd_bus_call_method"
+ },
+ {
+  "id": "O2",
+  "desc": "owner: readback exit owner() deleted",
+  "before_find": "return ok && held(s) && owner(s);",
+  "before_repl": "return ok && held(s);",
+  "after_find": "return ok && held(s) && owner(s);",
+  "after_repl": "return ok && held(s);"
+ },
+ {
+  "id": "K1",
+  "desc": "keeper_safe in lsc_open deleted",
+  "before_find": " || !keeper_safe() || c->exclusive",
+  "before_repl": " || c->exclusive",
+  "after_find": " || !keeper_safe() || c->exclusive",
+  "after_repl": " || c->exclusive"
+ },
+ {
+  "id": "K2",
+  "desc": "keeper_safe re-check in lsc_begin deleted",
+  "before_find": "if (!held(s) || !keeper_safe() || sd_bus_new",
+  "before_repl": "if (!held(s) || sd_bus_new",
+  "after_find": "if (!held(s) || !keeper_safe() || sd_bus_new",
+  "after_repl": "if (!held(s) || sd_bus_new"
+ },
+ {
+  "id": "K3",
+  "desc": "keeper_safe: component owner check deleted",
+  "before_find": "fstat(fd,&st)<0 || st.st_uid!=0 || (st.st_mode&022)",
+  "before_repl": "fstat(fd,&st)<0 || (st.st_mode&022)",
+  "after_find": "fstat(fd,&st)<0 || st.st_uid!=KEEPER_UID || (st.st_mode&022)",
+  "after_repl": "fstat(fd,&st)<0 || (st.st_mode&022)"
+ },
+ {
+  "id": "K4",
+  "desc": "keeper_safe: group/other-writable check deleted",
+  "before_find": "st.st_uid!=0 || (st.st_mode&022) ||",
+  "before_repl": "st.st_uid!=0 ||",
+  "after_find": "st.st_uid!=KEEPER_UID || (st.st_mode&022) ||",
+  "after_repl": "st.st_uid!=KEEPER_UID ||"
+ },
+ {
+  "id": "K5",
+  "desc": "keeper_safe: keeper nlink!=1 deleted",
+  "before_find": " || st.st_nlink!=1))) { close(fd); return 0; }",
+  "before_repl": "))) { close(fd); return 0; }",
+  "after_find": " || st.st_nlink!=1))) { close(fd); return 0; }",
+  "after_repl": "))) { close(fd); return 0; }"
+ },
+ {
+  "id": "K6",
+  "desc": "keeper_safe: keeper executable bit deleted",
+  "before_find": " || !(st.st_mode&0111)",
+  "before_repl": "",
+  "after_find": " || !(st.st_mode&0111)",
+  "after_repl": ""
+ },
+ {
+  "id": "P1",
+  "desc": "unit object path prefix compare deleted",
+  "before_find": " && !strncmp(p,\"/org/freedesktop/systemd1/unit/\",30)",
+  "before_repl": "",
+  "after_find": " && !strcmp(p,s->unit_path)",
+  "after_repl": ""
+ },
+ {
+  "id": "P2",
+  "desc": "unit path exact compare weakened to 30-byte prefix (old bug)",
+  "after_find": " && !strcmp(p,s->unit_path)",
+  "after_repl": " && !strncmp(p,\"/org/freedesktop/systemd1/unit/\",30)"
+ },
+ {
+  "id": "M1",
+  "desc": "match rule arg2 removed",
+  "after_find": ",member='JobRemoved',arg2='%s'\",s->c.manager,MANAGER,MI,s->unit);",
+  "after_repl": ",member='JobRemoved'\",s->c.manager,MANAGER,MI);"
+ },
+ {
+  "id": "D1",
+  "desc": "dispatch bound 32 -> 33",
+  "after_find": "#define DISPATCH_BOUND 32U",
+  "after_repl": "#define DISPATCH_BOUND 33U"
+ },
+ {
+  "id": "D2",
+  "desc": "dispatch bound removed",
+  "after_find": "for (unsigned i=0;i<DISPATCH_BOUND;i++) {",
+  "after_repl": "for (;;) {"
+ },
+ {
+  "id": "R1",
+  "desc": "EFFECTIVE readback loop deleted",
+  "after_find": "    for (size_t i=0;i<sizeof EFFECTIVE/sizeof *EFFECTIVE;i++) if (!fixed_matches(s,&EFFECTIVE[i])) return 0;\n",
+  "after_repl": ""
+ },
+ {
+  "id": "R2",
+  "desc": "FIXED readback loop deleted",
+  "after_find": "    for (size_t i=0;i<sizeof FIXED/sizeof *FIXED;i++) if (!fixed_matches(s,&FIXED[i])) return 0;\n",
+  "after_repl": ""
+ },
+ {
+  "id": "R3",
+  "desc": "MainPID nonzero check deleted",
+  "after_find": " && pid>1 && property_end(m);",
+  "after_repl": " && property_end(m);"
+ },
+ {
+  "id": "R4",
+  "desc": "DropInPaths readback deleted",
+  "after_find": "ok && strv_prop(s,UI,\"DropInPaths\",NULL,0) && ",
+  "after_repl": "ok && "
+ },
+ {
+  "id": "R5",
+  "desc": "ExecStart readback deleted",
+  "after_find": "exec_start(s) && deny_any(s)",
+  "after_repl": "(exec_start(s),1) && deny_any(s)"
+ },
+ {
+  "id": "R6",
+  "desc": "IPAddressDeny readback deleted",
+  "after_find": "deny_any(s) && no_families(s)",
+  "after_repl": "(deny_any(s),1) && no_families(s)"
+ },
+ {
+  "id": "R7",
+  "desc": "RestrictAddressFamilies readback deleted",
+  "after_find": "no_families(s) && syscall_filter(s);",
+  "after_repl": "(no_families(s),1) && syscall_filter(s);"
+ },
+ {
+  "id": "R8",
+  "desc": "SystemCallFilter readback deleted",
+  "after_find": "no_families(s) && syscall_filter(s);",
+  "after_repl": "no_families(s) && (syscall_filter(s),1);"
+ },
+ {
+  "id": "R9",
+  "desc": "SystemCallArchitectures readback deleted",
+  "after_find": " && strv_prop(s,SI,\"SystemCallArchitectures\",native,1)",
+  "after_repl": " && (strv_prop(s,SI,\"SystemCallArchitectures\",native,1),1)"
+ },
+ {
+  "id": "R10",
+  "desc": "SystemCallFilter denied-name scan deleted",
+  "after_find": "ok=strcmp(v,DENIED_SYSCALLS[k])!=0;",
+  "after_repl": "(void)v;"
+ },
+ {
+  "id": "R11",
+  "desc": "property_end trailing-arg check deleted",
+  "after_find": "sd_bus_message_exit_container(m)>0 && sd_bus_message_at_end(m,1)>0;\n}",
+  "after_repl": "sd_bus_message_exit_container(m)>0;\n}"
+ },
+ {
+  "id": "R12",
+  "desc": "fixed_matches bool compare weakened",
+  "after_find": "v==(f->n ? 1:0); }",
+  "after_repl": "v>=0; }"
+ },
+ {
+  "id": "R14",
+  "desc": "IPAddressDeny prefix==0 check deleted",
+  "after_find": "&prefix)>0 && prefix==0 &&",
+  "after_repl": "&prefix)>0 &&"
+ },
+ {
+  "id": "T1",
+  "desc": "lsc_timeout ignores sd-bus timeout",
+  "after_find": "uint64_t until=bus<s->deadline ? bus:s->deadline;",
+  "after_repl": "uint64_t until=s->deadline; (void)bus;"
+ },
+ {
+  "id": "T2",
+  "desc": "lsc_timeout ignores attempt deadline",
+  "after_find": "uint64_t until=bus<s->deadline ? bus:s->deadline;",
+  "after_repl": "uint64_t until=bus;"
+ },
+ {
+  "id": "C1",
+  "desc": "CollectMode property dropped from policy",
+  "after_find": "    {UI,\"CollectMode\",'s',\"inactive\",0},\n",
+  "after_repl": ""
+ },
+ {
+  "id": "C2",
+  "desc": "MemorySwapMax=0 dropped from policy",
+  "after_find": " {SI,\"MemorySwapMax\",'t',NULL,0},",
+  "after_repl": ""
+ },
+ {
+  "id": "C3",
+  "desc": "OOMPolicy dropped from policy",
+  "after_find": " {SI,\"OOMPolicy\",'s',\"kill\",0},",
+  "after_repl": ""
+ }
+]

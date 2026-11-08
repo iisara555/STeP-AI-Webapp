@@ -107,8 +107,9 @@ workload inside it. It never starts a workload, parses commands or reads files.
   begin; journal mode/owner/nlink 0/2/FIFO/O_WRONLY/O_RDONLY/nonempty/flock).
   `make pin-check` refuses a `create.o` containing the hook; defaults are
   asserted to be `/` and uid 0.
-- A mutation run deleted each check in a scratch copy; all were killed (see
-  the commit message).
+- `make mutation` deletes each of 52 guarded checks in a scratch copy and
+  requires `test-create` to fail; all are killed (before/after list in the
+  commit history).
 - Keeper identity/argument/pause tests, GCC analyzer, ASan/UBSan, link test
   against the real `libsystemd.so.0`.
 

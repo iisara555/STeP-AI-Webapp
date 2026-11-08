@@ -1,7 +1,7 @@
 CC ?= cc
 AR ?= ar
 CFLAGS ?= -std=c11 -O2 -g -Wall -Wextra -Werror -Wconversion -Wshadow -Wstrict-prototypes -D_FORTIFY_SOURCE=3 -fstack-protector-strong
-.PHONY: all test analyze sanitize clean install install-check host-check pin-check
+.PHONY: all test analyze sanitize clean install install-check host-check pin-check mutation
 all: libstep-systemd-create.a step-container-keeper test-link
 create.o: create.c create.h ../launch-lifecycle/lifecycle.h
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -44,3 +44,8 @@ install install-check:
 	@exit 1
 clean:
 	rm -f *.o *.a step-container-keeper test-create test-keeper test-link test-sanitize test-keeper-sanitize host-probe
+# Delete each guarded check in a scratch copy and require test-create to fail.
+mutation:
+	@d=$$(mktemp -d) && python3 mutation/run.py $(CURDIR)/../.. after mutation/mutations.json $$d/after.json > $$d/log; \
+	  s=$$?; cat $$d/log; bad=$$(grep -cv ' KILLED' $$d/log); rm -rf $$d; \
+	  if [ $$s -ne 0 ] || [ $$bad -ne 0 ]; then echo "mutation: $$bad not killed" >&2; exit 1; fi; echo 'mutation: all killed'
