@@ -4,9 +4,11 @@
 /* Startup reconciliation of ONE nonempty systemd-create journal (create.c
  * format: INTENT v1 / JOB / ANCHOR lines) against its durable lifecycle slot.
  * Trusted local API for the single startup owner only; never a wire request.
- * Read-only: never writes the journal, never calls StartTransientUnit, stop,
- * kill or reset, and never retries or reuses the journal's unit name. The only
- * durable effect is a lifecycle release through lso_reconcile -> lco_reconcile
+ * Never writes the create journal, never calls StartTransientUnit, stop or
+ * kill itself, and never retries or reuses the journal's unit name. The only
+ * systemd mutation it can trigger is the caller's optional, separately gated
+ * post-absence reset step (lcr_config.reset), which owns its separate durable
+ * reset record. The reconciler's own durable effect is a lifecycle release through lso_reconcile -> lco_reconcile
  * after the observer's exact absence AND separate cleanup proof.
  *
  * Verdicts:
@@ -45,6 +47,14 @@ enum lcr_reason {
     LCR_R_NO_PIN,     /* no retained original cgroup descriptor: cannot prove */
     LCR_R_UNPROVEN,   /* observer absence or cleanup proof not established */
     LCR_R_RELEASED,   /* ledger slot already durably RELEASED (ALREADY_RELEASED) */
+    LCR_R_RESET,      /* post-absence reset step failed/uncertain (sticky per handle) */
+};
+/* Parsed create journal (lcr_parse, also passed to the reset step). */
+struct lcr_journal {
+    uint64_t slot, principal;
+    unsigned job;
+    char epoch[33], boot[37], user[37], workspace[37], launch[33], unit[100],
+        bus_id[33], manager[128], invocation[33], cgroup[512];
 };
 struct lcr;
 struct lcr_config {
@@ -60,6 +70,21 @@ struct lcr_config {
     ino_t cgroup_inode;
     void *context;
     int (*lifetime_fenced)(void *, const struct lc_entry *); /* see lso_config */
+    /* OPTIONAL, separately gated post-absence cleanup step (NULL: never reset;
+     * a failed unit then stays loaded and cleanup stays UNPROVEN). Called at
+     * most once per handle, only after THIS handle's absence receipt, only
+     * while the exact unit is still loaded (inactive/failed, same invocation,
+     * ControlGroup ours or "", no job), immediately after re-validating the
+     * receipt, lifetime fence and pins. `absent(absent_context, entry)` is the
+     * observer's receipt check; the step must require it == 1 before acting.
+     * Production: systemd-create las_reset (typed Unit.ResetFailed on the
+     * InvocationID path, own durable reset record). Return 1 only on a
+     * correlated success; anything else -> UNKNOWN (RESET), capacity retained,
+     * never retried on this handle. Never releases: release still needs the
+     * observer's cleanup proof (NoSuchUnit + original directory removed). */
+    void *reset_context;
+    int (*reset)(void *reset_context, const struct lc_entry *, const struct lcr_journal *,
+                 int (*absent)(void *, const struct lc_entry *), void *absent_context);
 };
 /* Duplicates journal_fd CLOEXEC and takes flock(LOCK_EX|LOCK_NB) on that open
  * file description for the handle lifetime (another description's holder, e.g.
@@ -79,12 +104,6 @@ void lcr_close(struct lcr *);
 int lcr_open_with_ops(const struct lcr_config *, const struct lso_ops *, void *, struct lcr **);
 /* Exposed for tests: strict parser. Returns the number of complete lines
  * accepted (0..3) or -1 and sets *reason. */
-struct lcr_journal {
-    uint64_t slot, principal;
-    unsigned job;
-    char epoch[33], boot[37], user[37], workspace[37], launch[33], unit[100],
-        bus_id[33], manager[128], invocation[33], cgroup[512];
-};
 int lcr_parse(const char *bytes, size_t length, struct lcr_journal *, enum lcr_reason *);
 #define LCR_JOURNAL_MAX 1024
 #endif

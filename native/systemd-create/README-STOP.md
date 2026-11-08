@@ -93,9 +93,65 @@ journals exists yet; they are evidence, not authority.
    once a stopped unit's cgroup is pruned (live: every loaded inactive/failed
    service here reports `ControlGroup=`). Then owner, authority and deadline,
    then `STOPPED`.
-5. **Never**: `ResetFailedUnit`/`ResetFailed`, `StopUnit`/`KillUnit` by name,
+5. **Never from a stop handle**: `ResetFailedUnit`/`ResetFailed`, `StopUnit`/`KillUnit` by name,
    job `Cancel`, mode `replace`, retries, or touching the create journal or
    ledger. `las_close` only drops local subscriptions.
+
+## Post-absence reset (separate handle, not installed)
+
+`las_reset_open(config, absent, context, &handle)` uses the same protected
+create evidence and authority contract, but `stop_fd` must be a **fresh reset
+record**, never a stop journal. `absent(context, &entry)` must return exactly 1
+for this entry's observer receipt at open, entry and after durable intent.
+Only a trusted caller holding the continuous lifetime fence may provide it.
+`las_begin` refuses reset handles; `las_reset` refuses stop handles and consumes
+one attempt even on failure. The create journal is unchanged.
+
+`las_reset` checks the root peer, historical bus/manager, exact invocation
+path/Id/InvocationID, inactive-or-failed state, ControlGroup ours-or-empty and
+no job; writes and fsyncs:
+
+```text
+RESET v1 <slot> <launch> <unit> <bus id> <manager> <invocation> <create job>
+RESET-DONE <invocation> <inactive|collected>
+```
+
+The first line is durable **before** the one typed `Unit.ResetFailed()` call
+on the InvocationID path. Authority, receipt, unchanged create evidence, owner
+and stopped identity are checked again before the call. There is no reset by
+name, global reset or cancellation. Readback requires the invocation to be
+explicitly gone (`NoUnitForInvocationID`), or still exact and now inactive,
+then rechecks owner/authority/deadline before the durable completion line.
+`LAS_RESET`/return 1 is not an absence or cleanup proof and releases nothing.
+Any failure is UNCERTAIN, retains capacity and never retries on that handle.
+No reset-record replay/recovery implementation is included.
+
+Semantics rechecked read-only against upstream **v259** sources:
+
+- [dbus-unit.c](https://github.com/systemd/systemd/blob/v259/src/core/dbus-unit.c):
+  `ResetFailed` has no arguments/result; `bus_unit_method_reset_failed` invokes
+  `unit_reset_failed` after authorization.
+- [dbus-manager.c](https://github.com/systemd/systemd/blob/v259/src/core/dbus-manager.c):
+  `method_get_unit_by_invocation_id` explicitly returns an invocation-addressed
+  path that stays valid only while the invocation matches.
+- [manager.c](https://github.com/systemd/systemd/blob/v259/src/core/manager.c):
+  invocation-addressed unit lookup uses `units_by_invocation_id`; an unknown
+  ID returns `NoUnitForInvocationID`, without falling back to a unit name.
+- [unit.c](https://github.com/systemd/systemd/blob/v259/src/core/unit.c) and
+  [service.c](https://github.com/systemd/systemd/blob/v259/src/core/service.c):
+  reset clears failure/start-rate-limit state; failed service transitions to
+  its dead state. `CollectMode=inactive` permits subsequent GC, not guaranteed
+  immediate GC (references/jobs may keep metadata).
+- [cgroup.c](https://github.com/systemd/systemd/blob/v259/src/core/cgroup.c):
+  `unit_release_cgroup` clears the stored cgroup path; this empty property is
+  not evidence of emptiness. The observer still requires original pinned
+  `populated 0` and the lifetime-fence bracket before any reset.
+
+The fake-bus reset fixture covers gates at each stage, exact request arguments,
+durable intent, single-use/API separation, replacement, malformed/error
+replies, state/path/job readback, collection, fsync and deadline faults. The
+reconciler's optional callback and this adapter are tested separately; actual
+owner linkage and end-to-end stop/observe/reset/cleanup acceptance remain open.
 
 ## Pending jobs (drain policy)
 
@@ -164,6 +220,12 @@ capacity is untouched. Event-loop callers use `las_fd` / `las_events` /
   checks, `unique_name`'s length floor, the container terminator check
   (implied by equality) and the event's path-validity disjunct (an invalid
   path leaves job 0, which never correlates).
+- The stopped-observer/reset increment adds `mutation/reset-mutations.json`
+  (29 reset guard/ordering mutations). All specified lists were exercised
+  through their harnesses with preserved exit status: 64 create, 21 pin,
+  147 stop and 29 reset, all killed. Stop and composition lists used bounded
+  batches with distinct scratch parents and verified complete ID sets; failed
+  pattern runs were corrected and rerun, not counted as passes.
 - `make host-check` also runs `host-probe-stop` (read-only): production
   `owner()`, `by_invocation()` and `verify()` against the real bus on
   `dbus.service` (BEFORE accepted, AFTER refused as STATE, another unit's name
@@ -182,14 +244,17 @@ handling, `render_create` truncation (unreachable after field validation) and
 
 ## Not done (production blocked; `install`/`install-check` still refuse)
 
-- **Observer gap found while verifying (blocks release after a real stop):**
-  `systemd-observer.c` requires `ControlGroup` equal to the launch-time path
-  for an inactive/failed candidate, but systemd 259 reports `ControlGroup=`
-  for stopped units. A real stopped anchor would therefore classify as
-  INVOCATION → UNKNOWN; absence must instead rest on the pinned original
-  cgroup descriptor (`populated 0`, later `st_nlink == 0`). Its cleanup proof
-  also needs NoSuchUnit, i.e. a separately reviewed post-absence
-  `ResetFailed` step that this module deliberately never performs.
+- Empty stopped ControlGroup and a separately gated post-absence reset now
+  exist. Missing pre-pruning populated-0 observation still returns UNKNOWN;
+  a removed descriptor is cleanup evidence only, not a new absence proof.
+- **D1:** `sd_bus_start` can block around 90 s despite the 5 s attempt deadline;
+  its bounded-startup fix is a separate increment. This reset path shares that
+  blocker; per-method budgets do not bound connection startup.
+- **D2:** daemon-reexec invalidates the historical manager unique-name binding.
+  Keep it fail-closed: same boot/bus/invocation and uid 0 do not establish
+  lifetime-fence continuity (outstanding jobs are serialized too). Future work
+  needs an explicitly authorized A-to-B operation-owner transition shared by
+  stop/observer/reconciler, unchanged create journal, proposed STOPv2 A/B.
 - No reconciler for stop journals (startup after a crash mid-stop) and no
   durable link from ledger slot to stop journal(s).
 - Credential transition of the workload into the anchor cgroup, composition

@@ -111,9 +111,109 @@ static void absence_cleanup_retry(void) {
     assert(lco_prepare(f.f.owner,&f.f.spec,&e)==0);
     observation_finish(&f);
 }
+/* systemd 259 reports ControlGroup="" for a stopped unit whose cgroup it pruned
+ * (cg_trim rmdir, then unit_release_cgroup). The empty string is never evidence:
+ * absence must still rest on cgroup.events "populated 0" through the pinned
+ * original directory. Removal before that observation stays UNKNOWN; only
+ * later cleanup uses VFS S_DEAD/getdents ENOENT. These cases use the PRODUCTION removal check
+ * (ops.removed = NULL). */
+static void production_init(struct observation_fixture *f) {
+    observation_init(f); lso_close(f->observer); f->observer=NULL;
+    const struct lso_ops ops={.snapshot=bus_read};
+    assert(lso_open_with_ops(&f->c,&ops,f,&f->observer)==0);
+}
+static void remove_original(struct observation_fixture *f) {
+    assert(unlinkat(f->c.cgroup_fd,"cgroup.events",0)==0);
+    assert(unlinkat(f->f.quota.base,"original-cgroup",AT_REMOVEDIR)==0);
+}
+static int second_cgroup_calls; static const char *second_cgroup;
+static int bus_read_changing(void *ctx,const char *unit,const char *manager,struct lso_snapshot *s) {
+    int r=bus_read(ctx,unit,manager,s);
+    if (second_cgroup && ++second_cgroup_calls>1) strcpy(s->cgroup,second_cgroup);
+    return r;
+}
+enum { EMPTY_POPULATED_0, EMPTY_REMOVED, EXPECTED_REMOVED, FOREIGN_REMOVED, EMPTY_POPULATED_1,
+    EMPTY_NO_EVENTS_LIVE, EMPTY_OTHER_INVOCATION, EMPTY_ACTIVE, EMPTY_JOB, EMPTY_MISSING, EMPTY_BUS,
+    EMPTY_MANAGER, EMPTY_UNFENCED, EMPTY_THEN_EXPECTED, EXPECTED_THEN_EMPTY, EMPTY_THEN_FOREIGN,
+    EMPTY_BOOT, EMPTY_REMOVED_UNFENCED, EMPTY_REMOVAL_ERROR, STOPPED_CASES };
+static void stopped_case(unsigned which) {
+    struct observation_fixture f; production_init(&f);
+    strcpy(f.s.cgroup,""); strcpy(f.s.state,"failed");
+    int want=0;
+    switch (which) {
+    case EMPTY_POPULATED_0: want=1; break;
+    case EMPTY_REMOVED: remove_original(&f); break; /* missed populated 0 is UNKNOWN */
+    case EXPECTED_REMOVED: strcpy(f.s.cgroup,f.c.cgroup); remove_original(&f); break;
+    case FOREIGN_REMOVED: strcpy(f.s.cgroup,"/system.slice/other.service"); remove_original(&f); break;
+    case EMPTY_POPULATED_1: event_text(&f,"populated 1\nfrozen 0\n"); break;
+    case EMPTY_NO_EVENTS_LIVE: assert(unlinkat(f.c.cgroup_fd,"cgroup.events",0)==0); break; /* bare ENOENT */
+    case EMPTY_OTHER_INVOCATION: f.s.invocation[0]='d'; remove_original(&f); break;
+    case EMPTY_ACTIVE: strcpy(f.s.state,"active"); remove_original(&f); break;
+    case EMPTY_JOB: f.s.job=3; remove_original(&f); break;
+    case EMPTY_MISSING: f.s.missing=1; remove_original(&f); break;
+    case EMPTY_BUS: f.s.bus_id[0]='e'; remove_original(&f); break;
+    case EMPTY_MANAGER: strcpy(f.s.manager,":1.43"); remove_original(&f); break;
+    case EMPTY_UNFENCED: f.fenced=0; break;
+    case EMPTY_THEN_EXPECTED: second_cgroup=f.c.cgroup; break;
+    case EXPECTED_THEN_EMPTY: strcpy(f.s.cgroup,f.c.cgroup); second_cgroup=""; remove_original(&f); break;
+    case EMPTY_THEN_FOREIGN: second_cgroup="/system.slice/other.service"; remove_original(&f); break;
+    case EMPTY_BOOT: assert(pwrite(f.c.boot_fd,"9",1,0)==1); remove_original(&f); break;
+    case EMPTY_REMOVED_UNFENCED: f.fenced=0; remove_original(&f); break;
+    case EMPTY_REMOVAL_ERROR: { /* events unreadable and the removal seam errors (-1) */
+        lso_close(f.observer); f.observer=NULL; f.cleanup_error=1;
+        const struct lso_ops ops={.snapshot=bus_read,.removed=removal};
+        assert(lso_open_with_ops(&f.c,&ops,&f,&f.observer)==0);
+        assert(unlinkat(f.c.cgroup_fd,"cgroup.events",0)==0); break; }
+    default: abort();
+    }
+    if (second_cgroup) {
+        lso_close(f.observer); f.observer=NULL; second_cgroup_calls=0;
+        const struct lso_ops ops={.snapshot=bus_read_changing};
+        assert(lso_open_with_ops(&f.c,&ops,&f,&f.observer)==0);
+    }
+    int got=lso_absent(f.observer,&f.c.entry);
+    if (got!=want) { fprintf(stderr,"stopped case %u: absent %d, want %d\n",which,got,want); abort(); }
+    second_cgroup=NULL;
+    struct lc_entry e;
+    if (want) {
+        /* Cleanup is still the separate proof: NoSuchUnit + original directory removed. */
+        assert(lso_reconcile(f.observer,f.f.owner,1)<0 && lco_get(f.f.owner,1,&e)==0 && e.state!=LC_RELEASED);
+        f.s.missing=1; f.s.invocation[0]=0; f.s.state[0]=0;
+        if (which==EMPTY_POPULATED_0) {
+            assert(lso_reconcile(f.observer,f.f.owner,1)<0); /* live directory is not removal */
+            remove_original(&f);
+        }
+        assert(lso_reconcile(f.observer,f.f.owner,1)==0 && lco_get(f.f.owner,1,&e)==0 && e.state==LC_RELEASED);
+    } else {
+        assert(lso_reconcile(f.observer,f.f.owner,1)<0 && lco_get(f.f.owner,1,&e)==0 && e.state!=LC_RELEASED);
+    }
+    observation_finish(&f);
+}
+/* Production removal check only accepts a held directory the VFS marked dead:
+ * a live directory, or a descriptor that cannot be read (O_PATH -> EBADF), is
+ * never "removed", whatever the error. */
+static void production_removal(void) {
+    struct observation_fixture f; production_init(&f);
+    assert(lso_absent(f.observer,&f.c.entry)==1);
+    f.s.missing=1;
+    assert(lso_clean(f.observer,&f.c.entry)==0);
+    errno=ENOENT; /* a successful getdents must not reuse stale errno */
+    assert(lso_removed(NULL,f.c.cgroup_fd)==0);
+    int path=openat(f.f.quota.base,"original-cgroup",O_PATH|O_DIRECTORY|O_CLOEXEC); assert(path>=0);
+    assert(lso_removed(NULL,path)==0);
+    remove_original(&f);
+    assert(lso_removed(NULL,path)==0); /* O_PATH: getdents EBADF, not proof */
+    assert(lso_removed(NULL,f.c.cgroup_fd)==1);
+    assert(lso_removed(NULL,f.c.cgroup_fd)==1); /* independent of the shared offset */
+    close(path);
+    assert(lso_clean(f.observer,&f.c.entry)==1);
+    observation_finish(&f);
+}
 int main(void) {
     alarm(60); assert(geteuid()!=0);
     for (unsigned i=0;i<18;i++) { unknown_case(i); printf("ok - observer UNKNOWN fixture %u\n",i); }
     absence_cleanup_retry(); puts("ok - exact absence, separate cleanup retry, retained capacity, descriptor substitution");
+    for (unsigned i=0;i<STOPPED_CASES;i++) { stopped_case(i); printf("ok - stopped-unit ControlGroup case %u\n",i); }
+    production_removal(); puts("ok - production removal check: dead directory only (not live, not O_PATH)");
     return 0;
 }

@@ -1,5 +1,54 @@
 # Progress
 
+## Stopped-anchor empty ControlGroup and post-absence reset — synthetic, not installed
+
+- Accept empty `ControlGroup` only for the exact inactive/failed invocation
+  without a pending job; active-empty and foreign nonempty paths stay UNKNOWN.
+  Absence still needs `populated 0` through the retained original descriptor,
+  exact snapshot bracket and continuously held lifetime fence. The interrupted
+  removed-directory-as-absence fallback was tightened to this contract:
+  pruning before the empty observation remains UNKNOWN, not a recovery receipt.
+- Post-absence cleanup now detects a removed held directory by `getdents64`
+  returning ENOENT, not `st_nlink == 0` (kernfs synthesizes link count). Tests
+  reject a live directory, O_PATH/EBADF, other errors and stale errno.
+- Optional reconciler reset seam is gated on this handle's own receipt and a
+  fresh fence/pin check, with one consumed attempt. Separate `las_reset_open` /
+  `las_reset` writes durable RESET intent before typed `Unit.ResetFailed()` on
+  the InvocationID path, verifies inactive/collected readback and never releases
+  capacity. Release still needs independent NoSuchUnit plus descriptor-removal
+  cleanup proof. Create journal bytes/format and historical manager binding are
+  unchanged. The seam and reset adapter are tested separately, not yet composed
+  through an actual startup owner.
+- Verified unprivileged: both native directories' `all test analyze sanitize`
+  passed (GCC analyzer and ASan/UBSan, including production-library link and
+  systemd-create pin-negative/phony checks); both `install-check` targets still
+  refuse with make exit 2. Read-only upstream systemd v259 source checks cover
+  invocation-path lookup, reset signature/state changes, collection and cgroup
+  path clearing; no real systemd mutation was sent.
+- Mutation evidence: launch-composition 101/101 killed in five bounded batches;
+  systemd-create create 64/64, pin 21/21, stop 147/147 (five bounded batches)
+  and new reset 29/29 killed. The reset single-attempt mutant initially survived;
+  asserting consumption and second-call refusal at the fake mutation boundary
+  killed it on the full reset rerun. Ten old stop patterns needed unique
+  context after adding reset. Interrupted/colliding runs and missing JSON files
+  were not counted as passes; completed batch IDs/counts and exit status are
+  checked programmatically. The composition harness now saves each result as
+  it completes, so interruption no longer loses the whole batch.
+- Remaining gates: D1 bus startup can exceed the 5 s attempt deadline (separate
+  worktree fix, including this new reset path, still to compose/review); D2
+  manager reexec stays fail-closed. Same boot/bus/invocation and uid 0 do not
+  establish fence continuity; outstanding jobs are serialized too. Future D2
+  work needs an explicitly authorized A-to-B operation-owner transition shared
+  by stop/observer/reconciler, unchanged create journal and proposed STOPv2 A/B.
+  Also pending: retained FD/absence durability across crashes, protected census,
+  real lifetime fence, stop/reset journal recovery, actual owner/service and
+  credential-transition linkage, end-to-end acceptance, independent review and
+  deliberate artifact pins. This change does not make real stopped/pruned
+  anchors automatically releasable when populated-0 evidence was missed.
+- Not run: repository-wide npm/DB/engine/browser suites, live host-check or
+  privileged/systemd/cgroup/XFS acceptance. No installation, root/sudo, host
+  configuration, real-data migration, push or integration was performed.
+
 ## Storage pool warnings, visible end to end — synthetic only, broker not wired
 
 - `GET /api/storage` returns only the verified caller's pool: `level`

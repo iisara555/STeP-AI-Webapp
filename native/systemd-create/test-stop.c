@@ -17,7 +17,8 @@ extern int fsync(int);
  * ActiveState/ControlGroup change only when Kill reaches the invocation path.
  * Any method other than the allowed read-only queries, Unit.Kill and Unit.Stop
  * on the invocation path aborts the test (no StopUnit/KillUnit by name, no
- * ResetFailed, no job cancel). */
+ * ResetFailed, no job cancel). The only exception is Unit.ResetFailed() on the
+ * invocation path from a las_reset_open handle (reset tests at the end). */
 #define UNIT "step-lc-11111111111111111111111111111111-0000000000000001.service"
 #define CGROUP "/system.slice/" UNIT
 #define INV "01000000000000000000000000000000"
@@ -33,6 +34,9 @@ extern int fsync(int);
 #define JOB9 "/org/freedesktop/systemd1/job/9"
 #define JOBL "JOB 9 " JOB9 "\n"
 #define STOPPEDL "STOPPED 9 " INV " failed\n"
+#define RESETL "RESET v1 1 " LAUNCH " " UNIT " " EPOCH " :1.42 " INV " 7\n"
+#define DONEL "RESET-DONE " INV " inactive\n"
+#define DONEGCL "RESET-DONE " INV " collected\n"
 enum { REQ=1, REPLY, SIGNAL, PROP };
 struct tok { char k, ct; const char *sig, *str; uint64_t n; const void *p; size_t len; };
 struct sd_bus { int unused; };
@@ -45,6 +49,7 @@ static struct sd_bus_message pool[256];
 static sd_bus_message_handler_t method_cb, signal_cb;
 static void *method_ctx, *signal_ctx;
 static struct las *cur;
+static int resets_sent, reset_done, reset_gone, reset_noop;
 static int kills, stops, synced, bus_live, bus_events, timeout_fail, process_fail, bypass_arg2, endless, reply_delivered, variant, nth, killed;
 static uint64_t clock_us, bus_timeout, call_timeout_now, call_timeout_max, call_timeouts;
 static unsigned process_calls;
@@ -178,6 +183,7 @@ int sd_bus_call(sd_bus *b,sd_bus_message *m,uint64_t usec,sd_bus_error *e,sd_bus
     assert(b==&bus && m && m->kind==REQ && !strcmp(m->member,"GetUnitByInvocationID") && usec==0 && e && !e->name && out);
     assert(m->nbytes==16 && !memcmp(m->bytes,inv_ok,16));
     bounded(call_timeout_now); record("GetUnitByInvocationID;"); slow("slow:ByInvocation");
+    if (reset_done && reset_gone) { e->name="org.freedesktop.systemd1.NoUnitForInvocationID"; return -ENXIO; }
     if (hit("ByInvocation-missing")) { e->name="org.freedesktop.systemd1.NoUnitForInvocationID"; return -ENXIO; }
     if (hit("ByInvocation-error")) { e->name="org.freedesktop.DBus.Error.AccessDenied"; return -EACCES; }
     int v=hit("ByInvocation") ? variant:0;
@@ -188,7 +194,7 @@ int sd_bus_call(sd_bus *b,sd_bus_message *m,uint64_t usec,sd_bus_error *e,sd_bus
     *out=r; return 1;
 }
 int sd_bus_call_async(sd_bus *b,sd_bus_slot **s,sd_bus_message *m,sd_bus_message_handler_t cb,void *ctx,uint64_t timeout) {
-    assert(b==&bus && m && m->kind==REQ && m->refs==1 && !strcmp(m->member,"Stop") && !strcmp(m->arg,"fail") && cb && ctx==cur);
+    assert(b==&bus && m && m->kind==REQ && m->refs==1 && !strcmp(m->member,"Stop") && !strcmp(m->arg,"fail") && cb && ctx==cur && !cur->reset_mode);
     bounded(timeout); assert(timeout<=2000000);
     /* Stop only after the durable STOP and KILL lines */
     assert(!strcmp(stop_journal(),STOPL KILLL));
@@ -201,7 +207,7 @@ int sd_bus_add_match(sd_bus *b,sd_bus_slot **s,const char *rule,sd_bus_message_h
     match_slot.alive=1; *s=&match_slot; signal_cb=cb; signal_ctx=ctx; return 0;
 }
 int sd_bus_call_method(sd_bus *b,const char *dest,const char *path,const char *iface,const char *member,sd_bus_error *e,sd_bus_message **out,const char *types,...) {
-    assert(b==&bus && !e && out); bounded(call_timeout_now); va_list a; va_start(a,types); sd_bus_message *r=NULL; int rc=1;
+    assert(b==&bus && out && (!e || !strcmp(member,"ResetFailed"))); bounded(call_timeout_now); va_list a; va_start(a,types); sd_bus_message *r=NULL; int rc=1;
     record("%s;",member);
     if (!strcmp(member,"GetNameOwner") || !strcmp(member,"GetConnectionUnixUser")) {
         assert(!strcmp(dest,"org.freedesktop.DBus") && !strcmp(path,"/org/freedesktop/DBus") && !strcmp(iface,"org.freedesktop.DBus") && !strcmp(types,"s"));
@@ -211,8 +217,20 @@ int sd_bus_call_method(sd_bus *b,const char *dest,const char *path,const char *i
     } else if (!strcmp(member,"Subscribe")) {
         assert(!strcmp(dest,":1.42") && !strcmp(path,"/org/freedesktop/systemd1") && !strcmp(iface,"org.freedesktop.systemd1.Manager") && !strcmp(types,""));
         if (hit("Subscribe")) rc=-EACCES; else { r=msg(REPLY); if (hit("Subscribe-trailing")) put_s(r,'s',"x"); }
+    } else if (!strcmp(member,"ResetFailed")) {
+        /* only from a reset handle, only on the invocation path, typed (no
+         * arguments), only after the durable RESET line */
+        assert(cur && cur->reset_mode && las_status(cur)==LAS_UNCERTAIN && las_reset(cur)==-1 &&
+            !strcmp(dest,":1.42") && !strcmp(path,INV_PATH) &&
+            !strcmp(iface,"org.freedesktop.systemd1.Unit") && !strcmp(types,"") && e && !e->name);
+        assert(!strcmp(stop_journal(),RESETL) && synced>0);
+        resets_sent++; slow("slow:ResetFailed");
+        if (hit("ResetFailed-replaced")) { e->name="org.freedesktop.systemd1.NoUnitForInvocationID"; rc=-ENXIO; }
+        else if (hit("ResetFailed")) { e->name="org.freedesktop.DBus.Error.AccessDenied"; rc=-EACCES; }
+        else { reset_done=!reset_noop; r=msg(REPLY); if (hit("ResetFailed-trailing")) put_s(r,'s',"x"); }
     } else {
         /* the only mutation besides Stop: Unit.Kill("all", SIGKILL) on the invocation path */
+        assert(cur && !cur->reset_mode);
         assert(!strcmp(member,"Kill") && !strcmp(dest,":1.42") && !strcmp(path,INV_PATH) && !strcmp(iface,"org.freedesktop.systemd1.Unit") && !strcmp(types,"si"));
         const char *whom=va_arg(a,const char *); int sig=va_arg(a,int); assert(!strcmp(whom,"all") && sig==9);
         assert(!strcmp(stop_journal(),STOPL) && synced>0); /* durable STOP before the first mutation */
@@ -237,7 +255,7 @@ int sd_bus_get_property(sd_bus *b,const char *dest,const char *path,const char *
     if (k==0) put_s(m,'s',v==1 ? "other.service":UNIT);
     else if (k==1) put_y(m,v==2 ? inv_other:inv_ok,v==1 ? 15:16);
     else if (k==2) put_s(m,'s',v==1 ? "/system.slice/other.service":v==2 ? "":v==3 ? CGROUP:v==4 ? long_text:killed ? after_cgroup:CGROUP);
-    else if (k==3) put_s(m,'s',v==1 ? "deactivating":v==2 ? "active":v==3 ? "inactive":v==4 ? "":killed ? after_state:"active");
+    else if (k==3) put_s(m,'s',v==1 ? "deactivating":v==2 ? "active":v==3 ? "inactive":v==4 ? "":reset_done ? "inactive":killed ? after_state:"active");
     else { open_(m,'r',"uo"); put_n(m,'u',v==1 || v==3 ? 9:0); put_s(m,'o',v==1 ? JOB9:v==2 ? "/org/freedesktop/systemd1/job/0":"/"); close_(m); }
     close_(m);
     (void)snprintf(site,sizeof site,"trail:%s",key); if (hit(site)) put_s(m,'s',"x");
@@ -272,6 +290,7 @@ static void reset(const char *f,int n,int v) {
     clock_us=1000000; call_timeout_now=call_timeout_max=call_timeouts=0; slow_to_deadline=0; slow_by=0; method_ctx=signal_ctx=NULL; cur=NULL;
     process_calls=0; trace_n=0; trace[0]=0; qh=qt=0; call_slot.alive=match_slot.alive=0; method_cb=signal_cb=NULL;
     after_state="failed"; after_cgroup="";
+    resets_sent=reset_done=reset_gone=reset_noop=0;
 }
 static int file(char *path,const char *name,const char *content,int flags) {
     snprintf(path,600,"%s/%s",scratch,name); (void)unlink(path);
@@ -699,6 +718,168 @@ static void test_create_changed_before_kill(void) {
     assert(las_begin(s)==-1 && kills==0); mutate_on=0; reason_is(s,LAS_R_CREATE); journal_is(f.stop,STOPL);
     las_close(s); cur=NULL; rewrite(CREATE_JOURNAL); close(f.create); close(f.stop);
 }
+
+/* ---------------- post-absence reset (las_reset_open / las_reset) ---------------- */
+static int absence_token;
+static int absence_gate(void *ctx,const struct lc_entry *e) {
+    assert(ctx==&absence_token && e->slot==1 && e->state==LC_RUNNING && !strcmp(e->launch,LAUNCH)); return hit("absent") ? 0:1;
+}
+/* A stopped anchor: failed (SIGKILL), still loaded, ControlGroup "" (pruned). */
+static void stopped_unit(const char *f,int n,int v) { reset(f,n,v); killed=1; }
+static struct las *reset_opened(struct fds f) {
+    struct las_config c=config(f); struct las *s=NULL; assert(las_reset_open(&c,absence_gate,&absence_token,&s)==0 && s); cur=s; return s;
+}
+enum r_outcome { R_OPEN, R_NOTHING, R_INTENT, R_SENT, R_DONE_LINE, R_RESET };
+/* Stages by what the reset record and the fake systemd saw. */
+static void r_standard(enum r_outcome want,enum las_reason why) {
+    struct fds f=journals(); struct las_config c=config(f); struct las *s=NULL;
+    int rc=las_reset_open(&c,absence_gate,&absence_token,&s);
+    if (want==R_OPEN) { assert(rc==-1 && !s && resets_sent==0); journal_is(f.stop,""); create_intact(); close(f.create); close(f.stop); return; }
+    assert(rc==0 && s && las_status(s)==LAS_NEW); cur=s;
+    rc=las_reset(s); assert(las_reset(s)==-1 && las_begin(s)==-1 && las_poll(s)==-1);
+    assert(kills==0 && stops==0);
+    struct las_receipt r;
+    if (want==R_RESET) {
+        if (rc!=1) fprintf(stderr,"not reset (fault %s nth %d variant %d reason %d)\n",fault,nth,variant,las_reason(s));
+        assert(rc==1 && las_status(s)==LAS_RESET && las_receipt(s,&r)==0 && r.job==0 && !strcmp(r.invocation,INV));
+        int gone=reset_gone || (!strcmp(fault,"ByInvocation-missing") && nth==3);
+        if (strcmp(r.state,gone ? "collected":"inactive")) fprintf(stderr,"receipt %s (fault %s nth %d)\n",r.state,fault,nth);
+        assert(!strcmp(r.state,gone ? "collected":"inactive") && resets_sent==1);
+        journal_is(f.stop,gone ? RESETL DONEGCL:RESETL DONEL);
+    } else {
+        assert(rc==-1 && las_status(s)==LAS_UNCERTAIN && las_receipt(s,&r)==-1);
+        assert(resets_sent==(want>=R_SENT));
+        journal_is(f.stop,want==R_NOTHING ? "":want==R_DONE_LINE ? RESETL DONEL:RESETL);
+    }
+    reason_is(s,why); finish(s,f);
+}
+static const char *const RESET_TRACE=
+    "GetNameOwner;GetConnectionUnixUser;GetUnitByInvocationID;Get:Id;Get:InvocationID;Get:ControlGroup;Get:ActiveState;Get:Job;fsync;"
+    "GetNameOwner;GetConnectionUnixUser;GetUnitByInvocationID;Get:Id;Get:InvocationID;Get:ControlGroup;Get:ActiveState;Get:Job;"
+    "ResetFailed;GetUnitByInvocationID;GetUnitByInvocationID;Get:Id;Get:InvocationID;Get:ControlGroup;Get:ActiveState;Get:Job;"
+    "GetNameOwner;GetConnectionUnixUser;fsync;";
+static void test_reset_success(void) {
+    stopped_unit(NULL,0,0); r_standard(R_RESET,LAS_R_NONE);
+    if (strcmp(trace,RESET_TRACE)) { fprintf(stderr,"reset trace mismatch:\n%s\n",trace); assert(0); }
+    /* rechecks: open, entry, after RESET, after readback, after RESET-DONE; absence: open, entry, after RESET */
+    assert(count("exclusive")==5 && count("absent")==3 && count("GetNameOwner")==3 && count("peer")==3 && synced==2);
+    /* garbage-collected right after the reset: the invocation is gone */
+    stopped_unit(NULL,0,0); reset_gone=1; r_standard(R_RESET,LAS_R_NONE);
+    assert(strstr(trace,"ResetFailed;GetUnitByInvocationID;GetNameOwner;GetConnectionUnixUser;fsync;"));
+    /* inactive (not failed) before, and a still-reported cgroup, are stopped too */
+    stopped_unit(NULL,0,0); after_state="inactive"; r_standard(R_RESET,LAS_R_NONE);
+    stopped_unit(NULL,0,0); after_cgroup=CGROUP; r_standard(R_RESET,LAS_R_NONE);
+}
+static void test_reset_gates(void) {
+    /* authority: open, entry, after RESET (not sent), after readback (sent), after RESET-DONE */
+    static const enum r_outcome excl[]={R_OPEN,R_NOTHING,R_INTENT,R_SENT,R_DONE_LINE,R_RESET};
+    for (int n=1;n<=6;n++) { stopped_unit("exclusive",n,0); r_standard(excl[n-1],n==6 ? LAS_R_NONE:LAS_R_AUTHORITY); }
+    /* absence receipt: open, entry, immediately before the call */
+    static const enum r_outcome abs_[]={R_OPEN,R_NOTHING,R_INTENT,R_RESET};
+    for (int n=1;n<=4;n++) { stopped_unit("absent",n,0); r_standard(abs_[n-1],n==4 ? LAS_R_NONE:LAS_R_ABSENCE); }
+    /* owner bracket: before RESET, before the call, after the readback */
+    static const char *const facets[]={"peer","busid","GetNameOwner","GetConnectionUnixUser","GetNameOwner-trailing","GetConnectionUnixUser-trailing"};
+    static const enum r_outcome own[]={R_NOTHING,R_INTENT,R_SENT,R_RESET};
+    for (size_t k=0;k<6;k++) for (int n=1;n<=4;n++) { stopped_unit(facets[k],n,0); r_standard(own[n-1],n==4 ? LAS_R_NONE:LAS_R_OWNER); }
+    /* never without a gate */
+    stopped_unit(NULL,0,0); struct fds f=journals(); struct las_config c=config(f); struct las *s=(struct las *)1;
+    assert(las_reset_open(&c,NULL,&absence_token,&s)==-1 && !s); assert(las_reset_open(&c,absence_gate,&absence_token,NULL)==-1);
+    close(f.create); close(f.stop);
+}
+/* The exact stopped incarnation, checked before RESET (1) and immediately
+ * before the call (2); post-call readback (3: first lookup, 4: verify). */
+static void test_reset_incarnation(void) {
+    static const struct { const char *site; int v; enum las_reason why; } t[]={
+        {"ByInvocation-missing",0,LAS_R_REPLACED}, {"ByInvocation-error",0,LAS_R_QUERY},
+        {"ByInvocation",1,LAS_R_REPLACED}, {"ByInvocation",2,LAS_R_REPLACED}, {"ByInvocation",3,LAS_R_QUERY},
+        {"prop:Id",1,LAS_R_REPLACED}, {"prop:InvocationID",1,LAS_R_QUERY}, {"prop:InvocationID",2,LAS_R_REPLACED},
+        {"prop:ControlGroup",1,LAS_R_REPLACED}, {"prop:ControlGroup",2,LAS_R_NONE}, {"prop:ControlGroup",3,LAS_R_NONE},
+        {"prop:ControlGroup",4,LAS_R_QUERY},
+        {"prop:ActiveState",1,LAS_R_STATE}, {"prop:ActiveState",2,LAS_R_STATE}, {"prop:ActiveState",3,LAS_R_NONE},
+        {"prop:ActiveState",4,LAS_R_STATE},
+        {"prop:Job",1,LAS_R_JOB}, {"prop:Job",2,LAS_R_JOB}, {"prop:Job",3,LAS_R_JOB},
+    };
+    for (size_t i=0;i<sizeof t/sizeof *t;i++) for (int n=1;n<=2;n++) {
+        stopped_unit(t[i].site,n,t[i].v);
+        if (t[i].why==LAS_R_NONE) r_standard(R_RESET,LAS_R_NONE); else r_standard(n==1 ? R_NOTHING:R_INTENT,t[i].why);
+    }
+    static const char *const keys[]={"Id","InvocationID","ControlGroup","ActiveState","Job"};
+    for (size_t k=0;k<5;k++) for (int n=1;n<=3;n++) {
+        static const enum r_outcome at[]={R_NOTHING,R_INTENT,R_SENT};
+        char site[96];
+        snprintf(site,sizeof site,"trail:%s",keys[k]); stopped_unit(site,n,0); r_standard(at[n-1],LAS_R_QUERY);
+        snprintf(site,sizeof site,"fail:%s",keys[k]); stopped_unit(site,n,0); r_standard(at[n-1],LAS_R_QUERY);
+    }
+    /* post-call readback: the reply is not the outcome; this invocation must be
+     * gone or exactly ours and inactive */
+    stopped_unit("ByInvocation-missing",3,0); r_standard(R_RESET,LAS_R_NONE); /* gone at once = collected */
+    stopped_unit("ByInvocation-missing",4,0); r_standard(R_SENT,LAS_R_REPLACED); /* gone between lookups */
+    stopped_unit("ByInvocation-error",3,0); r_standard(R_SENT,LAS_R_QUERY);
+    stopped_unit("ByInvocation",3,1); r_standard(R_SENT,LAS_R_REPLACED);
+    stopped_unit("ByInvocation",3,2); r_standard(R_SENT,LAS_R_REPLACED);
+    stopped_unit("ByInvocation",3,3); r_standard(R_SENT,LAS_R_QUERY);
+    stopped_unit("ByInvocation",4,1); r_standard(R_SENT,LAS_R_REPLACED);
+    stopped_unit("prop:Id",3,1); r_standard(R_SENT,LAS_R_REPLACED);
+    stopped_unit("prop:InvocationID",3,2); r_standard(R_SENT,LAS_R_REPLACED);
+    stopped_unit("prop:ControlGroup",3,1); r_standard(R_SENT,LAS_R_REPLACED);
+    stopped_unit("prop:ActiveState",3,1); r_standard(R_SENT,LAS_R_STATE);
+    stopped_unit("prop:ActiveState",3,2); r_standard(R_SENT,LAS_R_STATE);
+    stopped_unit("prop:Job",3,1); r_standard(R_SENT,LAS_R_JOB);
+    stopped_unit(NULL,0,0); reset_noop=1; r_standard(R_SENT,LAS_R_STATE); /* still failed after the reply */
+    /* an active (not stopped) unit is never reset */
+    reset(NULL,0,0); r_standard(R_NOTHING,LAS_R_STATE);
+}
+static void test_reset_faults(void) {
+    static const struct { const char *f; int n; enum r_outcome o; enum las_reason r; } t[]={
+        {"new",1,R_NOTHING,LAS_R_BUS}, {"start",1,R_NOTHING,LAS_R_BUS}, {"clock",1,R_NOTHING,LAS_R_DEADLINE},
+        {"fsync",1,R_INTENT,LAS_R_JOURNAL}, {"fsync",2,R_DONE_LINE,LAS_R_JOURNAL},
+        {"ResetFailed",1,R_SENT,LAS_R_RESET}, {"ResetFailed-trailing",1,R_SENT,LAS_R_RESET},
+        {"ResetFailed-replaced",1,R_SENT,LAS_R_REPLACED}, /* replacement at the call: path no longer resolves */
+        {"slow:ResetFailed",1,R_SENT,LAS_R_DEADLINE},
+        {"slow:Job",2,R_INTENT,LAS_R_DEADLINE},
+        {"slow:GetConnectionUnixUser",3,R_SENT,LAS_R_DEADLINE}, /* last call: only the post-readback check sees it */
+    };
+    for (size_t i=0;i<sizeof t/sizeof *t;i++) { stopped_unit(t[i].f,t[i].n,0); r_standard(t[i].o,t[i].r); }
+    stopped_unit("slow:GetConnectionUnixUser",3,0); slow_to_deadline=1; r_standard(R_SENT,LAS_R_DEADLINE);
+    /* failed RESET fsync: the record is never reusable */
+    stopped_unit("fsync",1,0); struct fds f=journals(); struct las *s=reset_opened(f);
+    assert(las_reset(s)==-1 && resets_sent==0); reason_is(s,LAS_R_JOURNAL); journal_is(f.stop,RESETL); las_close(s); cur=NULL;
+    { struct las_config c=config(f); struct las *again=NULL; assert(las_reset_open(&c,absence_gate,&absence_token,&again)==-1 && !again); }
+    create_intact(); close(f.create); close(f.stop);
+    /* a clock failure at ANY read is DEADLINE, never RESET */
+    stopped_unit(NULL,0,0); r_standard(R_RESET,LAS_R_NONE); int total=count("clock"); assert(total>10);
+    for (int n=1;n<=total;n++) {
+        stopped_unit("clock",n,0); f=journals(); s=reset_opened(f);
+        assert(las_reset(s)==-1 && las_status(s)==LAS_UNCERTAIN); reason_is(s,LAS_R_DEADLINE); finish(s,f);
+    }
+    /* create journal changed / reset record written between open and reset: nothing attempted */
+    stopped_unit(NULL,0,0); f=journals(); s=reset_opened(f);
+    { int fd=open(create_path,O_WRONLY|O_APPEND|O_CLOEXEC); assert(fd>=0 && write(fd,"x",1)==1); close(fd); }
+    assert(las_reset(s)==-1 && !bus_live && resets_sent==0); reason_is(s,LAS_R_CREATE); journal_is(f.stop,""); las_close(s); cur=NULL;
+    rewrite(CREATE_JOURNAL); close(f.create); close(f.stop);
+    stopped_unit(NULL,0,0); f=journals(); s=reset_opened(f); assert(write(f.stop,"x",1)==1);
+    assert(las_reset(s)==-1 && resets_sent==0); reason_is(s,LAS_R_JOURNAL); journal_is(f.stop,"x"); las_close(s); cur=NULL;
+    close(f.create); close(f.stop);
+}
+/* create journal changed after the durable RESET line (3rd exclusive call):
+ * the pre-call check refuses, ResetFailed is never sent */
+static void test_reset_create_changed(void) {
+    stopped_unit(NULL,0,0); struct fds f=journals(); struct las_config c=config(f); c.exclusive=authority_mutating; struct las *s=NULL;
+    mutate_on=1; assert(las_reset_open(&c,absence_gate,&absence_token,&s)==0); cur=s;
+    assert(las_reset(s)==-1 && resets_sent==0); mutate_on=0; reason_is(s,LAS_R_CREATE); journal_is(f.stop,RESETL);
+    las_close(s); cur=NULL; rewrite(CREATE_JOURNAL); close(f.create); close(f.stop);
+}
+static void test_reset_api(void) {
+    /* a stop handle never resets; a reset handle never stops/kills */
+    stopped_unit(NULL,0,0); struct fds f=journals(); struct las *s=opened(f);
+    assert(las_reset(s)==-1 && las_status(s)==LAS_NEW && resets_sent==0); finish(s,f);
+    stopped_unit(NULL,0,0); f=journals(); s=reset_opened(f);
+    assert(las_begin(s)==-1 && las_status(s)==LAS_NEW && !bus_live && kills==0);
+    assert(las_fd(s)==-1 && las_poll(s)==-1);
+    assert(las_reset(s)==1 && las_fd(s)==-1 && las_events(s)==-1 && las_poll(s)==-1 && las_reset(s)==-1);
+    finish(s,f);
+    assert(las_reset(NULL)==-1);
+}
 static void setup(void) {
     assert(lsc_test_journal_uid==0 && lsc_test_create_uid==0); /* the fixture defaults match the production pins */
     assert(getcwd(scratch,sizeof scratch-32)); strcat(scratch,"/fixture-stop-XXXXXX"); assert(mkdtemp(scratch)); assert(chmod(scratch,0700)==0);
@@ -711,9 +892,11 @@ static void setup(void) {
 static void teardown(void) { (void)unlink(create_path); (void)unlink(stop_path); assert(rmdir(scratch)==0); }
 int main(void) {
     setup();
-    void (*tests[])(void)={test_open,test_success,test_authority_and_owner,test_incarnation,test_begin_faults,test_events,test_dispatch,test_api,test_create_changed_before_kill};
+    void (*tests[])(void)={test_open,test_success,test_authority_and_owner,test_incarnation,test_begin_faults,test_events,test_dispatch,test_api,test_create_changed_before_kill,
+        test_reset_success,test_reset_gates,test_reset_incarnation,test_reset_faults,test_reset_api,test_reset_create_changed};
     for (size_t i=0;i<sizeof tests/sizeof *tests;i++) tests[i]();
     teardown();
     puts("stop: fake-bus incarnation, authority/owner sweeps, journal, event, dispatch and budget tests passed");
+    puts("reset: post-absence ResetFailed gates, incarnation, readback, faults and API tests passed");
     return 0;
 }

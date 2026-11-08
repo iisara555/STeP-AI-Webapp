@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 #include <sys/vfs.h>
 #include <unistd.h>
 /* Minimal public stable sd-bus ABI declarations. Runtime library is installed
@@ -133,10 +134,20 @@ static int events(void *ctx,int group,int *populated) {
     }
     return found==1 ? 0:-1;
 }
+/* The held original directory was rmdir'd: the VFS marks a removed directory
+ * dead (S_DEAD) and getdents on ANY descriptor of it fails with ENOENT, which a
+ * live directory never does (the dead check precedes the offset). st_nlink is NOT usable: kernfs (cgroupfs)
+ * recomputes it as subdirs+2 on every stat, even after removal. A cgroup v2
+ * rmdir succeeds only while unpopulated and without live children. This check
+ * is used for post-absence metadata cleanup only, not to replace populated 0.
+ * Any other result,
+ * including other errors (O_PATH: EBADF), is not proof. */
 static int removed(void *ctx,int group) {
-    (void)ctx; struct stat st;
-    return fstat(group,&st)<0 ? -1:st.st_nlink==0;
+    (void)ctx; char buf[512];
+    long n=syscall(SYS_getdents64,group,buf,sizeof buf);
+    return n<0 && errno==ENOENT;
 }
+int lso_removed(void *ctx,int group) { return removed(ctx,group); }
 static int valid(struct lso *o,const struct lc_entry *e) {
     if (!e || !exact(e,&o->c.entry) || !o->c.lifetime_fenced || o->c.lifetime_fenced(o->c.context,e)!=1) return 0;
     struct stat st; char boot[38]={0};
@@ -184,9 +195,16 @@ int lso_absent(void *ctx,const struct lc_entry *e) {
     struct lso *o=ctx; struct lso_snapshot before,after;
     if (!o || !valid(o,e)) return 0;
     if (o->absent) return 1; /* same fenced lifetime; cleanup retry, not new observation */
+    /* ControlGroup: the launch-time path, or "" once systemd pruned the stopped
+     * unit's cgroup (systemd 259 reports "" after unit_release_cgroup). Never
+     * evidence by itself: absence rests on the pinned descriptor below. Any
+     * other nonempty path is a different cgroup. */
     if (!read_snapshot(o,&before) || before.missing || before.job ||
-        strcmp(before.invocation,o->c.invocation) || strcmp(before.cgroup,o->c.cgroup) ||
+        strcmp(before.invocation,o->c.invocation) || (strcmp(before.cgroup,o->c.cgroup) && before.cgroup[0]) ||
         (strcmp(before.state,"inactive") && strcmp(before.state,"failed"))) return 0;
+    /* The original pinned subtree must still yield populated 0 (including
+     * descendants). Removal is cleanup evidence only, never a substitute for
+     * a missed emptiness observation. */
     int populated=-1;
     if (o->ops.events(o->ops_context,o->group,&populated)<0 || populated!=0) return 0;
     if (!read_snapshot(o,&after) || after.missing || after.job ||

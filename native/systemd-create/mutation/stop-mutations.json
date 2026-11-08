@@ -338,8 +338,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "    if (!budget(s)) return LAS_R_DEADLINE;\n    if (sd_bus_message_new_method_call(s->bus,&m,s->c.manager,MANAGER,MI,\"GetUnitByInvocationID\")",
-    "after_repl": "    if (sd_bus_message_new_method_call(s->bus,&m,s->c.manager,MANAGER,MI,\"GetUnitByInvocationID\")"
+    "after_find": "ly=NULL; sd_bus_error e={0}; const char *p=NULL; enum las_reason r=LAS_R_QUERY;\n    if (!budget(s)) return LAS_R_DEADLINE;\n    if (sd_bus_message_new_method_call(s->bus,&m,s->c.manager,MANAGER,MI,\"GetUnitByInvocationID\")<0 ||\n        sd_bus_message_append_array(m,'y',s->invocation,16)<0) goto out;\n ",
+    "after_repl": "ly=NULL; sd_bus_error e={0}; const char *p=NULL; enum las_reason r=LAS_R_QUERY;\n    if (sd_bus_message_new_method_call(s->bus,&m,s->c.manager,MANAGER,MI,\"GetUnitByInvocationID\")<0 ||\n        sd_bus_message_append_array(m,'y',s->invocation,16)<0) goto out;\n "
   },
   {
     "id": "S40",
@@ -374,8 +374,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "|| !p || sd_bus_message_at_end(reply,1)<=0) goto out;",
-    "after_repl": "|| !p) goto out;"
+    "after_find": "ON)) r=LAS_R_REPLACED; goto out; }\n    if (sd_bus_message_read(reply,\"o\",&p)<=0 || !p || sd_bus_message_at_end(reply,1)<=0) goto out;\n    r=strcmp(p,s->invocation_path) ? LAS_R_REPLACED:LAS_R_NONE;\nout:\n    sd_bus",
+    "after_repl": "ON)) r=LAS_R_REPLACED; goto out; }\n    if (sd_bus_message_read(reply,\"o\",&p)<=0 || !p) goto out;\n    r=strcmp(p,s->invocation_path) ? LAS_R_REPLACED:LAS_R_NONE;\nout:\n    sd_bus"
   },
   {
     "id": "S44",
@@ -383,8 +383,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "r=strcmp(p,s->invocation_path) ? LAS_R_REPLACED:LAS_R_NONE;",
-    "after_repl": "r=LAS_R_NONE;"
+    "after_find": "cmp(e.name,NO_INVOCATION)) r=LAS_R_REPLACED; goto out; }\n    if (sd_bus_message_read(reply,\"o\",&p)<=0 || !p || sd_bus_message_at_end(reply,1)<=0) goto out;\n    r=strcmp(p,s->invocation_path) ? LAS_R_REPLACED:LAS_R_NONE;\nout:\n    sd_bus_error_free(&e); sd_bus_message_unref(reply); sd_bus_message_unref(m); return r;\n}\nenum phase { BEFORE, AFTER };\n/* Exact incarnation: invocatio",
+    "after_repl": "cmp(e.name,NO_INVOCATION)) r=LAS_R_REPLACED; goto out; }\n    if (sd_bus_message_read(reply,\"o\",&p)<=0 || !p || sd_bus_message_at_end(reply,1)<=0) goto out;\n    r=LAS_R_NONE;\nout:\n    sd_bus_error_free(&e); sd_bus_message_unref(reply); sd_bus_message_unref(m); return r;\n}\nenum phase { BEFORE, AFTER };\n/* Exact incarnation: invocatio"
   },
   {
     "id": "S45",
@@ -833,8 +833,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "    if (!t) { r=LAS_R_DEADLINE; goto fail; }\n    s->deadline",
-    "after_repl": "    s->deadline"
+    "after_find": " r;\n    sd_bus_message *sub=NULL, *kill=NULL, *stop=NULL;\n    uint64_t t=now();\n    if (!t) { r=LAS_R_DEADLINE; goto fail; }\n    s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!crea",
+    "after_repl": " r;\n    sd_bus_message *sub=NULL, *kill=NULL, *stop=NULL;\n    uint64_t t=now();\n    s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!crea"
   },
   {
     "id": "S98",
@@ -842,8 +842,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "    s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n",
-    "after_repl": "    s->deadline=t+ATTEMPT_US;\n"
+    "after_find": " *stop=NULL;\n    uint64_t t=now();\n    if (!t) { r=LAS_R_DEADLINE; goto fail; }\n    s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if (sd_bus_new(",
+    "after_repl": " *stop=NULL;\n    uint64_t t=now();\n    if (!t) { r=LAS_R_DEADLINE; goto fail; }\n    s->deadline=t+ATTEMPT_US;\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if (sd_bus_new("
   },
   {
     "id": "S99",
@@ -851,8 +851,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if (sd_bus_new",
-    "after_repl": "    if (sd_bus_new"
+    "after_find": "  s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,\"unix:path=/run/dbus/system_bus_socket\"",
+    "after_repl": "  s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,\"unix:path=/run/dbus/system_bus_socket\""
   },
   {
     "id": "S100",
@@ -860,8 +860,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "        sd_bus_set_bus_client(s->bus,1)<0 || sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }",
-    "after_repl": "        sd_bus_set_bus_client(s->bus,1)<0) { r=LAS_R_BUS; goto fail; }"
+    "after_find": "s)<0 || sd_bus_set_address(s->bus,\"unix:path=/run/dbus/system_bus_socket\")<0 ||\n        sd_bus_set_bus_client(s->bus,1)<0 || sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: a replaced/inactive/busy unit is refused wit",
+    "after_repl": "s)<0 || sd_bus_set_address(s->bus,\"unix:path=/run/dbus/system_bus_socket\")<0 ||\n        sd_bus_set_bus_client(s->bus,1)<0) { r=LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: a replaced/inactive/busy unit is refused wit"
   },
   {
     "id": "S101",
@@ -923,8 +923,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "    if (!journal_empty(s->fd) || journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }",
-    "after_repl": "    if (journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }"
+    "after_find": "try.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (!journal_empty(s->fd) || journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    /* 3. Immediately before acting: authority, create evidence, bus/manager\n  ",
+    "after_repl": "try.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    /* 3. Immediately before acting: authority, create evidence, bus/manager\n  "
   },
   {
     "id": "S108",
@@ -932,8 +932,8 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "    if (!journal_empty(s->fd) || journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }",
-    "after_repl": "    if (!journal_empty(s->fd)) { r=LAS_R_JOURNAL; goto fail; }\n    (void)journal(s,line);"
+    "after_find": "try.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (!journal_empty(s->fd) || journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    /* 3. Immediately before acting: authority, create evidence, bus/manager\n  ",
+    "after_repl": "try.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (!journal_empty(s->fd)) { r=LAS_R_JOURNAL; goto fail; }\n    (void)journal(s,line);\n    /* 3. Immediately before acting: authority, create evidence, bus/manager\n  "
   },
   {
     "id": "S109",
@@ -1310,7 +1310,7 @@
     "file": "stop.c",
     "build": ["make", "-s", "test-stop"],
     "run": ["./test-stop"],
-    "after_find": "if (!s || !r || s->state!=LAS_STOPPED) return -1;",
+    "after_find": "if (!s || !r || (s->state!=LAS_STOPPED && s->state!=LAS_RESET)) return -1;",
     "after_repl": "if (!s || !r) return -1;"
   },
   {

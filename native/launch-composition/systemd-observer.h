@@ -52,4 +52,5 @@ int lso_open_with_ops(const struct lso_config *, const struct lso_ops *, void *,
  * root system-bus peer, expected root manager owner bracketing GetUnit and
  * Get(ControlGroup/ActiveState/InvocationID/Job). Never mutates systemd. */
 int lso_bus_snapshot(void *, const char *unit, const char *manager, struct lso_snapshot *);
+int lso_removed(void *, int group);
 #endif

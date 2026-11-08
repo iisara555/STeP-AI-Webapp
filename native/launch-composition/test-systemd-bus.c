@@ -58,19 +58,21 @@ int sd_bus_get_property_string(sd_bus *b,const char *dest,const char *path,const
     (void)b; (void)dest; (void)path; (void)error;
     assert(!strcmp(iface,!strcmp(property,"ControlGroup") ? "org.freedesktop.systemd1.Service":"org.freedesktop.systemd1.Unit"));
     assert(!strcmp(property,"ControlGroup") || !strcmp(property,"ActiveState"));
-    *out=strdup(!strcmp(property,"ControlGroup") ? "/protected.slice/original.service":"inactive"); assert(*out);
+    /* mode 11: systemd 259 reports "" for a stopped unit whose cgroup was pruned */
+    *out=strdup(!strcmp(property,"ControlGroup") ? (mode==11 ? "":"/protected.slice/original.service"):"inactive"); assert(*out);
     return mode==6 ? -EIO:0;
 }
 int main(void) {
-    for (mode=0;mode<11;mode++) {
+    for (mode=0;mode<12;mode++) {
         owners=0; struct lso_snapshot s;
         int r=snapshot(NULL,"fixed.service",":1.42",&s);
         if (mode==0 || mode==7) {
             assert(r==0 && !s.missing && !strcmp(s.invocation,"cccccccccccccccccccccccccccccccc"));
             assert(s.job==(mode==7 ? 42u:0u));
         } else if (mode==2) assert(r==0 && s.missing==1);
+        else if (mode==11) assert(r==0 && !s.missing && s.cgroup[0]==0 && !strcmp(s.state,"inactive"));
         else assert(r<0);
         printf("ok - sd-bus ABI fixture %u\n",mode);
     }
-    assert(freed==11); return 0;
+    assert(freed==12); return 0;
 }

@@ -21,7 +21,7 @@ struct lcr {
     struct lcr_config c;
     struct lso_ops ops;
     void *ops_context;
-    int production, fd, absent, poisoned, seen;
+    int production, fd, absent, poisoned, seen, reset; /* reset: 0 not attempted, 1 done, -1 failed */
     struct lso *observer;
     size_t seen_length;
     char seen_bytes[LCR_JOURNAL_MAX];
@@ -185,9 +185,14 @@ static enum lcr_reason classify(struct lcr *h,const struct lcr_journal *j,int *o
     if (strcmp(s.bus_id,j->bus_id)) return LCR_R_BUS;
     if (strcmp(s.manager,j->manager)) return LCR_R_MANAGER;
     if (s.missing) return LCR_R_COLLECTED;
-    if (strcmp(s.invocation,j->invocation) || strcmp(s.cgroup,j->cgroup)) return LCR_R_INVOCATION;
+    /* ControlGroup must be the journal's path, or "" for a stopped unit whose
+     * cgroup systemd pruned (systemd 259). "" is never evidence: a candidate
+     * still needs the observer's pinned-descriptor proof. Another nonempty
+     * path, or "" on an active unit, is not this incarnation. */
+    int exact_cgroup=!strcmp(s.cgroup,j->cgroup);
+    if (strcmp(s.invocation,j->invocation) || (!exact_cgroup && s.cgroup[0])) return LCR_R_INVOCATION;
     if (s.job) return LCR_R_TRANSIENT;
-    if (!strcmp(s.state,"active")) { *out=C_LIVE; return LCR_R_NONE; }
+    if (!strcmp(s.state,"active")) { if (!exact_cgroup) return LCR_R_INVOCATION; *out=C_LIVE; return LCR_R_NONE; }
     if (!strcmp(s.state,"inactive") || !strcmp(s.state,"failed")) { *out=C_CANDIDATE; return LCR_R_NONE; }
     return LCR_R_TRANSIENT;
 }
@@ -241,6 +246,19 @@ int lcr_reconcile(struct lcr *h,enum lcr_verdict *v,enum lcr_reason *r) {
     if (!h->absent) {
         if (lso_absent(h->observer,&e)!=1) return verdict(v,r,LCR_UNKNOWN,LCR_R_UNPROVEN,0);
         h->absent=1;
+    }
+    /* Separately gated post-absence step, only while the exact unit is still
+     * loaded (why NONE = candidate; a collected unit never reaches it). One
+     * attempt per handle, consumed before the call; the receipt, fence and
+     * pins are re-validated immediately before it. */
+    if (why==LCR_R_NONE && h->c.reset) {
+        if (h->reset<0) return verdict(v,r,LCR_UNKNOWN,LCR_R_RESET,0);
+        if (!h->reset) {
+            if (lso_absent(h->observer,&e)!=1) return verdict(v,r,LCR_UNKNOWN,LCR_R_UNPROVEN,0);
+            h->reset=-1;
+            if (h->c.reset(h->c.reset_context,&e,&j,lso_absent,h->observer)!=1) return verdict(v,r,LCR_UNKNOWN,LCR_R_RESET,0);
+            h->reset=1;
+        }
     }
     /* Release only inside the lifecycle ledger, after absence AND cleanup. */
     if (lso_reconcile(h->observer,h->c.owner,h->c.slot)<0) return verdict(v,r,LCR_UNKNOWN,LCR_R_UNPROVEN,0);

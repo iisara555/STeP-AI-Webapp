@@ -87,7 +87,7 @@ clean:
 # Delete each guarded check in a scratch copy and require its check to fail:
 # mutations.json -> test-create; pin-mutations.json (pin-scan.sh, Makefile,
 # hook marker/#error) -> make pin-check-phony (runs pin-check and the negatives).
-MUTATION_LISTS = mutation/mutations.json mutation/pin-mutations.json mutation/stop-mutations.json
+MUTATION_LISTS = mutation/mutations.json mutation/pin-mutations.json mutation/stop-mutations.json mutation/reset-mutations.json
 mutation:
 	@d=$$(mktemp -d) && s=0 && for l in $(MUTATION_LISTS); do \
 	  python3 mutation/run.py $(CURDIR)/../.. after $$l $$d/after.json >> $$d/log || s=1; done; \

@@ -13,12 +13,36 @@ struct rfx {
     struct lc_entry e;
     struct lcr_config c;
     struct lso_snapshot s;
-    int fenced, error, snapshots, events_calls;
+    int fenced, error, snapshots, events_calls, fence_calls, fence_fail_at, resets, reset_result, reset_collects;
     char unit[100], intent[600], job[80], anchor[300], full[1024];
     size_t intent_n, job_n, full_n;
 };
 static int rfence(void *ctx,const struct lc_entry *e) {
-    struct rfx *f=ctx; return exact(e,&f->e) ? f->fenced:0;
+    struct rfx *f=ctx; f->fence_calls++;
+    if (f->fence_fail_at && f->fence_calls==f->fence_fail_at) return 0;
+    return exact(e,&f->e) ? f->fenced:0;
+}
+/* Fake post-absence reset step (the real one is systemd-create las_reset):
+ * asserts the journal identity it is given and that the absence gate it must
+ * honour holds for this entry only; success models ResetFailed -> inactive
+ * (GC pending) or -> garbage-collected. */
+static int rreset(void *ctx,const struct lc_entry *e,const struct lcr_journal *j,
+    int (*gate)(void *,const struct lc_entry *),void *gate_ctx) {
+    struct rfx *f=ctx; f->resets++;
+    assert(exact(e,&f->e) && e->state==LC_FENCED && j->job==7 && !strcmp(j->invocation,INV) &&
+        !strcmp(j->manager,MGR) && !strcmp(j->bus_id,BUS) && !strcmp(j->unit,f->unit) && j->slot==1);
+    assert(gate && gate(gate_ctx,e)==1);
+    struct lc_entry other=*e; other.launch[0]=other.launch[0]=='f' ? 'e':'f';
+    assert(gate(gate_ctx,&other)==0);
+    if (f->reset_result==1) {
+        if (f->reset_collects) {
+            assert(unlinkat(f->c.cgroup_fd,"cgroup.events",0)==0);
+            assert(unlinkat(f->f.quota.base,"original-cgroup",AT_REMOVEDIR)==0);
+            f->s.missing=1; f->s.invocation[0]=0; f->s.state[0]=0;
+        }
+        else strcpy(f->s.state,"inactive");
+    }
+    return f->reset_result;
 }
 static int rsnap(void *ctx,const char *unit,const char *manager,struct lso_snapshot *s) {
     struct rfx *f=ctx; f->snapshots++;
@@ -34,10 +58,8 @@ static int revents(void *ctx,int group,int *populated) {
     if (!strcmp(b,"populated 1\n")) { *populated=1; return 0; }
     return -1;
 }
-static int rremoved(void *ctx,int group) {
-    (void)ctx; struct stat st; return fstat(group,&st)<0 ? -1:st.st_nlink==0;
-}
-static const struct lso_ops OPS={rsnap,revents,rremoved};
+/* removed = NULL: the observer's production check (held directory rmdir'd). */
+static const struct lso_ops OPS={rsnap,revents,NULL};
 static void put_journal(struct rfx *f,const char *bytes,size_t n) {
     assert(ftruncate(f->c.journal_fd,0)==0);
     assert(n==0 || pwrite(f->c.journal_fd,bytes,n,0)==(ssize_t)n);
@@ -143,6 +165,109 @@ static void absent_proven(void) {
     assert(lco_prepare(f.f.owner,&f.f.spec,&next)==0 && strcmp(next.container,f.e.container));
     rfinish(&f);
 }
+/* Empty stopped ControlGroup is not evidence: retain the original descriptor's
+ * populated-0 observation before pruning; then prove removal independently. */
+static void stopped(struct rfx *f) {
+    strcpy(f->s.state,"failed"); f->s.cgroup[0]=0;
+    events(f,"populated 0\n");
+}
+static void prune(struct rfx *f) {
+    assert(unlinkat(f->c.cgroup_fd,"cgroup.events",0)==0);
+    assert(unlinkat(f->f.quota.base,"original-cgroup",AT_REMOVEDIR)==0);
+}
+static void stopped_anchor(void) {
+    struct rfx f; rinit(&f); stopped(&f);
+    struct lcr *h=NULL; assert(lcr_open_with_ops(&f.c,&OPS,&f,&h)==0);
+    enum lcr_verdict v; enum lcr_reason r;
+    /* Absence proven from pinned populated 0; the failed unit is
+     * still loaded (no reset step configured), so cleanup is unproven. */
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_UNPROVEN);
+    assert(ledger_state(&f)==LC_FENCED && f.events_calls==1);
+    prune(&f); f.s.missing=1; f.s.invocation[0]=0; f.s.state[0]=0;
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_ABSENT_PROVEN && r==LCR_R_NONE && ledger_state(&f)==LC_RELEASED);
+    lcr_close(h); rfinish(&f);
+    /* A missing events file on a LIVE directory is no evidence: no receipt, so
+     * a later NoSuchUnit + removed directory is still COLLECTED, never proof. */
+    rinit(&f); strcpy(f.s.state,"failed"); f.s.cgroup[0]=0;
+    assert(unlinkat(f.c.cgroup_fd,"cgroup.events",0)==0);
+    assert(lcr_open_with_ops(&f.c,&OPS,&f,&h)==0);
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_UNPROVEN);
+    assert(unlinkat(f.f.quota.base,"original-cgroup",AT_REMOVEDIR)==0);
+    f.s.missing=1; f.s.invocation[0]=0; f.s.state[0]=0;
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_COLLECTED && ledger_state(&f)==LC_FENCED);
+    lcr_close(h); rfinish(&f);
+    /* Same with "populated 0" readable and the cgroup path still reported. */
+    rinit(&f); absent_ready(&f); f.s.cgroup[0]=0;
+    assert(lcr_open_with_ops(&f.c,&OPS,&f,&h)==0);
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_UNPROVEN && f.events_calls==1);
+    lcr_close(h); rfinish(&f);
+}
+static void with_reset(struct rfx *f,int result,int collects) {
+    f->c.reset=rreset; f->c.reset_context=f; f->reset_result=result; f->reset_collects=collects;
+}
+static void reset_step(void) {
+    enum lcr_verdict v; enum lcr_reason r; struct lcr *h=NULL; struct rfx f;
+    /* 1. ResetFailed after this handle's own receipt; GC'd at once -> one call proves all. */
+    rinit(&f); stopped(&f); with_reset(&f,1,1);
+    assert(lcr_open_with_ops(&f.c,&OPS,&f,&h)==0);
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_ABSENT_PROVEN && r==LCR_R_NONE && f.resets==1);
+    assert(ledger_state(&f)==LC_RELEASED); lcr_close(h); rfinish(&f);
+    /* 2. Reset done but GC pending: cleanup unproven, never a second reset. */
+    rinit(&f); stopped(&f); with_reset(&f,1,0);
+    assert(lcr_open_with_ops(&f.c,&OPS,&f,&h)==0);
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_UNPROVEN && f.resets==1);
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_UNPROVEN && f.resets==1);
+    assert(ledger_state(&f)==LC_FENCED);
+    prune(&f); f.s.missing=1; f.s.invocation[0]=0; f.s.state[0]=0;
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_ABSENT_PROVEN && f.resets==1 && f.events_calls==1);
+    lcr_close(h); rfinish(&f);
+    /* 3. Any reset error is UNKNOWN (RESET), sticky on the handle, capacity
+     *    retained; only an independent later cleanup proof releases. */
+    static const int failures[]={0,-1,2};
+    for (size_t i=0;i<3;i++) {
+        rinit(&f); stopped(&f); with_reset(&f,failures[i],0);
+        assert(lcr_open_with_ops(&f.c,&OPS,&f,&h)==0);
+        assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_RESET && f.resets==1);
+        assert(ledger_state(&f)==LC_FENCED);
+        fresh_spec(&f.f,2); memcpy(f.f.spec.workspace,ws_b,37);
+        struct lc_entry next; assert(lco_prepare(f.f.owner,&f.f.spec,&next)<0);
+        assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_RESET && f.resets==1);
+        prune(&f); f.s.missing=1; f.s.invocation[0]=0; f.s.state[0]=0;
+        assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_ABSENT_PROVEN && f.resets==1);
+        lcr_close(h); rfinish(&f);
+    }
+    /* 4. No receipt, no reset: populated subtree, live anchor, collected unit,
+     *    another invocation, lost descriptor. */
+    for (int k=0;k<5;k++) {
+        rinit(&f); with_reset(&f,1,1);
+        enum lcr_reason want=LCR_R_UNPROVEN; enum lcr_verdict wantv=LCR_UNKNOWN;
+        if (k==0) { strcpy(f.s.state,"failed"); f.s.cgroup[0]=0; events(&f,"populated 1\n"); }
+        if (k==1) wantv=LCR_ANCHORED, want=LCR_R_NONE;
+        if (k==2) { stopped(&f); f.s.missing=1; want=LCR_R_COLLECTED; }
+        if (k==3) { stopped(&f); f.s.invocation[0]='d'; want=LCR_R_INVOCATION; }
+        if (k==4) { absent_ready(&f); close(f.c.cgroup_fd); f.c.cgroup_fd=-1; want=LCR_R_NO_PIN; }
+        assert(once(&f,&r)==wantv && r==want && f.resets==0); rfinish(&f);
+    }
+    /* 5. Lifetime fence lost after the receipt, right before the reset: the
+     *    gate re-validates (receipt + fence + pins) and nothing is sent. The
+     *    absence observation itself checks the fence twice (calls 1, 2). */
+    rinit(&f); stopped(&f); with_reset(&f,1,0); f.fence_fail_at=3;
+    assert(lcr_open_with_ops(&f.c,&OPS,&f,&h)==0);
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_UNPROVEN && f.resets==0 && f.fence_calls==3);
+    /* receipt kept: the unit later disappears on its own -> cleanup proof, no reset */
+    prune(&f); f.s.missing=1; f.s.invocation[0]=0; f.s.state[0]=0;
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_ABSENT_PROVEN && f.resets==0 && f.events_calls==1);
+    lcr_close(h); rfinish(&f);
+    /* 6. After the receipt, a replacement invocation is never reset. */
+    rinit(&f); stopped(&f); with_reset(&f,1,0); f.fence_fail_at=3;
+    assert(lcr_open_with_ops(&f.c,&OPS,&f,&h)==0);
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_UNPROVEN && f.resets==0);
+    f.s.invocation[0]='d';
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_INVOCATION && f.resets==0);
+    f.s.invocation[0]='c'; /* same invocation again, fence intact: the one reset now runs */
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_UNKNOWN && r==LCR_R_UNPROVEN && f.resets==1);
+    lcr_close(h); rfinish(&f);
+}
 static void collected_new_handle(void) {
     /* A fresh handle (e.g. after another crash) has no absence receipt. */
     struct rfx f; rinit(&f);
@@ -215,13 +340,24 @@ static void unknown_case(unsigned which) {
         char b[1100]; memcpy(b,f.full,f.full_n+1); char *p=strstr(b,f.e.boot); assert(p); p[35]=p[35]=='1' ? '2':'1';
         char boot[38]; memcpy(boot,p,36); boot[36]='\n'; boot[37]=0; assert(pwrite(f.c.boot_fd,boot,37,0)==37);
         put_journal(&f,b,f.full_n); want=LCR_R_LEDGER; break; }
+    /* Empty ControlGroup (systemd 259 after a stopped unit's cgroup is pruned). */
+    case 46: f.s.cgroup[0]=0; want=LCR_R_INVOCATION; break; /* active units always report their cgroup */
+    case 47: strcpy(f.s.state,"failed"); f.s.cgroup[0]=0; events(&f,"populated 1\n"); want=LCR_R_UNPROVEN; break;
+    case 48: stopped(&f); strcpy(f.s.cgroup,"/system.slice/other.service"); want=LCR_R_INVOCATION; break;
+    case 49: strcpy(f.s.state,"failed"); f.s.cgroup[0]=0;
+        assert(unlinkat(f.c.cgroup_fd,"cgroup.events",0)==0); want=LCR_R_UNPROVEN; break; /* not removed */
+    case 50: stopped(&f); strcpy(f.s.state,"deactivating"); want=LCR_R_TRANSIENT; break;
+    case 51: stopped(&f); f.s.job=9; want=LCR_R_TRANSIENT; break;
+    case 52: stopped(&f); f.s.invocation[0]='d'; want=LCR_R_INVOCATION; break;
+    case 53: stopped(&f); f.fenced=0; want=LCR_R_UNPROVEN; break;
+    case 54: stopped(&f); f.c.cgroup_inode++; want=LCR_R_UNPROVEN; break;
     default: abort();
     }
     expect_unknown(&f,want);
-    if (which==31 || which==43) assert(f.events_calls==1); /* one absence observation, no re-observation */
+    if (which==31 || which==43 || which==47 || which==49) assert(f.events_calls==1); /* one absence observation, no re-observation */
     /* Incomplete/rejected journals and changed generations never reach the observer's proof. */
-    if (which<=16 || (which>=21 && which<=28) || (which>=32 && which!=43)) assert(f.events_calls==0);
-    if (which<=5 || (which>=32 && which<=35) || (which>=37 && which!=43)) assert(f.snapshots==0);
+    if (which<=16 || (which>=21 && which<=28) || (which>=32 && which!=43 && which!=47 && which!=49 && which!=53)) assert(f.events_calls==0);
+    if (which<=5 || (which>=32 && which<=35) || (which>=37 && which<=45 && which!=43)) assert(f.snapshots==0);
     rfinish(&f);
 }
 static void changed_after_open(void) {
@@ -395,7 +531,9 @@ int main(void) {
     anchored(); puts("ok - ANCHORED: exact live anchor retains capacity, journal unchanged");
     absent_proven(); puts("ok - ABSENT_PROVEN: observer absence, separate cleanup retry, release, idempotent");
     collected_new_handle(); puts("ok - collected unit without prior receipt is UNKNOWN");
-    for (unsigned i=0;i<46;i++) { unknown_case(i); printf("ok - UNKNOWN case %u\n",i); }
+    stopped_anchor(); puts("ok - stopped anchor: empty ControlGroup, pinned populated 0, then separate removal");
+    reset_step(); puts("ok - post-absence reset step: gated on own receipt + fence, single attempt, errors UNKNOWN");
+    for (unsigned i=0;i<55;i++) { unknown_case(i); printf("ok - UNKNOWN case %u\n",i); }
     changed_after_open(); puts("ok - journal change poisons handle");
     open_refusals(); puts("ok - open refusals, lock exclusion, unknown slot");
     grammar(); puts("ok - strict grammar variants");

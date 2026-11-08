@@ -86,6 +86,9 @@ struct las {
     int got_reply, got_event;
     uint64_t deadline;
     struct las_receipt receipt;
+    int reset_mode; /* las_reset_open handle: las_begin refuses, las_reset only */
+    int (*absent)(void *, const struct lc_entry *);
+    void *absent_context;
 };
 static uint64_t now(void) {
     struct timespec t;
@@ -303,6 +306,7 @@ fail:
     free(s); return -1;
 }
 int las_begin(struct las *s) {
+    if (s && s->reset_mode) return -1;
     if (!s || s->state!=LAS_NEW) return -1;
     s->state=LAS_UNCERTAIN; /* consumed even by pre-STOP failures; no retry on this handle */
     enum las_reason r;
@@ -382,8 +386,87 @@ int las_timeout(const struct las *s,uint64_t *usec) {
 }
 enum las_status las_status(const struct las *s) { return s ? s->state:LAS_UNCERTAIN; }
 enum las_reason las_reason(const struct las *s) { return s ? s->reason:LAS_R_NONE; }
-int las_receipt(const struct las *s,struct las_receipt *r) { if (!s || !r || s->state!=LAS_STOPPED) return -1; *r=s->receipt; return 0; }
+int las_receipt(const struct las *s,struct las_receipt *r) { if (!s || !r || (s->state!=LAS_STOPPED && s->state!=LAS_RESET)) return -1; *r=s->receipt; return 0; }
 void las_close(struct las *s) {
     if (!s) return;
     sd_bus_slot_unref(s->call); sd_bus_slot_unref(s->match); sd_bus_unref(s->bus); close(s->create); close(s->fd); free(s);
+}
+/* ---- Post-absence reset (README-STOP.md): Unit.ResetFailed on the
+ * InvocationID path, only behind the caller's absence receipt. ---- */
+static int absence(struct las *s) { return s->absent(s->absent_context,&s->c.entry)==1; }
+int las_reset_open(const struct las_config *c,int (*absent)(void *,const struct lc_entry *),void *absent_context,struct las **out) {
+    if (!out) return -1;
+    *out=NULL;
+    if (!absent || las_open(c,out)<0) return -1;
+    struct las *s=*out;
+    s->reset_mode=1; s->absent=absent; s->absent_context=absent_context;
+    if (!absence(s)) { las_close(s); *out=NULL; return -1; }
+    return 0;
+}
+/* After the call: the invocation is either gone (NoUnitForInvocationID: our
+ * unit was garbage-collected; CollectMode=inactive collects it once reset) or
+ * still exactly ours and now inactive. Anything else is UNCERTAIN. */
+static enum las_reason reset_readback(struct las *s) {
+    sd_bus_message *m=NULL, *reply=NULL; sd_bus_error e={0}; enum las_reason r=LAS_R_QUERY;
+    if (!budget(s)) return LAS_R_DEADLINE;
+    if (sd_bus_message_new_method_call(s->bus,&m,s->c.manager,MANAGER,MI,"GetUnitByInvocationID")<0 ||
+        sd_bus_message_append_array(m,'y',s->invocation,16)<0) goto out;
+    if (sd_bus_call(s->bus,m,0,&e,&reply)<0) {
+        if (e.name && !strcmp(e.name,NO_INVOCATION)) { strcpy(s->receipt.state,"collected"); r=LAS_R_NONE; }
+        goto out;
+    }
+    const char *p=NULL;
+    if (sd_bus_message_read(reply,"o",&p)<=0 || !p || sd_bus_message_at_end(reply,1)<=0) goto out;
+    r=strcmp(p,s->invocation_path) ? LAS_R_REPLACED:LAS_R_NONE;
+out:
+    sd_bus_error_free(&e); sd_bus_message_unref(reply); sd_bus_message_unref(m);
+    if (r || !strcmp(s->receipt.state,"collected")) return r;
+    if ((r=verify(s,AFTER))) return r; /* same path, Id, InvocationID, cgroup, no job */
+    return strcmp(s->receipt.state,"inactive") ? LAS_R_STATE:LAS_R_NONE;
+}
+int las_reset(struct las *s) {
+    if (!s || !s->reset_mode || s->state!=LAS_NEW) return -1;
+    s->state=LAS_UNCERTAIN; /* consumed even by pre-RESET failures; one attempt per record */
+    enum las_reason r; sd_bus_message *reply=NULL; sd_bus_error e={0};
+    uint64_t t=now();
+    if (!t) { r=LAS_R_DEADLINE; goto fail; }
+    s->deadline=t+ATTEMPT_US;
+    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }
+    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }
+    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }
+    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,"unix:path=/run/dbus/system_bus_socket")<0 ||
+        sd_bus_set_bus_client(s->bus,1)<0 || sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }
+    /* 1. Before anything durable: still exactly our stopped incarnation. */
+    if ((r=owner(s)) || (r=verify(s,AFTER))) goto fail;
+    /* 2. Durable RESET intent in the reset record before the call. */
+    char line[512];
+    (void)snprintf(line,sizeof line,"RESET v1 %llu %s %s %s %s %s %u\n",(unsigned long long)s->c.entry.slot,s->c.entry.launch,
+        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);
+    if (!journal_empty(s->fd) || journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }
+    /* 3. Immediately before acting: authority, absence receipt, create
+     *    evidence, owner and the exact stopped incarnation. */
+    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }
+    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }
+    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }
+    if ((r=owner(s)) || (r=verify(s,AFTER))) goto fail;
+    /* 4. Typed Unit.ResetFailed() on the invocation path: systemd resolves it
+     *    only while this invocation exists, so a replacement is never reset. */
+    if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }
+    if (sd_bus_call_method(s->bus,s->c.manager,s->invocation_path,UI,"ResetFailed",&e,&reply,"")<0) {
+        r=e.name && !strcmp(e.name,NO_INVOCATION) ? LAS_R_REPLACED:LAS_R_RESET; goto fail;
+    }
+    if (sd_bus_message_at_end(reply,1)<=0) { r=LAS_R_RESET; goto fail; }
+    /* 5. Correlated outcome for this invocation, bracketed by owner checks. */
+    if ((r=reset_readback(s)) || (r=owner(s))) goto fail;
+    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }
+    t=now(); if (!t || t>=s->deadline) { r=LAS_R_DEADLINE; goto fail; }
+    (void)snprintf(line,sizeof line,"RESET-DONE %s %s\n",s->c.invocation,s->receipt.state);
+    if (journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }
+    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }
+    memcpy(s->receipt.invocation,s->c.invocation,sizeof s->receipt.invocation);
+    sd_bus_error_free(&e); sd_bus_message_unref(reply);
+    s->state=LAS_RESET; return 1;
+fail:
+    sd_bus_error_free(&e); sd_bus_message_unref(reply);
+    return terminal(s,r);
 }

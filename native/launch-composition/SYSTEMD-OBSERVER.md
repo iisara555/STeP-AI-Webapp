@@ -32,7 +32,10 @@ ownership. A trusted startup owner must supply that separate authority.
    Calls have a two-second per-method timeout; they are synchronous and cannot
    be cancelled by a socket deadline. Hosts whose bus peer is not root are
    conservatively unsupported (UNKNOWN); do not relax this to peer-selected UID.
-5. Absence requires the expected boot, manager/bus, InvocationID and ControlGroup,
+5. Absence requires the expected boot, manager/bus and InvocationID. ControlGroup
+   must equal the launch-time path, or be empty for an inactive/failed unit only;
+   a foreign nonempty path remains UNKNOWN. Neither value is absence evidence.
+   The proof still requires an
    inactive/failed unit, no systemd job, and `populated 0` read through the
    original cgroup FD. `cgroup.events` includes descendants. A second exact bus
    snapshot and owner-fence validation close the observation bracket. Unknown,
@@ -41,7 +44,10 @@ ownership. A trusted startup owner must supply that separate authority.
    PID or bare ENOENT heuristic exists.
 6. Only after absence, a separate cleanup proof requires explicit
    `org.freedesktop.systemd1.NoSuchUnit` from that same manager/bus and
-   `fstat(original cgroup FD).st_nlink == 0`. Errors/remaining metadata retain
+   `getdents64(original cgroup FD)` failing with `ENOENT` (a removed directory).
+   `st_nlink` is unusable on kernfs: it is synthesized as subdirectories + 2,
+   including after removal. A live directory, O_PATH/EBADF, other errors and
+   successful reads with stale errno are not removal proof. Errors/remaining metadata retain
    capacity. This certifies unit/cgroup metadata only; an owner with additional
    endpoint/other metadata obligations must compose its own additional proof
    before using `lso_clean` as the full composition cleanup callback. Outcome
@@ -63,7 +69,7 @@ Keep one adapter alive across metadata retries: an incarnation-scoped in-memory
 absence receipt avoids re-observation after metadata has disappeared. It is
 never transferred to another entry. A process crash loses that receipt; this
 increment does not persist a new trusted absence record. If systemd garbage
-collects or clears InvocationID/ControlGroup before the exact empty-subtree
+collects, clears InvocationID or removes cgroup.events before the exact empty-subtree
 observation, if the original FD is lost, or if boot/manager/bus changes, recovery
 returns UNKNOWN. **A missing unit is not a recovery receipt.** The next owner
 integration must retain evidence before GC (or supply a separately reviewed,
@@ -98,7 +104,7 @@ library plus the composition/lifecycle/quota archives and pthread.
 - One real composition/descriptor scenario: exact empty observation, independent
   cleanup failures, held capacity/new-workspace denial, rename/substitute against
   pinned original descriptor, cgroup removal, fence/query retry and release.
-- 11 strict sd-bus ABI fixtures, including valid result, transport failure,
+- 12 strict sd-bus ABI fixtures, including empty ControlGroup, valid result, transport failure,
   NoSuchUnit versus access-denied, manager restart, malformed InvocationID array,
   property error, job, malformed message, nonroot bus and nonroot name owner.
 
@@ -113,13 +119,14 @@ not privileged cgroup/systemd lifecycle acceptance or power-loss evidence.
 
 Still missing, deliberately untouched:
 
-- **ControlGroup after stop:** systemd 259 reports `ControlGroup=` (empty) for
-  every loaded inactive/failed service on this host once the cgroup is pruned
-  (read-only `host-probe-stop`). The absence check above requires the
-  launch-time path, so a really stopped anchor classifies as UNKNOWN. A
-  reviewed change must accept the empty value for inactive/failed only when
-  the pinned original descriptor proves `populated 0` (then `st_nlink == 0`),
-  and keep refusing any other path. Not changed in this increment.
+- Empty ControlGroup is now supported, but **missed pre-pruning populated-0
+  evidence remains UNKNOWN** even with a retained removed directory. Removal
+  proves cleanup only; this increment does not relax the emptiness requirement.
+- **D2: manager reexec stays fail-closed.** Historical manager equality is
+  unchanged. Same boot/bus/invocation and uid 0 do not prove lifetime-fence
+  continuity; systemd serializes outstanding jobs too. A future explicitly
+  authorized A-to-B operation-owner transition must be shared by stop,
+  observer and reconciler (unchanged create journal; proposed STOPv2 A/B).
 
 - Actual fixed-policy systemd create/start and incarnation-bound stop/kill,
   cancellation/draining of jobs, prevention of external restart/attach, nonreuse
