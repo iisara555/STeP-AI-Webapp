@@ -1,5 +1,11 @@
 # Protected step-runner launcher (gate 5) — prepared, NOT yet installed
 
+> **Installation blocked:** the [exec-status prerequisite](launcher-exec-status.md)
+> changes the launcher binary. SHA-256 pins and owner commands below are stale;
+> `make install-check` intentionally refuses. Do not install or bypass pins until
+> independent review, lifecycle completion and deliberate artifact repinning.
+> The new service-only executable is not registered or installable here.
+
 Status: **prepared, unprivileged evidence only.** Nothing was installed or run as
 root. The gateway entry is unchanged and still refuses to start. The driver keeps
 the old raw-bwrap path as its default until the owner switches.

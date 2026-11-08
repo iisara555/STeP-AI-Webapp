@@ -1,9 +1,12 @@
 /* Unprivileged tests of the protected launcher: request validation, the fixed bwrap vector,
  * descriptor/location checks on a scratch copy of the production layout, and (with the TESTING
  * main and a fake bwrap) the exec contract: env cleared, stdin untouched, extra fds closed.
- *   usage: test-launcher ./launch-testing ./fake-bwrap */
+ *   usage: test-launcher ./launch-testing ./fake-bwrap ./launch-service-testing */
 #define _GNU_SOURCE
 #include "launcher.h"
+#include "exec-status.h"
+#include <arpa/inet.h>
+#include <signal.h>
 #include "testing-config.h"
 
 #include <errno.h>
@@ -12,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -430,6 +435,94 @@ static void run_launcher(const char *launcher, struct run *res, const char *ws_r
     if (waitpid(pid, &res->status, 0) != pid) abort();
 }
 
+static void test_service(const char *launcher, int mode) {
+    int pair[2], diagnostics[2], bootstrap[2];
+    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, pair) ||
+        pipe2(diagnostics, O_CLOEXEC) || pipe2(bootstrap, O_CLOEXEC)) abort();
+    if (write(bootstrap[1], nonce, sizeof nonce - 1) != sizeof nonce - 1) abort();
+    close(bootstrap[1]);
+    pid_t pid = fork();
+    if (pid < 0) abort();
+    if (pid == 0) {
+        int ws = open_rel(WS, O_RDONLY | O_DIRECTORY);
+        int input = bootstrap[0];
+        if (ws < 0 || input < 0 || dup2(ws, 1) < 0 || dup2(input, 0) < 0 ||
+            dup2(pair[1], 4) < 0 || dup2(diagnostics[1], 2) < 0 || fcntl(4, F_SETFD, 0)) _exit(120);
+        close(pair[0]);
+        if (mode == 1) close(4); /* absent/closed fixed status FD */
+        if (mode == 2) { int f = open("/dev/null", O_WRONLY); if (f < 0 || dup2(f, 4) < 0) _exit(120); }
+        if (mode == 3) { int s[2]; if (socketpair(AF_UNIX, SOCK_STREAM, 0, s) || dup2(s[1], 4) < 0) _exit(120); }
+        if (mode == 8) { int f[2]; if (pipe(f) || dup2(f[1], 4) < 0) _exit(120); }
+        if (mode == 9) { int s = socket(AF_UNIX, SOCK_SEQPACKET, 0); if (s < 0 || dup2(s, 4) < 0) _exit(120); }
+        if (mode == 10) close(0);
+        char root_env[PATH_MAX + 16];
+        snprintf(root_env, sizeof root_env, "SRL_TEST_ROOT=%s", prefix);
+        char *env[] = {root_env, NULL};
+        char *args[] = {(char *)launcher, (char *)"v1", (char *)"p100000/" UUID,
+                        (char *)LAUNCH_ID, (char *)"65536", NULL};
+        if (mode == 4) args[4] = (char *)"65537";
+        if (mode == 6) _exit(123); /* death before launcher exec/ENTERED */
+        execve(mode == 7 ? "/nonexistent/srl-fixed-test-launcher" : launcher, args, env);
+        (void)srl_status_send(SRL_STATUS_LAUNCH_EXEC_FAILED, 0, (unsigned int)errno);
+        _exit(122);
+    }
+    close(pair[1]);
+    close(diagnostics[1]);
+    close(bootstrap[0]);
+    struct srl_exec_status observation = {0};
+    struct pollfd p = {.fd = pair[0], .events = POLLIN};
+    CHECK(poll(&p, 1, 2000) > 0, "service status bounded wait");
+    if (mode == 1 || mode == 2 || mode == 3 || mode == 6 || mode == 8 || mode == 9) {
+        CHECK(srl_status_receive(pair[0], &observation) == 0 && observation.stage == 0,
+              "no ack is UNKNOWN, not launcher/bwrap exec (%d)", mode);
+    } else if (mode == 7) {
+        CHECK(srl_status_receive(pair[0], &observation) == 1 &&
+              observation.stage == SRL_STATUS_LAUNCH_EXEC_FAILED && observation.exec_errno == ENOENT,
+              "launcher exec failed, distinct from bwrap exec failure");
+    } else {
+        CHECK(srl_status_receive(pair[0], &observation) == 1 && observation.stage == SRL_STATUS_ENTERED,
+              "launcher entered ack before validation");
+        CHECK(poll(&p, 1, 2000) > 0, "second status wait");
+        CHECK(srl_status_receive(pair[0], &observation) == 1 &&
+              observation.stage == (mode == 4 || mode == 10 ? SRL_STATUS_FAILED : SRL_STATUS_VALIDATED),
+              "validation/failure ack survives cleanup (%d)", mode);
+        if (mode == 4) CHECK(observation.error == SRL_E_USAGE && !observation.exec_errno,
+                             "explicit validation refusal");
+        if (mode == 10) CHECK(observation.error == SRL_E_DESCRIPTORS, "closed stdin validation failure");
+        if (mode == 5) {
+            CHECK(poll(&p, 1, 2000) > 0, "exec failure wait");
+            CHECK(srl_status_receive(pair[0], &observation) == 1 &&
+                  observation.stage == SRL_STATUS_FAILED && observation.error == SRL_E_INTERNAL &&
+                  observation.exec_errno == EACCES, "explicit bwrap exec errno");
+        }
+        CHECK(poll(&p, 1, 2000) > 0 && srl_status_receive(pair[0], &observation) == 0,
+              "status EOF after final frame");
+        CHECK(mode != 0 || (observation.stage == SRL_STATUS_VALIDATED && observation.eof),
+              "bwrap exec candidate, NOT runtime-ready");
+    }
+    close(pair[0]);
+    int status;
+    if (waitpid(pid, &status, 0) != pid) abort();
+    char output[16000];
+    size_t used = 0;
+    ssize_t n;
+    while ((n = read(diagnostics[0], output + used, sizeof output - 1 - used)) > 0) used += (size_t)n;
+    output[used] = 0;
+    close(diagnostics[0]);
+    if (mode == 0) CHECK(strstr(output, "extra_fds=0\n") && strstr(output, "envc=0\n"),
+                         "service status FD never reaches fake bwrap; env empty");
+    else CHECK(!strstr(output, "envc="), "refusal never executes bwrap");
+    if (mode == 0) {
+        char hex[sizeof nonce * 2 + 16] = "stdin=";
+        for (size_t i = 0; i < sizeof nonce - 1; i++)
+            snprintf(hex + strlen(hex), 3, "%02x", (unsigned char)nonce[i]);
+        strcat(hex, "\n");
+        CHECK(strstr(output, hex), "service preserves separate runtime nonce bootstrap unread");
+    }
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == (mode == 0 ? 0 : mode == 6 ? 123 : mode == 7 ? 122 : 2),
+          "service child exit (%d): %d", mode, status);
+}
+
 static void test_exec(const char *launcher) {
     struct run res;
     char *ok[] = {(char *)"v1", (char *)"p100000/" UUID, (char *)LAUNCH_ID, (char *)"16777216", NULL};
@@ -471,8 +564,8 @@ static void test_exec(const char *launcher) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3) {
-        fprintf(stderr, "usage: %s ./launch-testing ./fake-bwrap\n", argv[0]);
+    if (argc != 4) {
+        fprintf(stderr, "usage: %s ./launch-testing ./fake-bwrap ./launch-service-testing\n", argv[0]);
         return 2;
     }
     if (getuid() == 0 || geteuid() == 0) {
@@ -500,6 +593,11 @@ int main(int argc, char **argv) {
     test_socket_dir();
     test_trusted();
     test_exec(launcher);
+    for (int mode = 0; mode <= 10; mode++) {
+        if (mode == 5) chmod_rel("/usr/bin/bwrap", 0644);
+        test_service(argv[3], mode);
+        if (mode == 5) chmod_rel("/usr/bin/bwrap", 0755);
+    }
     char cmd[PATH_MAX + 32];
     snprintf(cmd, sizeof cmd, "rm -rf -- '%s'", prefix);
     if (system(cmd) != 0) fprintf(stderr, "warning: could not remove %s\n", prefix);

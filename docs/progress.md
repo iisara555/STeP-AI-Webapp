@@ -1,5 +1,21 @@
 # Progress
 
+## Launcher exec-status prerequisite — not installed
+
+- Added a separate fixed service child entry with trusted-root-created seqpacket
+  status FD 4, staged entry/validated acknowledgments and structured validation /
+  exec failures; legacy sudo still discards all inherited FDs >= 3. No caller FD,
+  executable or environment selector and no production service registration.
+- Nonblocking parent parser rejects malformed/order/ancillary messages. Explicit
+  kill tests preserve VALIDATED+EOF as exec-or-death UNKNOWN; runtime readiness
+  still requires the separate authenticated per-incarnation nonce channel.
+- Native launcher and broker test/analyze/sanitize, npm check and 17 targeted
+  launcher/Unix-channel/real-runtime tests passed unprivileged. Existing engine
+  diagnostics and Node deprecation remain. [Contract](launcher-exec-status.md).
+- Old launcher SHA-256 pins are intentionally stale: install-check refuses;
+  installation is blocked until review, lifecycle completion and repinning.
+  No root/sudo/host/install/XFS/real-data changes or push. Production stays refused.
+
 ## Bounded native revoke-through-launch core seam — not connected
 
 - Added `qb_launch_workspace`: fresh grant/peer, mount/quota and retained directory

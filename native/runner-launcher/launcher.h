@@ -113,5 +113,7 @@ int srl_open_socket_dir(const struct srl_config *cfg, const struct srl_request *
 
 /* The whole launch. Returns only on refusal (an srl_error) or a failed execve (SRL_E_INTERNAL). */
 int srl_launch(const struct srl_config *cfg, int argc, char *const argv[]);
+/* Separate service-only entry: fixed FD4 from a root-created socketpair. Not sudo API. */
+int srl_launch_service(const struct srl_config *cfg, int argc, char *const argv[]);
 
 #endif

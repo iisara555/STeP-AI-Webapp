@@ -3,3 +3,6 @@
 /launch-san
 /fake-bwrap
 /test-launcher
+/launch-service
+/launch-service-testing
+/test-exec-status

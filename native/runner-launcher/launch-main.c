@@ -1,6 +1,7 @@
 /* Entry point. The production build has a compiled-in configuration and reads no environment.
  * The TESTING build (-DSRL_TESTING, never installed) takes a scratch prefix from SRL_TEST_ROOT and
- * refuses to run as root or as the production runner uid. */
+ * refuses to run as root or as the production runner uid.
+ * SRL_SERVICE_ENTRY selects a separate service-only executable, never an argv/env option. */
 #define _GNU_SOURCE
 #include "launcher.h"
 
@@ -41,7 +42,11 @@ int main(int argc, char **argv) {
         .trusted_floor = NULL,
     };
 #endif
+#ifdef SRL_SERVICE_ENTRY
+    int error = srl_launch_service(&cfg, argc, argv);
+#else
     int error = srl_launch(&cfg, argc, argv);
+#endif
     /* fd 2 is the caller's; a refusal names only the failed check, never request contents. */
     fprintf(stderr, "step-runner-launch: REFUSED %s\n", srl_error_name(error));
     return 2;

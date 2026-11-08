@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "launcher.h"
+#include "exec-status.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -354,12 +355,16 @@ static void reset_signals(void) {
         if (sig != SIGKILL && sig != SIGSTOP) signal(sig, SIG_DFL);
 }
 
-int srl_launch(const struct srl_config *cfg, int argc, char *const argv[]) {
-    /* fds 0-2 must be open before anything is opened (or a new fd could become 1). Nothing else
-     * is inherited: sudo-rs already closes fds > 2, this does not rely on it. */
+static int launch_inner(const struct srl_config *cfg, int argc, char *const argv[], int service,
+                        unsigned int *exec_error) {
+    /* Legacy sudo entry still discards every inherited fd >= 3. Service entry
+     * preserves ONLY the prevalidated fixed status socket, marked CLOEXEC. */
     for (int fd = 0; fd <= 2; fd++)
         if (fcntl(fd, F_GETFD) < 0) return SRL_E_DESCRIPTORS;
-    if (close_range(3, ~0U, 0) != 0) return SRL_E_DESCRIPTORS;
+    if (service) {
+        close(3);
+        if (close_range(5, ~0U, 0) != 0) return SRL_E_DESCRIPTORS;
+    } else if (close_range(3, ~0U, 0) != 0) return SRL_E_DESCRIPTORS;
     int rc;
     struct srl_request req;
     if ((rc = srl_parse(cfg, argc, argv, &req)) != SRL_OK) return rc;
@@ -373,6 +378,25 @@ int srl_launch(const struct srl_config *cfg, int argc, char *const argv[]) {
     if (fcntl(0, F_SETFD, 0) || fcntl(1, F_SETFD, 0) || fcntl(2, F_SETFD, 0)) return SRL_E_DESCRIPTORS;
     reset_signals();
     char *const no_env[] = {NULL};
+    if (service && srl_status_send(SRL_STATUS_VALIDATED, 0, 0)) return SRL_E_DESCRIPTORS;
     execve(cfg->bwrap, args, no_env);
+    if (exec_error) *exec_error = (unsigned int)errno;
     return SRL_E_INTERNAL;
+}
+
+int srl_launch(const struct srl_config *cfg, int argc, char *const argv[]) {
+    return launch_inner(cfg, argc, argv, 0, NULL);
+}
+
+int srl_launch_service(const struct srl_config *cfg, int argc, char *const argv[]) {
+    /* Production cfg.root_uid is zero. SO_PEERCRED is captured when the trusted
+     * service creates this socketpair, before forking and dropping privileges.
+     * No argv/env selector can enable this path in the legacy executable. */
+    if (srl_status_prepare(cfg->root_uid)) return SRL_E_DESCRIPTORS;
+    if (srl_status_send(SRL_STATUS_ENTERED, 0, 0)) return SRL_E_DESCRIPTORS;
+    unsigned int exec_error = 0;
+    int rc = launch_inner(cfg, argc, argv, 1, &exec_error);
+    (void)srl_status_send(SRL_STATUS_FAILED, (unsigned int)rc, exec_error);
+    close(SRL_STATUS_FD);
+    return rc;
 }
