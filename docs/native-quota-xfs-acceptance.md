@@ -130,8 +130,8 @@ ignored build output and is never committed or installed.
 ## Pinned values (this commit; build with `make -C native/quota-broker acceptance`)
 
 ```text
-65881479679ee35a56ede6057fc367d5ce642e6291a48cfffbae4cb0f2bd5835  xfs-acceptance   (= BIN_SHA256 in run)
-559f84281995d9a9fb3816d8be81c0974d143b8a1fb6e7f979ab4a6e546ee00d  run (acceptance/run-xfs-acceptance.sh)
+52d918387d3353ba46b5fdfa96eb26802eaca7692120443db7f5b4597ff931e4  xfs-acceptance   (= BIN_SHA256 in run)
+bcf4675b945becca59bb8ea881abd3e8c95bc7d61cef21c9ea3947b43c3f9a0c  run (acceptance/run-xfs-acceptance.sh)
 ```
 
 ## Exact owner commands

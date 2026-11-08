@@ -158,11 +158,11 @@ Reproducible binary SHA-256 values (independent scratch-directory builds were
 byte-identical):
 
 ```text
-0cee49e9c91f4bee0b59565ea67b6d4a998772e0af7cacb3aa33a52da2f19cdc  step-quota-broker
+65bc1819e38d747285aa77d13aa5e639251a3c098e0ac8de19e1fc62ad2aeae5  step-quota-broker
 2d86101468b2af0622680ffa5e1004ba1ef55239a82192a6e16f4f7082e39394  service/step-quota-broker.service
-0855775b6d90fd8e246b0425d537043cf972ed6b4e3ed2ec1bf606cdcdbbd860  service/install-quota-broker.sh
-65881479679ee35a56ede6057fc367d5ce642e6291a48cfffbae4cb0f2bd5835  xfs-acceptance
-559f84281995d9a9fb3816d8be81c0974d143b8a1fb6e7f979ab4a6e546ee00d  acceptance/run-xfs-acceptance.sh
+f53c5d1d974ca3bb8a7d83a7c997af36b12d4097fb98d210a37adba60f3f5452  service/install-quota-broker.sh
+52d918387d3353ba46b5fdfa96eb26802eaca7692120443db7f5b4597ff931e4  xfs-acceptance
+bcf4675b945becca59bb8ea881abd3e8c95bc7d61cef21c9ea3947b43c3f9a0c  acceptance/run-xfs-acceptance.sh
 ```
 
 Only the owner may install root-owned copies. The installer requires its exact

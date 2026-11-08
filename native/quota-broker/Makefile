@@ -2,7 +2,7 @@ CC ?= cc
 AR ?= ar
 CFLAGS ?= -std=c11 -O2 -g -Wall -Wextra -Werror -Wconversion -Wshadow -Wstrict-prototypes -D_FORTIFY_SOURCE=3 -fstack-protector-strong
 .PHONY: acceptance-sql-test all test sanitize analyze clean acceptance acceptance-check acceptance-dry-run acceptance-wrapper-test service service-check service-dry-run service-script-test service-verify
-all: libstep-quota-core.a libstep-quota-xfs.a libstep-quota-transport.a step-quota-broker step-quota-broker-fake
+all: libstep-launch-request.a libstep-quota-core.a libstep-quota-xfs.a libstep-quota-transport.a step-quota-broker step-quota-broker-fake
 
 # Installable service binary: real core + REAL xfs adapter + transport + policy loader, fixed
 # paths, euid 0 only. Reproducible (path-independent) so service/install-quota-broker.sh pins its
@@ -64,7 +64,8 @@ xfs.o: xfs.c xfs.h core.h
 libstep-quota-xfs.a: xfs.o
 	$(AR) rcs $@ $<
 
-test: test-launch test-core test-capacity-race test-xfs test-transport test-policy test-broker acceptance-sql-test
+test: test-launch-request test-launch test-core test-capacity-race test-xfs test-transport test-policy test-broker acceptance-sql-test
+	./test-launch-request
 	./test-launch
 	./test-core
 	./test-capacity-race
@@ -78,6 +79,15 @@ test-xfs: xfs.c xfs.h core.c core.h test-xfs.c
 
 test-capacity-race: core.c core.h test-core.c test-capacity-race.c
 	$(CC) $(CFLAGS) -pthread core.c test-capacity-race.c -Wl,--wrap=fsync -Wl,--wrap=fstatvfs -o $@
+
+launch-request.o: launch-request.c launch-request.h core.h
+	$(CC) $(CFLAGS) -pthread -c launch-request.c -o $@
+
+libstep-launch-request.a: launch-request.o
+	$(AR) rcs $@ $<
+
+test-launch-request: core.c core.h test-core.c launch-request.c launch-request.h test-launch-request.c
+	$(CC) $(CFLAGS) -pthread core.c launch-request.c test-launch-request.c -Wl,--wrap=clock_gettime -Wl,--wrap=fsync -Wl,--wrap=fstatvfs -Wl,--wrap=pthread_mutex_lock -o $@
 
 test-launch: core.c core.h test-core.c test-launch.c
 	$(CC) $(CFLAGS) -pthread core.c test-launch.c -Wl,--wrap=fsync -Wl,--wrap=fstatvfs -Wl,--wrap=pthread_mutex_lock -o $@
@@ -133,6 +143,7 @@ sanitize:
 	rm -f step-quota-broker-san
 
 analyze:
+	$(CC) $(CFLAGS) -pthread -fanalyzer -c launch-request.c -o /dev/null
 	$(CC) $(CFLAGS) -pthread -fanalyzer -c transport.c -o /dev/null
 	$(CC) $(CFLAGS) -pthread -fanalyzer -c core.c -o /dev/null
 	$(CC) $(CFLAGS) -DQB_XFS_TESTING -fanalyzer -c xfs.c -o /dev/null
@@ -144,4 +155,4 @@ analyze:
 	$(CC) $(CFLAGS) -DQB_BROKER_TESTING -fanalyzer -c policy.c -o /dev/null
 
 clean:
-	rm -f test-launch test-capacity-race test-acceptance-sql test-core test-xfs test-transport test-policy test-broker step-quota-broker step-quota-broker-fake step-quota-broker-san xfs-acceptance xfs-acceptance-san core.o xfs.o transport.o libstep-quota-core.a libstep-quota-xfs.a libstep-quota-transport.a
+	rm -f launch-request.o libstep-launch-request.a test-launch-request test-launch test-capacity-race test-acceptance-sql test-core test-xfs test-transport test-policy test-broker step-quota-broker step-quota-broker-fake step-quota-broker-san xfs-acceptance xfs-acceptance-san core.o xfs.o transport.o libstep-quota-core.a libstep-quota-xfs.a libstep-quota-transport.a
