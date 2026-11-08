@@ -18,10 +18,19 @@ test-keeper: test-keeper.c keeper.c
 host-probe: host-probe.c create.c create.h
 	$(CC) $(CFLAGS) $< -l:libsystemd.so.0 -o $@
 # The archive object must not carry the LSC_TESTING scratch-root hook.
+# Checks both the symbol table and raw bytes, because -O2 can fold the hook
+# variables away; the hook also plants a `used` marker that survives.
+PIN_REFUSE = nm $(1) | grep -q 'lsc_test_' || strings -a $(1) | grep -q 'lsc_test_'
 pin-check: create.o
-	@if nm create.o | grep -q 'lsc_test_'; then echo 'REFUSED: test hook in create.o' >&2; exit 1; fi
+	@if $(call PIN_REFUSE,create.o); then echo 'REFUSED: test hook in create.o' >&2; exit 1; fi
 	@echo 'pin-check: create.o has no test hook; keeper root "/" and uid 0 pinned'
-test: test-create test-keeper test-link pin-check
+# Negative proof: (a) -DLSC_TESTING alone must not compile; (b) an object built
+# with the hook the way the fixture enables it must be refused by the same check.
+pin-check-negative: create.c create.h
+	@if $(CC) $(CFLAGS) -DLSC_TESTING -c create.c -o pin-neg-a.o 2>/dev/null; then rm -f pin-neg-a.o; echo 'FAIL: LSC_TESTING compiled outside the fixture' >&2; exit 1; fi
+	@$(CC) $(CFLAGS) -DLSC_TESTING -DLSC_FIXTURE_INCLUDE -c create.c -o pin-neg-b.o
+	@if $(call PIN_REFUSE,pin-neg-b.o); then rm -f pin-neg-b.o; echo 'pin-check-negative: hooked builds refused'; else rm -f pin-neg-b.o; echo 'FAIL: hooked object passed pin-check' >&2; exit 1; fi
+test: test-create test-keeper test-link pin-check pin-check-negative
 	./test-create
 	./test-keeper
 	./test-link

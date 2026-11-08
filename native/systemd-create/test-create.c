@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #define LSC_TESTING 1
+#define LSC_FIXTURE_INCLUDE 1
 #define fsync fixture_fsync
 #define getsockopt fixture_getsockopt
 #define clock_gettime fixture_clock_gettime
@@ -29,7 +30,9 @@ enum { REQ=1, REPLY, SIGNAL, PROP };
 struct tok { char k, ct; const char *sig, *str; uint64_t n; const void *p; size_t len; };
 struct sd_bus { int unused; };
 struct sd_bus_slot { int alive; };
-struct sd_bus_message { int refs, kind, error, depth; size_t n, pos; struct tok t[64]; const char *sender; };
+/* room for the oversized SystemCallFilter reply (1100 names + framing) */
+#define MSG_TOKENS 1200
+struct sd_bus_message { int refs, kind, error, depth; size_t n, pos; struct tok t[MSG_TOKENS]; const char *sender; };
 static struct sd_bus bus;
 static struct sd_bus_slot call_slot, match_slot;
 static struct sd_bus_message pool[512];
@@ -57,7 +60,7 @@ static sd_bus_message *msg(int kind) {
     assert(0); return NULL;
 }
 static size_t live(void) { size_t n=0; for (size_t i=0;i<sizeof pool/sizeof *pool;i++) n+=pool[i].refs>0; return n; }
-static struct tok *put(sd_bus_message *m,char k) { assert(m->n<64); struct tok *t=&m->t[m->n++]; memset(t,0,sizeof *t); t->k=k; return t; }
+static struct tok *put(sd_bus_message *m,char k) { assert(m->n<MSG_TOKENS); struct tok *t=&m->t[m->n++]; memset(t,0,sizeof *t); t->k=k; return t; }
 static void put_s(sd_bus_message *m,char k,const char *s) { put(m,k)->str=s; }
 static void put_n(sd_bus_message *m,char k,uint64_t n) { put(m,k)->n=n; }
 static void put_y(sd_bus_message *m,const void *p,size_t len) { struct tok *t=put(m,'Y'); t->p=p; t->len=len; }
@@ -129,7 +132,11 @@ int sd_bus_set_address(sd_bus *b,const char *a) { assert(b==&bus && !strcmp(a,"u
 int sd_bus_set_bus_client(sd_bus *b,int x) { assert(b==&bus && x==1); return 0; }
 int sd_bus_start(sd_bus *b) { assert(b==&bus); return hit("start") ? -ECONNREFUSED:0; }
 int sd_bus_get_bus_id(sd_bus *b,sd_id128_t *id) { assert(b==&bus); memset(id->bytes,hit("busid") ? 0x12:0x11,16); return 0; }
-int sd_bus_set_method_call_timeout(sd_bus *b,uint64_t t) { assert(b==&bus && t==2000000); return 0; }
+static uint64_t call_timeout_max, call_timeout_calls;
+int sd_bus_set_method_call_timeout(sd_bus *b,uint64_t t) {
+    assert(b==&bus && t>0 && t<=2000000);
+    call_timeout_calls++; if (call_timeout_calls>1 && t>call_timeout_max) call_timeout_max=t; return 0;
+}
 sd_bus *sd_bus_unref(sd_bus *b) { if (b) { assert(b==&bus && bus_live); bus_live=0; } return NULL; }
 sd_bus_slot *sd_bus_slot_unref(sd_bus_slot *s) { if (s) { assert(s==&call_slot || s==&match_slot); s->alive=0; } return NULL; }
 /* --- request serialization --- */
@@ -172,7 +179,7 @@ int sd_bus_call_method(sd_bus *b,const char *dest,const char *path,const char *i
         assert(!strcmp(dest,"org.freedesktop.DBus") && !strcmp(path,"/org/freedesktop/DBus") && !strcmp(iface,"org.freedesktop.DBus") && !strcmp(types,"s"));
         const char *arg=va_arg(a,const char *); r=msg(REPLY);
         if (member[3]=='N') { assert(!strcmp(arg,"org.freedesktop.systemd1")); put_s(r,'s',hit("GetNameOwner") ? ":1.99":":1.42"); }
-        else { assert(!strcmp(arg,":1.42")); put_n(r,'u',hit("GetConnectionUnixUser") ? 1000:0); }
+        else { assert(!strcmp(arg,":1.42")); if (hit("slow:GetConnectionUnixUser")) clock_us+=6000000; put_n(r,'u',hit("GetConnectionUnixUser") ? 1000:0); }
     } else {
         assert(!strcmp(dest,":1.42") && !strcmp(path,"/org/freedesktop/systemd1") && !strcmp(iface,"org.freedesktop.systemd1.Manager"));
         if (!strcmp(member,"Subscribe")) {
@@ -214,7 +221,9 @@ static void b_families(sd_bus_message *m,int v) { static const char *const unix_
 static void b_filter(sd_bus_message *m,int v) {
     static const char *const ok[]={"close","execve","exit_group","pause","read"}, *const nopause[]={"close","execve","read"}, *const sock[]={"pause","socket"};
     open_(m,'r',"bas"); put_n(m,'b',v!=1);
-    if (v==2) strv_(m,nopause,3); else if (v==3) strv_(m,sock,2); else if (v==4) strv_(m,NULL,0); else strv_(m,ok,5);
+    static const char *big[1100];
+    if (v==5) { for (size_t i=0;i<1100;i++) big[i]=i==7 ? "pause":"read"; strv_(m,big,1100); }
+    else if (v==2) strv_(m,nopause,3); else if (v==3) strv_(m,sock,2); else if (v==4) strv_(m,NULL,0); else strv_(m,ok,5);
     close_(m);
 }
 static void b_archs(sd_bus_message *m,int v) { static const char *const n[]={"native","x32"}, *const x[]={"x86-64"}; strv_(m,v==1 ? x:n,v==3 ? 0:v==2 ? 2:1); }
@@ -245,7 +254,7 @@ static struct fprop props[]={
     {S,"LimitNOFILE","t",NULL,64,1,NULL,0}, {S,"LimitNOFILESoft","t",NULL,64,1,NULL,0}, {S,"MainPID","u",NULL,4242,2,NULL,0},
     {S,"ControlGroup","s",CGROUP,0,1,NULL,0}, {S,"ExecStart","a(sasbttttuii)",NULL,0,4,b_exec,0},
     {S,"IPAddressDeny","a(iayu)",NULL,0,5,b_deny,0}, {S,"RestrictAddressFamilies","(bas)",NULL,0,2,b_families,0},
-    {S,"SystemCallFilter","(bas)",NULL,0,4,b_filter,0}, {S,"SystemCallArchitectures","as",NULL,0,3,b_archs,0},
+    {S,"SystemCallFilter","(bas)",NULL,0,5,b_filter,0}, {S,"SystemCallArchitectures","as",NULL,0,3,b_archs,0},
 };
 #define NPROPS (sizeof props/sizeof *props)
 int sd_bus_get_property(sd_bus *b,const char *dest,const char *path,const char *iface,const char *key,sd_bus_error *e,sd_bus_message **out,const char *type) {
@@ -287,10 +296,14 @@ int sd_bus_process(sd_bus *b,sd_bus_message **r) {
 /* --- scenario plumbing --- */
 static int authority(void *ctx,const struct lc_entry *e) { assert(ctx==&auth_token && e->slot==1 && e->state==LC_STARTING); return hit("exclusive") ? 0:1; }
 static char last_path[600];
+static int prop_queried(const char *name) {
+    for (size_t i=0;i<NPROPS;i++) if (!strcmp(props[i].name,name)) return props[i].queried;
+    assert(0); return -1;
+}
 static void reset(const char *f,int n,int v) {
     snprintf(fault,sizeof fault,"%s",f ? f:""); nth=n; variant=v; ncounts=0;
     sent=synced=bus_live=timeout_fail=process_fail=bypass_arg2=endless=reply_delivered=0; bus_events=1; bus_timeout=UINT64_MAX;
-    clock_us=1000000; process_calls=0; trace_n=0; trace[0]=0; qh=qt=0; call_slot.alive=match_slot.alive=0; method_cb=signal_cb=NULL;
+    clock_us=1000000; call_timeout_max=call_timeout_calls=0; process_calls=0; trace_n=0; trace[0]=0; qh=qt=0; call_slot.alive=match_slot.alive=0; method_cb=signal_cb=NULL;
     for (size_t i=0;i<NPROPS;i++) props[i].queried=0;
 }
 static int journal_file(int flags,const char *name) {
@@ -413,6 +426,14 @@ static void test_dispatch(void) {
     reset(NULL,0,0); fd=journal_file(O_RDWR,"j"); s=pending(fd); q_reply(JOB7,0,0); q_event(); clock_us+=5000000;
     assert(lsc_poll(s)==-1 && process_calls==0); expect(s,fd,LSC_UNCERTAIN,INTENT);
     reset("slow:Job",1,0); standard(O_JOB);
+    /* the final owner() call of the readback is slow: only the post-readback deadline check sees it */
+    reset("slow:GetConnectionUnixUser",4,0); standard(O_JOB);
+    /* a slow Get mid-readback stops further blocking calls: nothing after it is queried */
+    reset("slow:MainPID",1,0); fd=journal_file(O_RDWR,"j"); s=pending(fd); q_reply(JOB7,0,0); q_event();
+    assert(lsc_poll(s)==-1 && prop_queried("DropInPaths")==0 && prop_queried("Job")==0); expect(s,fd,LSC_UNCERTAIN,INTENT JOBLINE);
+    /* per-call timeout is capped at the time left: 300 ms left -> no call may wait longer */
+    reset(NULL,0,0); fd=journal_file(O_RDWR,"j"); s=pending(fd); q_reply(JOB7,0,0); q_event(); clock_us+=4700000;
+    assert(lsc_poll(s)==1 && call_timeout_calls>50 && call_timeout_max==300000); expect(s,fd,LSC_ANCHORED,INTENT JOBLINE ANCHOR);
     reset("clock",2,0); standard(O_POLL0);
     reset("clock",3,0); standard(O_JOB);
 }

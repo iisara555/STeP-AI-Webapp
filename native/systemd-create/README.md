@@ -28,9 +28,9 @@ workload inside it. It never starts a workload, parses commands or reads files.
     `SystemCallFilter` allow-list (`@default` plus the few file/IO calls the
     dynamically linked keeper needs before `pause()`; a violation kills it),
     `UMask=0077`, `LimitNOFILE=64`.
-  - `CollectMode=inactive` (explicit; not `inactive-or-failed`): a *failed*
+  - `CollectMode=inactive` (explicit; not `inactive-or-failed`): a _failed_
     anchor stays loaded with its `Result`/`InvocationID` as evidence until
-    explicitly reset. A cleanly *inactive* anchor is garbage-collected, so
+    explicitly reset. A cleanly _inactive_ anchor is garbage-collected, so
     reconciliation must not depend on unit metadata after a clean stop; it
     relies on the pinned cgroup and lifecycle fence instead.
   - None dropped: no requested property was rejected by host introspection.
@@ -48,7 +48,7 @@ workload inside it. It never starts a workload, parses commands or reads files.
   still ignores other units as defense in depth.
 - A durable `INTENT` line is fsynced to the journal **before** the async call;
   then `JOB` on reply and `ANCHOR` only after the exact `JobRemoved(done)` whose
-  job id and path equal the reply's, plus readback of the *effective* values:
+  job id and path equal the reply's, plus readback of the _effective_ values:
   every fixed property above (root drop-ins apply to transient units too),
   `DropInPaths` empty, `Transient=yes`, `ActiveState=active`,
   `SubState=running`, `MainPID>1`, `LimitNOFILESoft`, exact `ExecStart`,
@@ -60,7 +60,10 @@ workload inside it. It never starts a workload, parses commands or reads files.
   `lsc_fd` / `lsc_events` / `lsc_timeout` (relative µs until the next required
   poll: the earlier of sd-bus's own timeout and the 5 s attempt deadline)
   instead of busy-polling. The deadline is checked at poll entry and again after
-  the synchronous readback.
+  the synchronous readback. During readback every blocking call (each property
+  Get, GetUnit and both owner() calls) first rechecks the deadline and caps its
+  own method-call timeout at the time left (never above 2 s), so one poll can
+  overrun the 5 s attempt deadline by at most one bus round trip, not ~60 × 2 s.
 - Any error, timeout, mismatched or duplicate event, lost authority/owner or
   fsync failure leaves the state `UNCERTAIN`. Nothing in this module releases a
   reservation, cancels a job or kills anything. `lsc_close` only drops local
@@ -69,14 +72,14 @@ workload inside it. It never starts a workload, parses commands or reads files.
 ## Single-use: exactly what is enforced
 
 - Per handle: `lsc_begin` runs once; any later call fails without sending.
-- Per journal *content*: `lsc_open` and `lsc_begin` require an empty journal, and
+- Per journal _content_: `lsc_open` and `lsc_begin` require an empty journal, and
   `INTENT` is written before the send. Once any `INTENT` byte is written (even if
   its fsync failed) the journal is never accepted again.
 - **Not single-use before `INTENT`:** a failure before the `INTENT` write (bus
   connect, owner/authority/keeper check, match, `Subscribe`) sends nothing and
   leaves the journal empty, so it can be opened and attempted again.
 - `flock(LOCK_EX)` is taken on the caller's **open file description**. It
-  excludes concurrent handles opened through *other* descriptions of the same
+  excludes concurrent handles opened through _other_ descriptions of the same
   file, but **not** a second `lsc_open` on the same fd (or a dup of it): both
   handles open successfully, and only the empty-journal check stops the second
   from sending after the first wrote `INTENT`. The lock persists until every fd
@@ -105,9 +108,13 @@ workload inside it. It never starts a workload, parses commands or reads files.
   `LSC_TESTING`-only hook (missing, symlink, writable, not executable, hardlink,
   directory, symlinked ancestor/root, wrong owner — at open and between open and
   begin; journal mode/owner/nlink 0/2/FIFO/O_WRONLY/O_RDONLY/nonempty/flock).
-  `make pin-check` refuses a `create.o` containing the hook; defaults are
+  `LSC_TESTING` only compiles together with `LSC_FIXTURE_INCLUDE` (set by
+  `test-create.c`), and the hook plants a `used` marker that survives `-O2`.
+  `make pin-check` refuses a `create.o` whose symbols or bytes contain the hook;
+  `make pin-check-negative` (part of `make test`) proves both a bare
+  `-DLSC_TESTING` build failing and a hooked object being refused. Defaults are
   asserted to be `/` and uid 0.
-- `make mutation` deletes each of 52 guarded checks in a scratch copy and
+- `make mutation` deletes each of 55 guarded checks in a scratch copy and
   requires `test-create` to fail; all are killed (before/after list in the
   commit history).
 - Keeper identity/argument/pause tests, GCC analyzer, ASan/UBSan, link test

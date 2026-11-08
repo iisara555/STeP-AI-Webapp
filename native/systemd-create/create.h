@@ -24,7 +24,8 @@ struct lsc_receipt { unsigned job; char invocation[33], cgroup[512]; };
 int lsc_open(const struct lsc_config *, struct lsc **);
 int lsc_begin(struct lsc *); /* one attempt only, durable INTENT before enqueue */
 int lsc_poll(struct lsc *); /* nonblocking dispatch of at most 32 bus messages, then
-                            bounded synchronous readback after the exact successful
+                            deadline-bounded synchronous readback (each call capped
+                            at the time left) after the exact successful
                             JobRemoved; 1 anchored, 0 still pending, -1 terminal */
 /* Event-loop integration; each returns -1 unless the handle is LSC_PENDING.
  * lsc_fd: bus socket for poll(2); owned by the handle, never close/read it.

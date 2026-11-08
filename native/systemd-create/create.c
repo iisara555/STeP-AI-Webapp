@@ -58,6 +58,12 @@ extern int sd_bus_process(sd_bus *,sd_bus_message **);
  * under test; the archive object pins "/" and uid 0 (make refuses an object
  * that contains the hook symbols). */
 #ifdef LSC_TESTING
+#ifndef LSC_FIXTURE_INCLUDE
+#error "LSC_TESTING is only valid when create.c is #included by test-create.c"
+#endif
+/* Survives -O2 even when the hook variables are folded away, so pin-check can
+ * refuse any object built with the hook (nm/strings both see it). */
+__attribute__((used)) static const char lsc_test_hook_marker[]="lsc_test_hook_marker";
 static const char *lsc_test_root="/";
 static uid_t lsc_test_keeper_uid=0, lsc_test_journal_uid=0;
 #define TRUST_ROOT lsc_test_root
@@ -114,6 +120,7 @@ struct lsc {
     unsigned event_job;
     int got_reply, got_event;
     uint64_t deadline;
+    int readback; /* set only while observe() runs: calls are bounded by the deadline */
     struct lsc_receipt receipt;
 };
 static uint64_t now(void) {
@@ -182,6 +189,17 @@ static int keeper_safe(void) {
     }
     close(fd); return 1;
 }
+/* During readback, cap the next blocking call at the time left before the
+ * attempt deadline (and never above the 2 s per-call ceiling), so ~60
+ * synchronous Gets cannot stall a caller far past 5 s. 0 = no budget left. */
+#define CALL_CEILING_US 2000000ULL
+static int budget(struct lsc *s) {
+    if (!s->readback) return 1;
+    uint64_t t=now();
+    if (!t || t>=s->deadline) return 0;
+    uint64_t left=s->deadline-t;
+    return sd_bus_set_method_call_timeout(s->bus,left<CALL_CEILING_US ? left:CALL_CEILING_US)>=0;
+}
 static int owner(struct lsc *s) {
     struct ucred peer; socklen_t length=sizeof peer;
     int fd=sd_bus_get_fd(s->bus);
@@ -190,9 +208,10 @@ static int owner(struct lsc *s) {
     if (sd_bus_get_bus_id(s->bus,&id)<0) return 0;
     for (size_t i=0;i<16;i++) (void)snprintf(bus_id+2*i,3,"%02x",(unsigned)id.bytes[i]);
     if (strcmp(bus_id,s->c.bus_id)) return 0;
+    if (!budget(s)) return 0;
     int r=sd_bus_call_method(s->bus,"org.freedesktop.DBus","/org/freedesktop/DBus","org.freedesktop.DBus","GetNameOwner",NULL,&m,"s","org.freedesktop.systemd1");
     int ok=r>=0 && sd_bus_message_read(m,"s",&name)>0 && name && !strcmp(name,s->c.manager) && sd_bus_message_at_end(m,1)>0;
-    sd_bus_message_unref(m); m=NULL; if (!ok) return 0;
+    sd_bus_message_unref(m); m=NULL; if (!ok || !budget(s)) return 0;
     r=sd_bus_call_method(s->bus,"org.freedesktop.DBus","/org/freedesktop/DBus","org.freedesktop.DBus","GetConnectionUnixUser",NULL,&m,"s",s->c.manager);
     ok=r>=0 && sd_bus_message_read(m,"u",&uid)>0 && uid==0 && sd_bus_message_at_end(m,1)>0;
     sd_bus_message_unref(m); return ok;
@@ -322,7 +341,7 @@ static int property_end(sd_bus_message *m) {
     return sd_bus_message_at_end(m,0)>0 && sd_bus_message_exit_container(m)>0 && sd_bus_message_at_end(m,1)>0;
 }
 static int get(struct lsc *s,const char *iface,const char *key,const char *type,sd_bus_message **m) {
-    *m=NULL; return sd_bus_get_property(s->bus,s->c.manager,s->unit_path,iface,key,NULL,m,type)>=0;
+    *m=NULL; return budget(s) && sd_bus_get_property(s->bus,s->c.manager,s->unit_path,iface,key,NULL,m,type)>=0;
 }
 static int string_prop(struct lsc *s,const char *iface,const char *key,char *out,size_t n) {
     sd_bus_message *m=NULL; const char *v=NULL;
@@ -410,9 +429,14 @@ static int effective(struct lsc *s) {
     return ok && strv_prop(s,UI,"DropInPaths",NULL,0) && strv_prop(s,SI,"SystemCallArchitectures",native,1) &&
         exec_start(s) && deny_any(s) && no_families(s) && syscall_filter(s);
 }
+static int observe_unbudgeted(struct lsc *s);
 static int observe(struct lsc *s) {
+    s->readback=1; int ok=observe_unbudgeted(s); s->readback=0;
+    return ok;
+}
+static int observe_unbudgeted(struct lsc *s) {
     sd_bus_message *m=NULL; const char *p=NULL;
-    if (!held(s) || !owner(s) || sd_bus_call_method(s->bus,s->c.manager,MANAGER,MI,"GetUnit",NULL,&m,"s",s->unit)<0) return 0;
+    if (!held(s) || !owner(s) || !budget(s) || sd_bus_call_method(s->bus,s->c.manager,MANAGER,MI,"GetUnit",NULL,&m,"s",s->unit)<0) return 0;
     int ok=sd_bus_message_read(m,"o",&p)>0 && p && !strcmp(p,s->unit_path) && sd_bus_message_at_end(m,1)>0;
     sd_bus_message_unref(m); m=NULL; if (!ok) return 0;
     if (!effective(s) || !string_prop(s,SI,"ControlGroup",s->receipt.cgroup,sizeof s->receipt.cgroup)) return 0;

@@ -148,8 +148,8 @@
   "desc": "authority: readback entry held deleted",
   "before_find": "if (!held(s) || !owner(s) || sd_bus_call_method",
   "before_repl": "if (!owner(s) || sd_bus_call_method",
-  "after_find": "if (!held(s) || !owner(s) || sd_bus_call_method",
-  "after_repl": "if (!owner(s) || sd_bus_call_method"
+  "after_find": "if (!held(s) || !owner(s) || !budget(s) || sd_bus_call_method",
+  "after_repl": "if (!owner(s) || !budget(s) || sd_bus_call_method"
  },
  {
   "id": "A6",
@@ -172,8 +172,8 @@
   "desc": "owner: readback entry owner() deleted",
   "before_find": "if (!held(s) || !owner(s) || sd_bus_call_method",
   "before_repl": "if (!held(s) || sd_bus_call_method",
-  "after_find": "if (!held(s) || !owner(s) || sd_bus_call_method",
-  "after_repl": "if (!held(s) || sd_bus_call_method"
+  "after_find": "if (!held(s) || !owner(s) || !budget(s) || sd_bus_call_method",
+  "after_repl": "if (!held(s) || !budget(s) || sd_bus_call_method"
  },
  {
   "id": "O2",
@@ -370,5 +370,23 @@
   "desc": "OOMPolicy dropped from policy",
   "after_find": " {SI,\"OOMPolicy\",'s',\"kill\",0},",
   "after_repl": ""
+ },
+ {
+  "id": "D1",
+  "desc": "SystemCallFilter 1024-entry cap removed",
+  "after_find": "if (r<0 || i>=1024) { ok=0; break; }",
+  "after_repl": "if (r<0) { ok=0; break; }"
+ },
+ {
+  "id": "D2",
+  "desc": "per-call budget not applied to property Gets",
+  "after_find": "return budget(s) && sd_bus_get_property(",
+  "after_repl": "return sd_bus_get_property("
+ },
+ {
+  "id": "D3",
+  "desc": "per-call timeout not capped at time left",
+  "after_find": "uint64_t left=s->deadline-t;",
+  "after_repl": "uint64_t left=CALL_CEILING_US;"
  }
 ]
