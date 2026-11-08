@@ -152,6 +152,12 @@ created.
 `make install install-check` refuse on purpose. Missing: host acceptance of the
 hardened unit (the sandbox, syscall allow-list, `LimitNOFILE=64` and readback
 representations have not been exercised by a real root `StartTransientUnit`),
-startup reconciliation of nonempty journals, incarnation-bound stop/kill,
+incarnation-bound stop/kill,
 credential transition into the anchored cgroup, composition with
 `launch-composition`, independent review and artifact pins.
+
+Startup reconciliation of nonempty journals (read-only ANCHORED /
+ABSENT_PROVEN / UNKNOWN decision reusing these exact lines and the observer's
+proofs) is in
+[`launch-composition/CREATE-RECONCILE.md`](../launch-composition/CREATE-RECONCILE.md);
+it is synthetic and unlinked from any service.

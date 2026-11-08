@@ -113,6 +113,9 @@ done:
     if (result==0 && (!owner(b,manager) || copy(out->manager,sizeof out->manager,manager)<0)) result=-1;
     sd_bus_error_free(&error); sd_bus_message_unref(m); sd_bus_unref(b); return result;
 }
+int lso_bus_snapshot(void *ctx,const char *unit,const char *manager,struct lso_snapshot *out) {
+    return snapshot(ctx,unit,manager,out);
+}
 static int events(void *ctx,int group,int *populated) {
     (void)ctx;
     int fd=openat(group,"cgroup.events",O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK);

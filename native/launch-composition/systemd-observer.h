@@ -48,4 +48,8 @@ struct lso_ops {
     int (*removed)(void *, int);
 };
 int lso_open_with_ops(const struct lso_config *, const struct lso_ops *, void *, struct lso **);
+/* The production read-only snapshot reader (the default lso_ops.snapshot):
+ * root system-bus peer, expected root manager owner bracketing GetUnit and
+ * Get(ControlGroup/ActiveState/InvocationID/Job). Never mutates systemd. */
+int lso_bus_snapshot(void *, const char *unit, const char *manager, struct lso_snapshot *);
 #endif

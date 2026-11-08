@@ -6,3 +6,5 @@ test-systemd-observer
 test-observer-sanitize
 test-systemd-bus
 test-bus-sanitize
+test-create-reconcile
+test-reconcile-sanitize

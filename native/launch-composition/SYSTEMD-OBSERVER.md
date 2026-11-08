@@ -70,6 +70,11 @@ integration must retain evidence before GC (or supply a separately reviewed,
 durable lifetime/absence receipt). This intentionally narrow adapter cannot
 recover never-created reservations from ledger state alone.
 
+The production snapshot reader is also exported as `lso_bus_snapshot` (same
+code, no new query) so [create-journal reconciliation](CREATE-RECONCILE.md) can
+observe a live anchor through the identical seam before feeding a candidate into
+`lso_absent`/`lso_reconcile`.
+
 ## Dependencies and exercised evidence
 
 Discovery found `libsystemd.so.0`, but no `pkg-config` or sd-bus development

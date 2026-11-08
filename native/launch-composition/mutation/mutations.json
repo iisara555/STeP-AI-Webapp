@@ -1,0 +1,500 @@
+[
+  {
+    "id": "R1",
+    "desc": "hex32: nonzero requirement deleted",
+    "after_find": "    return nonzero;\n}\nstatic int uuid",
+    "after_repl": "    return 1;\n}\nstatic int uuid"
+  },
+  {
+    "id": "R2",
+    "desc": "hex32: lowercase-hex charset deleted",
+    "after_find": "if (!is_hex(s.p[i])) return 0; nonzero|=",
+    "after_repl": "nonzero|="
+  },
+  {
+    "id": "R3",
+    "desc": "hex32: exact length 32 deleted",
+    "after_find": "    if (s.n!=32) return 0;\n    int nonzero",
+    "after_repl": "    int nonzero"
+  },
+  {
+    "id": "R4",
+    "desc": "uuid: dash positions deleted",
+    "after_find": "{ if (s.p[i]!='-') return 0; }",
+    "after_repl": "{ }"
+  },
+  {
+    "id": "R5",
+    "desc": "uuid: hex charset deleted",
+    "after_find": "        else if (!is_hex(s.p[i])) return 0;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R6",
+    "desc": "uuid: exact length 36 deleted",
+    "after_find": "    if (s.n!=36) return 0;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R7",
+    "desc": "decimal: leading zero rejection deleted",
+    "after_find": "(s.p[0]=='0' && s.n>1) || ",
+    "after_repl": ""
+  },
+  {
+    "id": "R8",
+    "desc": "decimal: zero rejection (slot/job) deleted",
+    "after_find": " || (s.p[0]=='0' && !zero)",
+    "after_repl": " || ((void)zero,0)"
+  },
+  {
+    "id": "R9",
+    "desc": "decimal: digit charset deleted",
+    "after_find": "        if (s.p[i]<'0' || s.p[i]>'9') return 0;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R10",
+    "desc": "decimal: overflow check deleted",
+    "after_find": "        if (v>(UINT64_MAX-d)/10) return 0;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R11",
+    "desc": "decimal: max bound (job <= UINT32_MAX) deleted",
+    "after_find": "    if (v>max) return 0;\n",
+    "after_repl": "    (void)max;\n"
+  },
+  {
+    "id": "R12",
+    "desc": "manager: length < 128 deleted",
+    "after_find": "    if (s.n>=128 || s.p[0]!=':') return 0;",
+    "after_repl": "    if (s.p[0]!=':') return 0;"
+  },
+  {
+    "id": "R13",
+    "desc": "manager: leading ':' deleted",
+    "after_find": "    if (s.n>=128 || s.p[0]!=':') return 0;",
+    "after_repl": "    if (s.n>=128) return 0;"
+  },
+  {
+    "id": "R14",
+    "desc": "manager: empty digit run before '.' deleted",
+    "after_find": "if (s.p[i]!='.' || !run) return 0;",
+    "after_repl": "if (s.p[i]!='.') return 0;"
+  },
+  {
+    "id": "R15",
+    "desc": "manager: exactly one dot deleted",
+    "after_find": "    return dots==1 && run>0;",
+    "after_repl": "    return run>0;"
+  },
+  {
+    "id": "R16",
+    "desc": "manager: trailing digit run deleted",
+    "after_find": "    return dots==1 && run>0;",
+    "after_repl": "    return dots==1;"
+  },
+  {
+    "id": "R17",
+    "desc": "fields: too-few-fields check deleted (missing manager then reaches unique_name with an empty span)",
+    "after_find": "        if (at==line.n) return i+1==count; /* last field ends the line exactly */",
+    "after_repl": "        if (at==line.n) return 1;"
+  },
+  {
+    "id": "R18",
+    "desc": "fields: extra-fields check deleted",
+    "after_find": "    return 0; /* more separators than fields */",
+    "after_repl": "    return 1;"
+  },
+  {
+    "id": "R19",
+    "desc": "INTENT literal deleted",
+    "after_find": "!equals(f[0],\"INTENT\") || ",
+    "after_repl": ""
+  },
+  {
+    "id": "R20",
+    "desc": "INTENT version v1 deleted",
+    "after_find": "!equals(f[1],\"v1\") ||",
+    "after_repl": ""
+  },
+  {
+    "id": "R21",
+    "desc": "INTENT unit derivation deleted",
+    "after_find": "    if (!equals(f[9],unit)) return 0; /* the unit is derived, never chosen */\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R22",
+    "desc": "JOB literal deleted",
+    "after_find": "!equals(f[0],\"JOB\") || ",
+    "after_repl": ""
+  },
+  {
+    "id": "R23",
+    "desc": "JOB path length deleted",
+    "after_find": "if (f[2].n!=sizeof JOB_PREFIX-1+f[1].n || ",
+    "after_repl": "if ("
+  },
+  {
+    "id": "R24",
+    "desc": "JOB path prefix deleted",
+    "after_find": "memcmp(f[2].p,JOB_PREFIX,sizeof JOB_PREFIX-1) ||\n        ",
+    "after_repl": ""
+  },
+  {
+    "id": "R25",
+    "desc": "JOB path digits deleted",
+    "after_find": " ||\n        memcmp(f[2].p+sizeof JOB_PREFIX-1,f[1].p,f[1].n)) return 0;",
+    "after_repl": ") return 0;"
+  },
+  {
+    "id": "R26",
+    "desc": "ANCHOR literal deleted",
+    "after_find": "!equals(f[0],\"ANCHOR\") || ",
+    "after_repl": ""
+  },
+  {
+    "id": "R27",
+    "desc": "ANCHOR job == JOB job deleted",
+    "after_find": "        n!=j->job || !hex32(f[2])) return 0;",
+    "after_repl": "        !hex32(f[2])) return 0;"
+  },
+  {
+    "id": "R28",
+    "desc": "ANCHOR invocation grammar deleted",
+    "after_find": "        n!=j->job || !hex32(f[2])) return 0;",
+    "after_repl": "        n!=j->job) return 0;"
+  },
+  {
+    "id": "R29",
+    "desc": "ANCHOR cgroup == /system.slice/<unit> deleted",
+    "after_find": "    if (!equals(f[3],cgroup)) return 0;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R30",
+    "desc": "torn final line accepted as absent",
+    "after_find": "if (!end) { *reason=LCR_R_TORN; return -1; }",
+    "after_repl": "if (!end) break;"
+  },
+  {
+    "id": "R31",
+    "desc": "fourth line accepted",
+    "after_find": "lines==2 ? anchor(line,j):0",
+    "after_repl": "lines==2 ? anchor(line,j):anchor(line,j)"
+  },
+  {
+    "id": "R32",
+    "desc": "parser journal size cap deleted",
+    "after_find": "    if (length>LCR_JOURNAL_MAX) { *reason=LCR_R_JOURNAL; return -1; }\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R33",
+    "desc": "open: owner required deleted",
+    "after_find": "if (!c || !c->owner || !c->slot",
+    "after_repl": "if (!c || !c->slot"
+  },
+  {
+    "id": "R34",
+    "desc": "open: nonzero slot deleted",
+    "after_find": "!c->owner || !c->slot || !ops",
+    "after_repl": "!c->owner || !ops"
+  },
+  {
+    "id": "R35",
+    "desc": "open: snapshot seam required deleted",
+    "after_find": "|| !ops || !ops->snapshot)",
+    "after_repl": "|| !ops)"
+  },
+  {
+    "id": "R36",
+    "desc": "open: readable journal fd deleted",
+    "after_find": "    if (mode<0 || ((mode&O_ACCMODE)!=O_RDONLY && (mode&O_ACCMODE)!=O_RDWR)) { errno=EBADF; return -1; }\n",
+    "after_repl": "    (void)mode;\n"
+  },
+  {
+    "id": "R37",
+    "desc": "open: journal flock deleted",
+    "after_find": "if (h->fd<0 || flock(h->fd,LOCK_EX|LOCK_NB)<0) {",
+    "after_repl": "if (h->fd<0) {"
+  },
+  {
+    "id": "R38",
+    "desc": "production open: trusted_uid 0 deleted",
+    "after_find": "if (!c || c->trusted_uid!=0) { errno=EPERM; return -1; }",
+    "after_repl": "if (!c) { errno=EPERM; return -1; }"
+  },
+  {
+    "id": "R39",
+    "desc": "journal owner check deleted",
+    "after_find": " || st.st_uid!=h->c.trusted_uid || (st.st_mode&07777)!=0600 ||",
+    "after_repl": " || (st.st_mode&07777)!=0600 ||"
+  },
+  {
+    "id": "R40",
+    "desc": "journal mode 0600 deleted",
+    "after_find": " || (st.st_mode&07777)!=0600 ||\n        st.st_nlink!=1",
+    "after_repl": " ||\n        st.st_nlink!=1"
+  },
+  {
+    "id": "R41",
+    "desc": "journal single link deleted",
+    "after_find": "        st.st_nlink!=1 || st.st_size<0",
+    "after_repl": "        st.st_size<0"
+  },
+  {
+    "id": "R42",
+    "desc": "journal size cap before read deleted",
+    "after_find": " || st.st_size>LCR_JOURNAL_MAX) return 0;\n    /* One",
+    "after_repl": ") return 0;\n    /* One"
+  },
+  {
+    "id": "R43",
+    "desc": "journal-changed comparison deleted",
+    "after_find": "    if (h->seen && (n!=h->seen_length || memcmp(bytes,h->seen_bytes,n))) {\n        h->poisoned=1; return verdict(v,r,LCR_UNKNOWN,LCR_R_CHANGED,0);\n    }\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R44",
+    "desc": "journal-changed poison not persisted",
+    "after_find": "        h->poisoned=1; return verdict",
+    "after_repl": "        return verdict"
+  },
+  {
+    "id": "R45",
+    "desc": "poisoned handle check deleted",
+    "after_find": "    if (h->poisoned) return verdict(v,r,LCR_UNKNOWN,LCR_R_CHANGED,0);\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R46",
+    "desc": "empty journal mapping deleted",
+    "after_find": "    if (lines==0) return verdict(v,r,LCR_UNKNOWN,LCR_R_EMPTY,0);\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R47",
+    "desc": "INTENT-without-JOB mapping deleted",
+    "after_find": "    if (lines==1) return verdict(v,r,LCR_UNKNOWN,LCR_R_NO_JOB,0);\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R48",
+    "desc": "JOB-without-ANCHOR mapping deleted",
+    "after_find": "    if (lines==2) return verdict(v,r,LCR_UNKNOWN,LCR_R_NO_ANCHOR,0);\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R49",
+    "desc": "ledger read failure reported as success",
+    "after_find": "LCR_UNKNOWN,LCR_R_LEDGER,-1)",
+    "after_repl": "LCR_UNKNOWN,LCR_R_LEDGER,0)"
+  },
+  {
+    "id": "R50",
+    "desc": "ledger binding: unit/container deleted",
+    "after_find": "    return !strcmp(unit,j->unit) && e->principal",
+    "after_repl": "    return e->principal"
+  },
+  {
+    "id": "R51",
+    "desc": "ledger binding: principal deleted",
+    "after_find": "e->principal==j->principal && ",
+    "after_repl": ""
+  },
+  {
+    "id": "R52",
+    "desc": "ledger binding: boot deleted",
+    "after_find": " && !strcmp(e->boot,j->boot)",
+    "after_repl": ""
+  },
+  {
+    "id": "R53",
+    "desc": "ledger binding: user deleted",
+    "after_find": "        && !strcmp(e->user,j->user) && ",
+    "after_repl": "        && "
+  },
+  {
+    "id": "R54",
+    "desc": "ledger binding: workspace deleted",
+    "after_find": " && !strcmp(e->workspace,j->workspace) &&",
+    "after_repl": " &&"
+  },
+  {
+    "id": "R55",
+    "desc": "ledger binding: launch deleted",
+    "after_find": "        !strcmp(e->launch,j->launch);",
+    "after_repl": "        1;"
+  },
+  {
+    "id": "R56",
+    "desc": "RELEASED short-circuit deleted",
+    "after_find": "    if (e.state==LC_RELEASED) return verdict(v,r,LCR_ABSENT_PROVEN,LCR_R_RELEASED,0);\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R57",
+    "desc": "boot file not group/other-writable deleted",
+    "after_find": " ||\n        (st.st_mode&022)) return 0;\n    return pread",
+    "after_repl": ") return 0;\n    return pread"
+  },
+  {
+    "id": "R58",
+    "desc": "boot file exact 37 bytes deleted",
+    "after_find": "pread(h->c.boot_fd,b,sizeof b-1,0)==37 && b[36]",
+    "after_repl": "pread(h->c.boot_fd,b,sizeof b-1,0)>=37 && b[36]"
+  },
+  {
+    "id": "R59",
+    "desc": "boot newline deleted",
+    "after_find": " && b[36]=='\\n' && !memcmp",
+    "after_repl": " && !memcmp"
+  },
+  {
+    "id": "R60",
+    "desc": "boot equality deleted",
+    "after_find": " && !memcmp(b,boot,36);",
+    "after_repl": " && boot;"
+  },
+  {
+    "id": "R61",
+    "desc": "snapshot query failure ignored",
+    "after_find": "if (h->ops.snapshot(h->ops_context,j->unit,j->manager,&s)<0 ||",
+    "after_repl": "if ((void)h->ops.snapshot(h->ops_context,j->unit,j->manager,&s),0 ||"
+  },
+  {
+    "id": "R62",
+    "desc": "snapshot bus_id terminator deleted",
+    "after_find": "        !memchr(s.bus_id,0,sizeof s.bus_id) || ",
+    "after_repl": "        "
+  },
+  {
+    "id": "R63",
+    "desc": "snapshot manager terminator deleted",
+    "after_find": "!memchr(s.manager,0,sizeof s.manager) ||\n",
+    "after_repl": "\n"
+  },
+  {
+    "id": "R64",
+    "desc": "snapshot invocation terminator deleted",
+    "after_find": "        !memchr(s.invocation,0,sizeof s.invocation) || ",
+    "after_repl": "        "
+  },
+  {
+    "id": "R65",
+    "desc": "snapshot cgroup terminator deleted",
+    "after_find": "!memchr(s.cgroup,0,sizeof s.cgroup) ||\n",
+    "after_repl": "\n"
+  },
+  {
+    "id": "R66",
+    "desc": "snapshot state terminator deleted",
+    "after_find": "        !memchr(s.state,0,sizeof s.state) || ",
+    "after_repl": "        "
+  },
+  {
+    "id": "R67",
+    "desc": "snapshot missing range deleted",
+    "after_find": " || (s.missing!=0 && s.missing!=1)) return LCR_R_QUERY;",
+    "after_repl": ") return LCR_R_QUERY;"
+  },
+  {
+    "id": "R68",
+    "desc": "bus id generation check deleted",
+    "after_find": "    if (strcmp(s.bus_id,j->bus_id)) return LCR_R_BUS;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R69",
+    "desc": "manager owner check deleted",
+    "after_find": "    if (strcmp(s.manager,j->manager)) return LCR_R_MANAGER;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R70",
+    "desc": "collected unit check deleted",
+    "after_find": "    if (s.missing) return LCR_R_COLLECTED;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R71",
+    "desc": "invocation equality deleted",
+    "after_find": "if (strcmp(s.invocation,j->invocation) || strcmp(s.cgroup,j->cgroup))",
+    "after_repl": "if (strcmp(s.cgroup,j->cgroup))"
+  },
+  {
+    "id": "R72",
+    "desc": "cgroup equality deleted",
+    "after_find": "if (strcmp(s.invocation,j->invocation) || strcmp(s.cgroup,j->cgroup))",
+    "after_repl": "if (strcmp(s.invocation,j->invocation))"
+  },
+  {
+    "id": "R73",
+    "desc": "pending job check deleted",
+    "after_find": "    if (s.job) return LCR_R_TRANSIENT;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R74",
+    "desc": "inactive candidate deleted",
+    "after_find": "if (!strcmp(s.state,\"inactive\") || !strcmp(s.state,\"failed\"))",
+    "after_repl": "if (!strcmp(s.state,\"failed\"))"
+  },
+  {
+    "id": "R75",
+    "desc": "failed candidate deleted",
+    "after_find": "if (!strcmp(s.state,\"inactive\") || !strcmp(s.state,\"failed\"))",
+    "after_repl": "if (!strcmp(s.state,\"inactive\"))"
+  },
+  {
+    "id": "R76",
+    "desc": "other states treated as candidate",
+    "after_find": "    return LCR_R_TRANSIENT;\n}\nstatic int observer",
+    "after_repl": "    *out=C_CANDIDATE; return LCR_R_NONE;\n}\nstatic int observer"
+  },
+  {
+    "id": "R77",
+    "desc": "ANCHORED without live state",
+    "after_find": "if (why==LCR_R_NONE && c==C_LIVE)",
+    "after_repl": "if (why==LCR_R_NONE)"
+  },
+  {
+    "id": "R78",
+    "desc": "collected accepted without prior receipt",
+    "after_find": "!(why==LCR_R_COLLECTED && h->absent)",
+    "after_repl": "!(why==LCR_R_COLLECTED)"
+  },
+  {
+    "id": "R79",
+    "desc": "lost cgroup descriptor not reported",
+    "after_find": "    if (!observer(h,&e,&j)) return verdict(v,r,LCR_UNKNOWN,LCR_R_NO_PIN,0);\n",
+    "after_repl": "    (void)observer(h,&e,&j);\n"
+  },
+  {
+    "id": "R80",
+    "desc": "absence failure early return deleted (re-observes)",
+    "after_find": "        if (lso_absent(h->observer,&e)!=1) return verdict(v,r,LCR_UNKNOWN,LCR_R_UNPROVEN,0);\n        h->absent=1;",
+    "after_repl": "        h->absent=lso_absent(h->observer,&e)==1;"
+  },
+  {
+    "id": "R81",
+    "desc": "absence receipt not retained",
+    "after_find": "        h->absent=1;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "R82",
+    "desc": "release result ignored",
+    "after_find": "    if (lso_reconcile(h->observer,h->c.owner,h->c.slot)<0) return verdict(v,r,LCR_UNKNOWN,LCR_R_UNPROVEN,0);",
+    "after_repl": "    (void)lso_reconcile(h->observer,h->c.owner,h->c.slot);"
+  },
+  {
+    "id": "R83",
+    "desc": "close keeps journal lock",
+    "after_find": "    (void)flock(h->fd,LOCK_UN); close(h->fd);",
+    "after_repl": "    close(h->fd);"
+  }
+]
