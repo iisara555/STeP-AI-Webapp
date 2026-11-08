@@ -13,6 +13,19 @@ static const char *user="12345678-1234-4234-8234-000000000001";
 static const char *workspace="12345678-1234-4234-8234-000000000002";
 static const char *launch="00000000000000000000000000000001";
 static int fault, sync_count, at_sync=1, after_sync, calls;
+/* Pause contender immediately before its REAL flock. It already took the
+ * pre-lock fstat, while the holder may still append durable reservations. */
+static int lock_arrived=-1, lock_continue=-1;
+int __real_flock(int, int);
+int __wrap_flock(int fd, int operation) {
+    if (lock_arrived>=0) {
+        char b;
+        assert(write(lock_arrived,"x",1)==1);
+        assert(read(lock_continue,&b,1)==1);
+        close(lock_arrived); close(lock_continue); lock_arrived=-1;
+    }
+    return __real_flock(fd,operation);
+}
 int __real_fsync(int);
 ssize_t __real_pwrite(int,const void *,size_t,off_t);
 int __wrap_fsync(int fd) {
@@ -240,4 +253,34 @@ static void write_poison(void) {
     }
     puts("write uncertainty: errors, short writes and error-after-complete-write poison all transitions");
 }
-int main(void) { duplicate_workspace(); crash_establish(); crash_transitions(); crash_fences(); sync_poison(); write_poison(); corrupt(); }
+static void lock_handoff_snapshot(void) {
+    struct fixture f=fresh(4); assert(lc_establish(&f.c)==0);
+    int start[2], arrived[2], proceed[2];
+    assert(pipe(start)==0 && pipe(arrived)==0 && pipe(proceed)==0);
+    pid_t pid=fork(); assert(pid>=0);
+    if (!pid) {
+        close(start[1]); close(arrived[0]); close(proceed[1]);
+        char b; assert(read(start[0],&b,1)==1); close(start[0]);
+        lock_arrived=arrived[1]; lock_continue=proceed[0];
+        struct lc *a=open_f(&f);
+        for (uint64_t i=1;i<=3;i++) {
+            struct lc_entry e; assert(lc_get(a,i,&e)==0 && e.state==LC_FENCED);
+        }
+        struct lc_entry next;
+        assert(lc_reserve(a,1000,user,workspace,"00000000000000000000000000000004",&next)<0);
+        for (uint64_t i=1;i<=3;i++) assert(lc_reconcile(a,i,absence,NULL)==0);
+        next=reserve(a,4); assert(next.slot==4);
+        for (uint64_t i=1;i<=3;i++) {
+            struct lc_entry e; assert(lc_get(a,i,&e)==0 && strcmp(e.container,next.container));
+        }
+        lc_close(a); _exit(0);
+    }
+    close(start[0]); close(arrived[1]); close(proceed[0]);
+    struct lc *a=open_f(&f); assert(write(start[1],"x",1)==1); close(start[1]);
+    char b; assert(read(arrived[0],&b,1)==1); close(arrived[0]);
+    for (unsigned i=1;i<=3;i++) (void)reserve(a,i);
+    lc_close(a); assert(write(proceed[1],"x",1)==1); close(proceed[1]);
+    wait_exit(pid,0); dispose(&f);
+    puts("lock handoff: post-lock snapshot fences all three late durable reservations; names never reused");
+}
+int main(void) { alarm(60); assert(geteuid()!=0); lock_handoff_snapshot(); duplicate_workspace(); crash_establish(); crash_transitions(); crash_fences(); sync_poison(); write_poison(); corrupt(); }

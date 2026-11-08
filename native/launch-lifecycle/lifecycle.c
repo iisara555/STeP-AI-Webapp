@@ -81,6 +81,10 @@ static int setup(const struct lc_config *c,struct lc **out,int fresh) {
     if (fd<0) return -1;
     if (fstat(fd,&st)<0 || !S_ISREG(st.st_mode) || st.st_uid!=geteuid() || (st.st_mode&07777)!=0600 || st.st_nlink!=1) { close(fd); return fail(EPERM); }
     if (flock(fd,LOCK_EX|LOCK_NB)<0) { int saved=errno; close(fd); return fail(saved); }
+    /* The previous holder may append between the first fstat and our lock.
+     * Only the locked snapshot is authoritative for validation and replay. */
+    if (fstat(fd,&st)<0) { int saved=errno; close(fd); return fail(saved); }
+    if (!S_ISREG(st.st_mode) || st.st_uid!=geteuid() || (st.st_mode&07777)!=0600 || st.st_nlink!=1) { close(fd); return fail(EPERM); }
     struct lc *a=calloc(1,sizeof *a);
     if (!a) { close(fd); return -1; }
     a->fd=fd; a->c=*c; a->owner=getpid();

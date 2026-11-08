@@ -9,7 +9,7 @@ libstep-lifecycle.a: lifecycle.o
 	$(AR) rcs $@ $<
 test-lifecycle: lifecycle.c lifecycle.h test-lifecycle.c
 	$(CC) $(CFLAGS) -pthread lifecycle.c test-lifecycle.c -o $@
-WRAPS = -Wl,--wrap=fsync -Wl,--wrap=pwrite
+WRAPS = -Wl,--wrap=fsync -Wl,--wrap=pwrite -Wl,--wrap=flock
 test-recovery: lifecycle.c lifecycle.h test-recovery.c
 	$(CC) $(CFLAGS) -pthread lifecycle.c test-recovery.c $(WRAPS) -o $@
 test: test-lifecycle test-recovery
