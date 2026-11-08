@@ -6,6 +6,14 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <poll.h>
+static int prepare_crash_stage;
+int __real_qbl_establish(const struct qbl_config *);
+int __wrap_qbl_establish(const struct qbl_config *c) {
+    if (prepare_crash_stage==1) _exit(71); /* reservation durable, no outcome yet */
+    int rc=__real_qbl_establish(c);
+    if (prepare_crash_stage==2 && rc==0) _exit(72); /* established, no request */
+    return rc;
+}
 struct composed_fixture {
     struct fixture quota;
     struct lco_config config;
@@ -139,6 +147,40 @@ static void crash_reopen(void) {
     assert(lco_get(f.owner,2,&next)==0 && next.state==LC_STARTING); /* not readiness */
     finish(&f);
 }
+static void prepare_process_crash(int stage) {
+    struct composed_fixture f; init(&f,1);
+    pid_t child=fork(); assert(child>=0);
+    if (!child) {
+        prepare_crash_stage=stage; assert(lco_open(&f.config,&f.owner)==0);
+        struct lc_entry e; (void)lco_prepare(f.owner,&f.spec,&e); _exit(79);
+    }
+    qb_close(f.quota.broker); f.quota.broker=NULL;
+    int status;
+    assert(waitpid(child,&status,0)==child && WIFEXITED(status) && WEXITSTATUS(status)==70+stage);
+    start(&f.quota); f.config.broker=f.quota.broker;
+    assert(lco_open(&f.config,&f.owner)==0);
+    struct lc_entry e; assert(lco_get(f.owner,1,&e)==0 && e.state==LC_FENCED);
+    struct stat st;
+    if (stage==1) {
+        assert(fstatat(f.outcome_fd,"launch.outcome",&st,0)<0 && errno==ENOENT);
+        assert(lco_attach(f.owner,1,&f.spec)<0 && errno==ENOENT);
+        assert(fstatat(f.outcome_fd,"launch.outcome",&st,0)<0 && errno==ENOENT);
+    } else {
+        assert(fstatat(f.outcome_fd,"launch.outcome",&st,0)==0);
+        assert(lco_attach(f.owner,1,&f.spec)==0);
+        exchange(&f,1,"LAUNCH/1 EMPTY\n"); exchange(&f,0,"LAUNCH/1 UNKNOWN\n");
+        assert(lco_detach(f.owner)==0);
+    }
+    assert(f.calls==0); fresh_spec(&f,2); memcpy(f.spec.workspace,ws_b,37);
+    struct lc_entry next; assert(lco_prepare(f.owner,&f.spec,&next)<0); /* recovery drain */
+    struct proof_model p={.expected=e,.absence=0,.metadata=1};
+    assert(lco_reconcile(f.owner,1,absent,clean,&p)<0 && p.clean_calls==0);
+    p.absence=1; p.metadata=0; assert(lco_reconcile(f.owner,1,absent,clean,&p)<0);
+    assert(lco_get(f.owner,1,&next)==0 && next.state==LC_FENCED);
+    p.metadata=1; assert(lco_reconcile(f.owner,1,absent,clean,&p)==0);
+    assert(lco_prepare(f.owner,&f.spec,&next)==0 && next.slot==2 && strcmp(next.container,e.container));
+    assert(f.calls==0); finish(&f);
+}
 static void all_pending_fenced(void) {
     struct composed_fixture f; init(&f,4); assert(lco_open(&f.config,&f.owner)==0);
     struct lc_entry entries[3];
@@ -259,6 +301,7 @@ int COMPOSITION_TEST_MAIN(void) {
     alarm(60); assert(geteuid()!=0); unsigned passed=0;
 #define RUN(test) do { test; printf("ok %u - %s\n",++passed,#test); } while (0)
     RUN(crash_reopen()); RUN(all_pending_fenced());
+    RUN(prepare_process_crash(1)); RUN(prepare_process_crash(2));
     RUN(capacity_and_denial(0)); RUN(capacity_and_denial(1));
     RUN(io_failure(0)); RUN(io_failure(1)); RUN(io_failure(2));
     RUN(startup_and_binding()); RUN(release_sync_failure());

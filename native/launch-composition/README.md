@@ -77,7 +77,7 @@ npm run check
 make -C native/launch-composition install-check
 ```
 
-The composition executable prints **11 named scenarios**, passed normally and
+The composition executable prints **13 named scenarios**, passed normally and
 under ASan/UBSan:
 
 1. Child owner exits inside fixed spawn, before qbl outcome completion; reopen
@@ -96,6 +96,16 @@ under ASan/UBSan:
 9. Release fsync failure poisons the owner; new preparation and proof retry refuse.
 10. Recovered EMPTY outcome cannot spawn through a FENCED lifecycle entry.
 11. Outcome establishment error retains the durable reservation and capacity.
+12. Child owner exits after durable reservation but before outcome establishment;
+    reopening fences the reservation, attach refuses the missing outcome without
+    creating it, new-workspace preparation is blocked until both proofs succeed.
+13. Child owner exits after durable outcome establishment but before any request;
+    reopened EMPTY status cannot authorize launch, capacity remains fenced until
+    exact absence and cleanup proofs succeed, and the next container is distinct.
+
+The two prepare crash cases use a linker wrapper around `qbl_establish` to exit
+the real child process immediately before or after the actual establishment.
+They do not add production crash hooks, issue systemd requests or kill processes.
 
 GCC `-fanalyzer` passes for composition and fixture. The lifecycle suite also
 includes a deterministic real-two-process lock-handoff regression: contender B

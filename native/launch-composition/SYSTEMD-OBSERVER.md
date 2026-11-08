@@ -82,7 +82,9 @@ library plus the composition/lifecycle/quota archives and pthread.
 `make -C native/launch-composition all test analyze sanitize` passed GCC
 `-fanalyzer` and ASan/UBSan for the actual source and fixtures:
 
-- Existing 11 composition scenarios.
+- 13 composition scenarios (including the separate two-case prepare-crash test
+  increment: death before outcome establishment and death after establishment
+  but before a request).
 - 18 UNKNOWN fixtures: missing lifetime authority/outstanding attach, bus job,
   missing unit, query failure, manager replacement, InvocationID replacement,
   cgroup-path replacement, active unit, populated descendants, duplicate,

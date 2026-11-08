@@ -3,7 +3,7 @@ AR ?= ar
 CFLAGS ?= -std=c11 -O2 -g -Wall -Wextra -Werror -Wconversion -Wshadow -Wstrict-prototypes -D_FORTIFY_SOURCE=3 -fstack-protector-strong
 SOURCES = composition.c ../launch-lifecycle/lifecycle.c ../quota-broker/launch-request.c ../quota-broker/core.c
 HEADERS = composition.h ../launch-lifecycle/lifecycle.h ../quota-broker/launch-request.h ../quota-broker/core.h
-WRAPS = -Wl,--wrap=fsync -Wl,--wrap=fstatvfs
+WRAPS = -Wl,--wrap=fsync -Wl,--wrap=fstatvfs -Wl,--wrap=qbl_establish
 .DEFAULT_GOAL := all
 .PHONY: all test analyze sanitize clean install install-check
 # Deliberate review gate; never provide an installable composition by default.
