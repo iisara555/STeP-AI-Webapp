@@ -332,7 +332,7 @@
   {
     "id": "R56",
     "desc": "RELEASED short-circuit deleted",
-    "after_find": "    if (e.state==LC_RELEASED) return verdict(v,r,LCR_ABSENT_PROVEN,LCR_R_RELEASED,0);\n",
+    "after_find": "    if (e.state==LC_RELEASED) return verdict(v,r,LCR_ALREADY_RELEASED,LCR_R_RELEASED,0);\n",
     "after_repl": ""
   },
   {

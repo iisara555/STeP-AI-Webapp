@@ -136,9 +136,10 @@ static void absent_proven(void) {
     f.fenced=1;
     assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_ABSENT_PROVEN && r==LCR_R_NONE);
     assert(ledger_state(&f)==LC_RELEASED && f.events_calls==1);
-    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_ABSENT_PROVEN && r==LCR_R_RELEASED);
+    /* Second pass: already released is reported distinctly, never as a fresh proof. */
+    assert(lcr_reconcile(h,&v,&r)==0 && v==LCR_ALREADY_RELEASED && r==LCR_R_RELEASED);
     lcr_close(h);
-    assert(once(&f,&r)==LCR_ABSENT_PROVEN && r==LCR_R_RELEASED);
+    assert(once(&f,&r)==LCR_ALREADY_RELEASED && r==LCR_R_RELEASED);
     assert(lco_prepare(f.f.owner,&f.f.spec,&next)==0 && strcmp(next.container,f.e.container));
     rfinish(&f);
 }

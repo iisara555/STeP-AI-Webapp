@@ -228,7 +228,7 @@ int lcr_reconcile(struct lcr *h,enum lcr_verdict *v,enum lcr_reason *r) {
     struct lc_entry e;
     if (lco_get(h->c.owner,h->c.slot,&e)<0) return verdict(v,r,LCR_UNKNOWN,LCR_R_LEDGER,-1);
     if (!bound(&e,&j)) return verdict(v,r,LCR_UNKNOWN,LCR_R_LEDGER,0);
-    if (e.state==LC_RELEASED) return verdict(v,r,LCR_ABSENT_PROVEN,LCR_R_RELEASED,0);
+    if (e.state==LC_RELEASED) return verdict(v,r,LCR_ALREADY_RELEASED,LCR_R_RELEASED,0);
     if (!boot_matches(h,j.boot)) return verdict(v,r,LCR_UNKNOWN,LCR_R_BOOT,0);
     int c=-1;
     why=classify(h,&j,&c);

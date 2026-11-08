@@ -45,14 +45,18 @@ lines at 455/55/130 bytes.
 
 ## Decision
 
-1. Journal attributes or bytes changed since this handle's first read: UNKNOWN
-   (the handle stays poisoned even if the bytes are restored).
+1. Journal bytes changed since this handle's first read: UNKNOWN, and the handle
+   stays poisoned even if the bytes are restored. A failed attribute check
+   (type/owner/mode/links/size/read) is a non-poisoning UNKNOWN for that call
+   only; no release follows either way.
 2. Empty / INTENT only / INTENT+JOB / torn / grammar: UNKNOWN **without any bus
    query**: an empty journal has no absence proof, an `INTENT` without `JOB` may
    or may not have reached systemd, a `JOB` without `ANCHOR` may still exist.
 3. `INTENT` must bind exactly the ledger entry (unit = `<container>.service`,
    principal, boot, user, workspace, launch); a slot already durably RELEASED
-   reports ABSENT_PROVEN (reason RELEASED) without observing.
+   reports the distinct verdict ALREADY_RELEASED (reason RELEASED) without
+   observing. It is not an absence proof and never permits deleting the journal
+   or other evidence, because a different path may have released the slot.
 4. Current boot (pinned `boot_fd`: root-owned, not group/other-writable, exactly
    37 bytes) must equal the `INTENT` boot.
 5. One read-only snapshot through the observer's own seam

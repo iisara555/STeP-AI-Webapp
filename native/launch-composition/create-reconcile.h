@@ -17,9 +17,14 @@
  *                     the journal's bus/manager/unit/invocation/cgroup and the
  *                     lifecycle entry is durably RELEASED.
  *  LCR_UNKNOWN        everything else. Retains capacity and the recovery fence.
+ *  LCR_ALREADY_RELEASED  the bound ledger slot is already durably RELEASED. Not
+ *                     observed and NOT an absence proof: capacity is already
+ *                     back, but this verdict never permits deleting the journal
+ *                     or any other evidence (another path may have released it).
  */
-enum lcr_verdict { LCR_UNKNOWN = 0, LCR_ANCHORED, LCR_ABSENT_PROVEN };
-/* Diagnostic only; every reason except NONE/RELEASED accompanies LCR_UNKNOWN. */
+enum lcr_verdict { LCR_UNKNOWN = 0, LCR_ANCHORED, LCR_ABSENT_PROVEN, LCR_ALREADY_RELEASED };
+/* Diagnostic only; every reason except NONE (ANCHORED/ABSENT_PROVEN) and
+ * RELEASED (ALREADY_RELEASED) accompanies LCR_UNKNOWN. */
 enum lcr_reason {
     LCR_R_NONE = 0,
     LCR_R_JOURNAL,    /* journal type/owner/mode/links/size/read failure */
@@ -39,7 +44,7 @@ enum lcr_reason {
     LCR_R_TRANSIENT,  /* exact unit with job or activating/deactivating state */
     LCR_R_NO_PIN,     /* no retained original cgroup descriptor: cannot prove */
     LCR_R_UNPROVEN,   /* observer absence or cleanup proof not established */
-    LCR_R_RELEASED,   /* ledger slot already durably RELEASED (ABSENT_PROVEN) */
+    LCR_R_RELEASED,   /* ledger slot already durably RELEASED (ALREADY_RELEASED) */
 };
 struct lcr;
 struct lcr_config {
