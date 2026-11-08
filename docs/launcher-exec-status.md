@@ -52,6 +52,23 @@ The future trusted post-fork stub can use `srl_status_send` for stage 4 after it
 fixed `execve` returns, then `_exit`; the unprivileged exec fixture exercises this.
 No general-purpose spawn helper or production stub is introduced.
 
+Strict decoder return values are `1` for a valid frame, `-1` for an error
+(including nonblocking EAGAIN), and `0` for an **ambiguous terminal observation**.
+The latter sets `ambiguous_terminal`, not an EOF flag: Unix seqpacket permits a
+live zero-length record, so `recvmsg == 0` does not prove closure. The decoder
+conservatively stops on either a clean empty record or actual closure, retaining
+the prior stage/error fields and leaving any later queued records unread; further
+calls return EINVAL. It neither resumes parsing nor infers runtime readiness.
+Polling hangup is not used to retroactively classify the consumed record: the
+sender can close concurrently, with an empty record and later frames queued.
+Ancillary data or MSG_TRUNC/MSG_CTRUNC still takes the malformed path first,
+even with zero payload: received rights are closed, `invalid` is set and EPROTO
+is returned, without setting `ambiguous_terminal`.
+
+Below, EOF denotes independently known closure in the controlled exec/death
+fixtures or a conforming sender that sends only fixed-size records. Decoder
+return 0 alone is weaker: **empty-record-or-closure UNKNOWN**, at every stage.
+
 Keep these observations separate:
 
 1. `fork()` returning a PID proves only creation; `fork() == -1` is a local fork
@@ -89,9 +106,16 @@ invalid request, failed launcher exec, bwrap EACCES, successful fake exec, empty
 environment, no status FD leakage and byte-exact separate nonce bootstrap.
 Protocol tests cover SIGKILL before entry/after ENTERED/after VALIDATED, hostile
 frames/rights, wrong creator UID, CLOEXEC and broken-peer SIGPIPE avoidance.
+The empty-record regression was RED against `c7da895` (assertion exit 134): an
+open sender queues an empty record followed by ENTERED. It now verifies explicit
+ambiguity, permanent terminal decoding, and the still-unread ENTERED record.
+Genuine SIGKILL closure at three stages and write shutdown remain terminal.
+Seven hostile-frame cases include empty payload with rights and control-truncated
+32-rights delivery; descriptor counts are unchanged after every rejection.
 The original successful-ack test failed against the old launcher before the fix.
 
-Verified: runner-launcher `clean all test analyze sanitize`, with normal rebuild;
+Verified after decoder correction: runner-launcher `clean all test analyze sanitize`
+(328 launcher checks in normal and sanitizer builds), with normal rebuild;
 quota-broker `clean all test analyze sanitize`; `npm run check` (17 existing engine
 diagnostics); 17 targeted launcher/Unix-channel/real-runtime tests (all passed,
 no skips; existing Node module.register deprecation). No privileged host tests.

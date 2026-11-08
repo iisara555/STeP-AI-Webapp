@@ -38,7 +38,7 @@ int srl_status_send(unsigned int stage, unsigned int error, unsigned int exec_er
 }
 
 int srl_status_receive(int fd, struct srl_exec_status *status) {
-    if (!status || status->invalid || status->eof) { errno = EINVAL; return -1; }
+    if (!status || status->invalid || status->ambiguous_terminal) { errno = EINVAL; return -1; }
     uint32_t wire[4];
     char control[CMSG_SPACE(sizeof(int) * 16)];
     struct iovec iov = {.iov_base = wire, .iov_len = sizeof wire};
@@ -56,7 +56,10 @@ int srl_status_receive(int fd, struct srl_exec_status *status) {
         }
     }
     if (!ancillary && !(msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) && n == 0) {
-        status->eof = 1;
+        /* recvmsg(0) can be a live empty seqpacket, not just peer closure.
+         * Stop conservatively; polling hangup cannot identify this record and
+         * a peer may close concurrently or leave later records queued. */
+        status->ambiguous_terminal = 1;
         return 0;
     }
     if (ancillary || (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) || n != sizeof wire ||

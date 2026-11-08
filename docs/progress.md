@@ -1,5 +1,23 @@
 # Progress
 
+## Exec-status zero-length classification correction — not installed
+
+- Replaced decoder EOF claim with `ambiguous_terminal`: clean zero-length receive
+  means empty-record-or-closure UNKNOWN, preserves stage and stops decoding; later
+  records remain unread. No runtime-ready inference. Genuine closure still stops.
+- RED live empty-record + queued ENTERED regression failed on the reviewed base;
+  now covers terminal refusal and unread ENTERED. Seven hostile frames include
+  empty rights and control-truncated rights, with unchanged descriptor counts.
+- Launcher native all/test/analyze/sanitize passed (328 launcher checks each normal
+  and sanitized); broker all/test/analyze/sanitize passed unprivileged.
+- Exact targeted launcher/Unix-channel/real-runtime suite: 17 passed, zero failed
+  or skipped; broader related suite: 21 passed, zero failed or skipped.
+  `npm run check` passed (17 existing engine diagnostics; Node deprecation unchanged).
+  `install-check` still fails on the expected stale launcher hash.
+- Old install pins remain stale; installation and production launch stay blocked
+  until final lifecycle composition, review and deliberate repinning. No root,
+  sudo, install, host configuration, real-data changes or push.
+
 ## Launcher exec-status prerequisite — not installed
 
 - Added a separate fixed service child entry with trusted-root-created seqpacket

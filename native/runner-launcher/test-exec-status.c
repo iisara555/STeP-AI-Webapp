@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <poll.h>
@@ -14,6 +15,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+static unsigned int fd_count(void) {
+    DIR *dir = opendir("/proc/self/fd"); assert(dir);
+    unsigned int count = 0;
+    while (readdir(dir)) count++;
+    assert(closedir(dir) == 0);
+    return count;
+}
 static void pair_new(int p[2]) {
     assert(socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, p) == 0);
 }
@@ -38,11 +46,36 @@ int main(void) {
         assert(WIFSIGNALED(exit_status));
         struct srl_exec_status s = {0};
         for (unsigned int i = 0; i < stage; i++) assert(srl_status_receive(p[0], &s) == 1);
-        assert(srl_status_receive(p[0], &s) == 0 && s.eof && s.stage == stage);
+        assert(srl_status_receive(p[0], &s) == 0 && s.ambiguous_terminal && s.stage == stage);
         /* stage 2 + EOF is identical to a successful exec: NO ready bit exists. */
         close(p[0]);
     }
-    for (int mode = 0; mode < 5; mode++) {
+    /* A live empty seqpacket is not EOF, even with ENTERED already queued. */
+    {
+        int p[2]; pair_new(p);
+        struct srl_exec_status s = {0};
+        assert(send(p[1], "", 0, MSG_NOSIGNAL) == 0);
+        frame(p[1], SRL_STATUS_ENTERED); /* sender remains open */
+        assert(srl_status_receive(p[0], &s) == 0);
+        assert(s.ambiguous_terminal && !s.invalid && s.stage == 0);
+        assert(srl_status_receive(p[0], &s) == -1 && errno == EINVAL);
+        uint32_t queued[4];
+        assert(recv(p[0], queued, sizeof queued, MSG_DONTWAIT) == sizeof queued);
+        assert(ntohl(queued[1]) == SRL_STATUS_ENTERED);
+        close(p[0]); close(p[1]);
+    }
+    /* A genuine write shutdown still terminates, but is not called proven EOF. */
+    {
+        int p[2]; pair_new(p);
+        struct srl_exec_status s = {0};
+        assert(srl_status_receive(p[0], &s) == -1 && errno == EAGAIN);
+        assert(!s.ambiguous_terminal && !s.invalid);
+        assert(shutdown(p[1], SHUT_WR) == 0);
+        assert(srl_status_receive(p[0], &s) == 0 && s.ambiguous_terminal && !s.invalid);
+        assert(srl_status_receive(p[0], &s) == -1 && errno == EINVAL);
+        close(p[0]); close(p[1]);
+    }
+    for (int mode = 0; mode < 7; mode++) {
         int p[2]; pair_new(p);
         struct srl_exec_status s = {0};
         if (mode == 0) frame(p[1], SRL_STATUS_VALIDATED); /* out of order */
@@ -53,18 +86,21 @@ int main(void) {
         }
         if (mode == 2) assert(send(p[1], "x", 1, 0) == 1);
         if (mode == 3) { char large[17] = {0}; assert(send(p[1], large, sizeof large, 0) == sizeof large); }
-        if (mode == 4) {
+        if (mode >= 4) {
             uint32_t w[4] = {htonl(SRL_STATUS_MAGIC), htonl(SRL_STATUS_ENTERED), 0, 0};
-            char control[CMSG_SPACE(sizeof(int))] = {0};
-            struct iovec iov = {.iov_base = w, .iov_len = sizeof w};
+            int count = mode == 6 ? 32 : 1;
+            char control[CMSG_SPACE(sizeof(int) * 32)] = {0};
+            struct iovec iov = {.iov_base = w, .iov_len = mode == 5 ? 0 : sizeof w};
             struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1,
-                                 .msg_control = control, .msg_controllen = sizeof control};
+                                 .msg_control = control, .msg_controllen = CMSG_SPACE(sizeof(int) * (size_t)count)};
             struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
-            c->cmsg_level = SOL_SOCKET; c->cmsg_type = SCM_RIGHTS; c->cmsg_len = CMSG_LEN(sizeof(int));
-            *(int *)CMSG_DATA(c) = p[1];
-            assert(sendmsg(p[1], &msg, 0) == sizeof w);
+            c->cmsg_level = SOL_SOCKET; c->cmsg_type = SCM_RIGHTS; c->cmsg_len = CMSG_LEN(sizeof(int) * (size_t)count);
+            for (int i = 0; i < count; i++) ((int *)CMSG_DATA(c))[i] = p[1];
+            assert(sendmsg(p[1], &msg, 0) == (mode == 5 ? 0 : (ssize_t)sizeof w));
         }
+        unsigned int before = fd_count();
         assert(srl_status_receive(p[0], &s) == -1 && errno == EPROTO && s.invalid);
+        assert(!s.ambiguous_terminal && fd_count() == before);
         assert(srl_status_receive(p[0], &s) == -1 && s.invalid);
         close(p[0]); close(p[1]);
     }
@@ -84,6 +120,6 @@ int main(void) {
     close(p[0]); close(p[1]);
     int exit_status; assert(waitpid(child, &exit_status, 0) == child);
     assert(WIFEXITED(exit_status) && WEXITSTATUS(exit_status) == 0);
-    puts("test-exec-status: crash at 3 stages, 5 hostile frames, peer identity and broken peer passed");
+    puts("test-exec-status: crash at 3 stages, live empty record, write shutdown, 7 hostile frames (rights cleanup included), peer identity and broken peer passed");
     return 0;
 }

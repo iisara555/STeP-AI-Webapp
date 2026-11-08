@@ -496,8 +496,8 @@ static void test_service(const char *launcher, int mode) {
                   observation.exec_errno == EACCES, "explicit bwrap exec errno");
         }
         CHECK(poll(&p, 1, 2000) > 0 && srl_status_receive(pair[0], &observation) == 0,
-              "status EOF after final frame");
-        CHECK(mode != 0 || (observation.stage == SRL_STATUS_VALIDATED && observation.eof),
+              "ambiguous terminal after final frame");
+        CHECK(mode != 0 || (observation.stage == SRL_STATUS_VALIDATED && observation.ambiguous_terminal),
               "bwrap exec candidate, NOT runtime-ready");
     }
     close(pair[0]);
