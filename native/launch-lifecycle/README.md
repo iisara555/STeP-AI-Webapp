@@ -136,28 +136,24 @@ ASan/UBSan. Fault-injected process death is **not** sudden-power-loss validation
 No test starts systemd, switches account, uses sudo/root/XFS, installs host files,
 or executes a workload.
 
-## Exact next integration (not implemented here)
+## Synthetic composition and remaining integration
 
-1. Independently review this component and the adjacent `qbl` request/outcome and
-   fixed-policy launcher descriptor/status contracts. Keep the installed broker
-   refusing lifecycle composition meanwhile; do not change launcher hashes.
-2. Add a protected native startup owner which opens exactly one configured ledger
-   before serving requests, retains it through service drain/join, and enumerates
-   all FENCED entries. Supply a trusted synchronous container/cgroup reconciliation
-   adapter that proves exact epoch/boot/launch/container identity, descendant
-   absence and metadata cleanup. Unknown observations retain capacity and block
-   admission; do not auto-establish after any open failure.
-3. Compose reserve + durable STARTING before the existing one-shot protected
-   request enters the quota-core fixed-policy spawn fence. Use this entry's
-   launch/container identity, not caller-selected names. Keep launch.outcome
-   PENDING/outcome persistence independent. Only verified native/runtime evidence
-   may advance RUNNING; neither error-pipe EOF nor launcher death proves runtime
-   readiness or absence. A reservation is never permission to replay a launch.
-4. Add an unprivileged cross-component regression: child holder dies after fixed
-   spawn callback entry but before outcome completion; restarted owner fences the
-   reservation, STATUS never spawns, another reserve is denied despite spare
-   capacity, UNKNOWN/PRESENT proof retains it, and exact ABSENT_AND_CLEAN proof
-   permits exactly one release and a different never-reused container name.
-5. Only after that review, implement root-owned startup/service policy, deliberate
-   establishment/census, artifact repinning and separately authorized host
-   acceptance. No production or host readiness is claimed by this library.
+The adjacent [`launch-composition`](../launch-composition/README.md) now exercises
+this library together with the actual `qbl` outcome adapter and quota core under
+one startup owner. Its unprivileged fixture kills that owner inside the fixed
+spawn callback, reopens/fences, queries STATUS without replay, retains capacity
+through failed absence/metadata proofs and permits a never-reused name only
+after exact trusted reconciliation. This is not production service linkage.
+
+The lock-handoff regression in `test-recovery` pauses a real contender before
+`flock`, lets the current holder append three durable reservations and close,
+then requires the contender to replay the **post-lock** fresh `fstat` size and
+fence all three. The pre-lock snapshot is never authoritative after handoff.
+
+Still required: independent review, protected systemd/cgroup incarnation
+ownership and startup census, actual exact-incarnation descendant-absence plus
+metadata-cleanup backend, fixed-policy launcher/exec-status/runtime-ready
+linkage, root-owned service startup policy, deliberate artifact repinning and
+separately authorized host acceptance. Keep production launch composition
+unlinked/refused and the new composition's installation gate blocked. Neither
+callback STARTED nor exec-status EOF establishes readiness or absence.
