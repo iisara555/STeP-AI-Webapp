@@ -7,3 +7,5 @@ test-link
 test-sanitize
 test-keeper-sanitize
 core
+host-probe
+fixture-*/

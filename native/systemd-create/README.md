@@ -10,32 +10,119 @@ workload inside it. It never starts a workload, parses commands or reads files.
 
 - Unit name is derived from the lifecycle entry (`step-lc-<epoch>-<slot>.service`);
   callers cannot choose a unit, path, PID, command, environment or limit.
-- Fixed properties: `Type=exec`, `Restart=no`, `Delegate=no`,
-  `KillMode=control-group`, `MemoryMax=512 MiB`, `TasksMax=64`,
-  `CPUQuotaPerSecUSec=1s`, `NoNewPrivileges=yes`, null stdio, mode `fail`.
-- Before connecting: the expected system-bus id and the expected systemd manager
-  unique name (strict `:<digits>.<digits>`; it is interpolated into a match rule)
-  are verified, plus peer credentials uid 0 and `GetConnectionUnixUser == 0`.
-- A durable `INTENT` line is fsynced to a fresh, private, single-use journal
-  **before** the async call; then `JOB` on reply and `ANCHOR` only after the exact
-  `JobRemoved(done)` for that job plus readback of `ActiveState=active`, the
-  expected `ControlGroup`, a nonzero `InvocationID` and no pending job.
-- One attempt per journal. Any error, timeout (5 s), mismatched event, lost
-  exclusive authority or fsync failure leaves the state `UNCERTAIN`. Nothing in
-  this module releases a reservation, cancels a job or kills anything.
-- `lsc_close` only drops local subscriptions.
+- Fixed properties (mode `fail`), every name and D-Bus type checked against the
+  systemd 259 introspection on this host (`make host-check`) and its transient
+  setters:
+  - `Type=exec`, `Restart=no`, `KillMode=control-group`, `OOMPolicy=kill`,
+    `Delegate=no`, `MemoryMax=512 MiB`, `MemorySwapMax=0`, `TasksMax=64`,
+    `CPUQuotaPerSecUSec=1s`, `User=root`, `Group=root`, null stdio,
+    `ExecStart=/usr/libexec/step-container-keeper` (argv = the path only).
+  - Sandbox: `NoNewPrivileges`, empty `CapabilityBoundingSet` and
+    `AmbientCapabilities`, `PrivateNetwork`, `IPAddressDeny=any` (0.0.0.0/0 and
+    ::/0), `RestrictAddressFamilies=none`, `ProtectSystem=strict`,
+    `ProtectHome=yes`, `PrivateTmp`, `PrivateDevices`, `PrivateIPC`,
+    `ProtectProc=invisible`, `ProcSubset=pid`, `ProtectKernelTunables/Modules/Logs`,
+    `ProtectControlGroups`, `ProtectClock`, `ProtectHostname`,
+    `RestrictNamespaces=yes` (0), `LockPersonality`, `MemoryDenyWriteExecute`,
+    `RestrictSUIDSGID`, `RestrictRealtime`, `SystemCallArchitectures=native`,
+    `SystemCallFilter` allow-list (`@default` plus the few file/IO calls the
+    dynamically linked keeper needs before `pause()`; a violation kills it),
+    `UMask=0077`, `LimitNOFILE=64`.
+  - `CollectMode=inactive` (explicit; not `inactive-or-failed`): a *failed*
+    anchor stays loaded with its `Result`/`InvocationID` as evidence until
+    explicitly reset. A cleanly *inactive* anchor is garbage-collected, so
+    reconciliation must not depend on unit metadata after a clean stop; it
+    relies on the pinned cgroup and lifecycle fence instead.
+  - None dropped: no requested property was rejected by host introspection.
+- Before connecting and again after the durable `INTENT` (both before the send),
+  and again at the start and end of readback: expected system-bus id, expected
+  manager unique name (strict `:<digits>.<digits>`; it is interpolated into a
+  match rule), bus peer credential uid 0 and `GetConnectionUnixUser == 0`.
+  Exclusive authority is re-checked at open, begin entry, after `INTENT`, at
+  every poll entry, at readback start/end and after `ANCHOR`.
+- The keeper path ancestry (`/`, `/usr`, `/usr/libexec`, keeper) must be
+  root-owned, not group/other-writable, no symlinks, keeper a regular
+  executable with one link; checked at open and again at begin.
+- Match rule: `sender`, `path`, `interface`, `member='JobRemoved'` **and
+  `arg2='<unit>'`**, so host job traffic is filtered by the bus; the callback
+  still ignores other units as defense in depth.
+- A durable `INTENT` line is fsynced to the journal **before** the async call;
+  then `JOB` on reply and `ANCHOR` only after the exact `JobRemoved(done)` whose
+  job id and path equal the reply's, plus readback of the *effective* values:
+  every fixed property above (root drop-ins apply to transient units too),
+  `DropInPaths` empty, `Transient=yes`, `ActiveState=active`,
+  `SubState=running`, `MainPID>1`, `LimitNOFILESoft`, exact `ExecStart`,
+  `IPAddressDeny`, `RestrictAddressFamilies`, an allow-list `SystemCallFilter`
+  containing `pause` and none of a short never-grant list, `GetUnit` returning
+  exactly the encoded unit object path, the expected `ControlGroup`, a nonzero
+  `InvocationID` and no pending job. Readback is a point-in-time check.
+- `lsc_poll` dispatches at most 32 bus messages per call. Event-loop callers use
+  `lsc_fd` / `lsc_events` / `lsc_timeout` (relative µs until the next required
+  poll: the earlier of sd-bus's own timeout and the 5 s attempt deadline)
+  instead of busy-polling. The deadline is checked at poll entry and again after
+  the synchronous readback.
+- Any error, timeout, mismatched or duplicate event, lost authority/owner or
+  fsync failure leaves the state `UNCERTAIN`. Nothing in this module releases a
+  reservation, cancels a job or kills anything. `lsc_close` only drops local
+  subscriptions.
+
+## Single-use: exactly what is enforced
+
+- Per handle: `lsc_begin` runs once; any later call fails without sending.
+- Per journal *content*: `lsc_open` and `lsc_begin` require an empty journal, and
+  `INTENT` is written before the send. Once any `INTENT` byte is written (even if
+  its fsync failed) the journal is never accepted again.
+- **Not single-use before `INTENT`:** a failure before the `INTENT` write (bus
+  connect, owner/authority/keeper check, match, `Subscribe`) sends nothing and
+  leaves the journal empty, so it can be opened and attempted again.
+- `flock(LOCK_EX)` is taken on the caller's **open file description**. It
+  excludes concurrent handles opened through *other* descriptions of the same
+  file, but **not** a second `lsc_open` on the same fd (or a dup of it): both
+  handles open successfully, and only the empty-journal check stops the second
+  from sending after the first wrote `INTENT`. The lock persists until every fd
+  on that description is closed. Callers must serialize and must not open two
+  handles per journal; the module does not enforce this within one description.
+- Unit-name nonreuse across journals is the caller's `exclusive` authority.
 
 ## Verified (unprivileged)
 
-`make clean all test analyze sanitize`: 18 fake-bus scenarios (exact serialized
-arguments and property types, reply/event/readback mismatches, timeouts, fsync
-faults, wrong bus id/owner/uid, authority loss, and rejected manager names),
-keeper identity/argument/pause tests, GCC analyzer, ASan/UBSan, and a link test
-against the real `libsystemd.so.0`. No real unit was created.
+`make clean all test analyze sanitize`:
+
+- Fake-bus fixture: typed token messages with sd-bus cursor semantics; a FIFO
+  delivered only by `sd_bus_process` (one message per call); every request
+  argument asserted (destinations, paths, interfaces, `GetNameOwner`/
+  `GetConnectionUnixUser`/`GetUnit` arguments, property object path and type,
+  exact match rule, exact `StartTransientUnit` serialization in
+  `test-create.trace`), no message leaks.
+- Sweeps: every authority re-check (7) and every owner facet × call (4×4) at
+  the exact stage; every readback property × perturbation, trailing argument
+  and Get failure; `GetUnit` prefix/other/trailing; dispatch bound (32 per poll),
+  event-before-reply, separate polls, endless flood to deadline, spoofed sender,
+  `sd_bus_process` error, post-readback deadline, clock failures, fsync faults,
+  `Subscribe` error/trailing, correlation (`JobRemoved` job 8 vs reply job 7),
+  duplicate events, other units; `lsc_fd`/`lsc_events`/`lsc_timeout`.
+- Production keeper/journal branches run against a scratch root through the
+  `LSC_TESTING`-only hook (missing, symlink, writable, not executable, hardlink,
+  directory, symlinked ancestor/root, wrong owner — at open and between open and
+  begin; journal mode/owner/nlink 0/2/FIFO/O_WRONLY/O_RDONLY/nonempty/flock).
+  `make pin-check` refuses a `create.o` containing the hook; defaults are
+  asserted to be `/` and uid 0.
+- A mutation run deleted each check in a scratch copy; all were killed (see
+  the commit message).
+- Keeper identity/argument/pause tests, GCC analyzer, ASan/UBSan, link test
+  against the real `libsystemd.so.0`.
+
+`make host-check` (read-only system bus: Get/GetUnit/Introspect/GetNameOwner):
+the production `owner()` passes on this host, unit path encoding equals
+`GetUnit`, every sent/read property name and type is present in live
+introspection, and the production readers parse real replies. No unit was
+created.
 
 ## Not done (production blocked)
 
-`make install install-check` refuse on purpose. Missing: startup reconciliation
-of nonempty journals, incarnation-bound stop/kill, credential transition into
-the anchored cgroup, composition with `launch-composition`, independent review,
-host acceptance and artifact pins.
+`make install install-check` refuse on purpose. Missing: host acceptance of the
+hardened unit (the sandbox, syscall allow-list, `LimitNOFILE=64` and readback
+representations have not been exercised by a real root `StartTransientUnit`),
+startup reconciliation of nonempty journals, incarnation-bound stop/kill,
+credential transition into the anchored cgroup, composition with
+`launch-composition`, independent review and artifact pins.
