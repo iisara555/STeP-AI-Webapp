@@ -126,9 +126,14 @@ artifacts; they do not certify or install the composition. The separate
 `f16b589` main exec-status handshake is deliberately not edited or backported;
 its installation gate must remain intact when integrating these commits.
 
+The concrete read-only [systemd/cgroup observer](SYSTEMD-OBSERVER.md) now supplies
+narrow exact-incarnation absence and independent unit/cgroup metadata-cleanup
+callbacks using sd-bus and pinned descriptors. It does not supply create/stop or
+exclusive lifetime authority; missing authority/evidence returns UNKNOWN.
+
 Still required: actual protected systemd/cgroup incarnation ownership and
-startup census, an exact-identity descendant-absence **and** unit-metadata-cleanup
-backend, fixed-policy launcher linkage (including the separate exec-status
+startup census, durable protected expectation/absence records, a real single
+owner lifetime-fence implementation, fixed-policy launcher linkage (including the separate exec-status
 handshake and authenticated runtime-ready acknowledgment), root-owned startup
 policy, independent review, deliberately reviewed artifact pins, and separately
 authorized host acceptance. Never infer absence from a PID, launcher death,

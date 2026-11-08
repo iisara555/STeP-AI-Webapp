@@ -252,7 +252,10 @@ static void prepare_error_retains(void) {
     assert(lco_prepare(f.owner,&f.spec,&e)<0 && errno==ENOSPC);
     assert(f.calls==0); finish(&f);
 }
-int main(void) {
+#ifndef COMPOSITION_TEST_MAIN
+#define COMPOSITION_TEST_MAIN main
+#endif
+int COMPOSITION_TEST_MAIN(void) {
     alarm(60); assert(geteuid()!=0); unsigned passed=0;
 #define RUN(test) do { test; printf("ok %u - %s\n",++passed,#test); } while (0)
     RUN(crash_reopen()); RUN(all_pending_fenced());

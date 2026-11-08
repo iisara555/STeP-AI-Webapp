@@ -2,3 +2,7 @@
 *.a
 test-composition
 test-sanitize
+test-systemd-observer
+test-observer-sanitize
+test-systemd-bus
+test-bus-sanitize
