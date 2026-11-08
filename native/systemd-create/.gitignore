@@ -1,0 +1,9 @@
+*.o
+*.a
+step-container-keeper
+test-create
+test-keeper
+test-link
+test-sanitize
+test-keeper-sanitize
+core
