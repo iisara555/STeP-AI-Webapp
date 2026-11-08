@@ -1932,3 +1932,16 @@ observed failing first. Verified: native 263 checks + analyzer/ASan/UBSan, insta
 24 stub checks, protected driver 6 tests, check + npm 118 + DB 29 + engine 326.
 No root/sudo/install/host tests run; raw-bwrap remains the gated default. Residual
 privileged-update and revocation-through-spawn races are documented, not closed.
+
+### Incarnation-bound anchor stop — synthetic, not installed
+
+`native/systemd-create/stop.[ch]` stops exactly one anchored systemd-create
+incarnation: byte-exact create-journal binding, a separate single-use stop
+journal (`STOP` durable before any mutation), `Unit.Kill("all", SIGKILL)` then
+`Unit.Stop("fail")` on the InvocationID object path (a replacement incarnation
+cannot be addressed), exact `JobRemoved` correlation and readback; pending jobs
+are refused, never cancelled; success releases nothing. Fake-bus tests,
+analyzer, ASan/UBSan, mutation list and a read-only host probe; no real
+Kill/Stop was sent. Found: stopped units report `ControlGroup=` on systemd 259,
+so the observer cannot yet prove absence for a really stopped anchor. Details
+and remaining gates: `native/systemd-create/README-STOP.md`.

@@ -17,7 +17,7 @@ for m in muts:
     os.makedirs(base + '/native')
     for d in ('systemd-create', 'launch-lifecycle'):
         shutil.copytree(os.path.join(wt, 'native', d), os.path.join(base, 'native', d),
-                        ignore=shutil.ignore_patterns('*.o', '*.a', 'test-create', 'test-sanitize', 'fixture-*',
+                        ignore=shutil.ignore_patterns('*.o', '*.a', 'test-create', 'test-sanitize', 'test-stop', 'test-stop-sanitize', 'fixture-*',
                                                       'pin-check', 'pin-check-negative'))
     src = os.path.join(base, 'native/systemd-create', m.get('file', 'create.c'))
     text = open(src).read()

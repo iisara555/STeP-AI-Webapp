@@ -86,7 +86,7 @@
     "file": "pin-scan.sh",
     "build": ["make", "-s", "create.o"],
     "run": ["make", "-s", "pin-check-phony"],
-    "after_find": "case $symbols in *' T lsc_open'*) ;; *) refuse 'nm output lacks lsc_open' ;; esac\n",
+    "after_find": "case $symbols in *\" T $want_symbol\"*) ;; *) refuse \"nm output lacks $want_symbol\" ;; esac\n",
     "after_repl": ""
   },
   {
@@ -95,7 +95,7 @@
     "file": "pin-scan.sh",
     "build": ["make", "-s", "create.o"],
     "run": ["make", "-s", "pin-check-phony"],
-    "after_find": "case $bytes in *StartTransientUnit*) ;; *) refuse 'strings output lacks StartTransientUnit' ;; esac\n",
+    "after_find": "case $bytes in *\"$want_string\"*) ;; *) refuse \"strings output lacks $want_string\" ;; esac\n",
     "after_repl": ""
   },
   {
@@ -122,7 +122,7 @@
     "file": "Makefile",
     "build": ["make", "-s", "create.o"],
     "run": ["make", "-s", "pin-check-phony"],
-    "after_find": "$(error REFUSED: LSC_ test macros in CC/CFLAGS/CPPFLAGS; the hook is only valid inside test-create.c)\n",
+    "after_find": "$(error REFUSED: LSC_ test macros in CC/CFLAGS/CPPFLAGS; the hook is only valid inside test-create.c and test-stop.c)\n",
     "after_repl": ""
   },
   {
@@ -151,5 +151,41 @@
     "run": ["make", "-s", "pin-check-phony"],
     "after_find": "\t@sh ./pin-scan.sh create.o\n",
     "after_repl": ""
+  },
+  {
+    "id": "PN18",
+    "desc": "pin-check no longer scans stop.o",
+    "file": "Makefile",
+    "after_find": "\t@sh ./pin-scan.sh stop.o\n",
+    "after_repl": "",
+    "build": ["make", "-s", "create.o", "stop.o"],
+    "run": ["make", "-s", "pin-check-phony"]
+  },
+  {
+    "id": "PN19",
+    "desc": "stop.c hook: used marker removed",
+    "file": "stop.c",
+    "after_find": "__attribute__((used)) static const char lsc_test_hook_marker[]=\"lsc_test_hook_marker\";\n",
+    "after_repl": "",
+    "build": ["make", "-s", "create.o", "stop.o"],
+    "run": ["make", "-s", "pin-check-phony"]
+  },
+  {
+    "id": "PN20",
+    "desc": "stop.c hook: #error weakened to #warning",
+    "file": "stop.c",
+    "after_find": "#error \"LSC_TESTING is only valid when stop.c",
+    "after_repl": "#warning \"LSC_TESTING is only valid when stop.c",
+    "build": ["make", "-s", "create.o", "stop.o"],
+    "run": ["make", "-s", "pin-check-phony"]
+  },
+  {
+    "id": "PN21",
+    "desc": "pin-scan: stop.o plausibility anchors replaced by the creator's",
+    "file": "pin-scan.sh",
+    "after_find": "    *stop*.o) want_symbol=las_open want_string=GetUnitByInvocationID ;;\n",
+    "after_repl": "",
+    "build": ["make", "-s", "create.o", "stop.o"],
+    "run": ["make", "-s", "pin-check-phony"]
   }
 ]

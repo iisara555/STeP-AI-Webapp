@@ -109,8 +109,13 @@ needs root, cgroup2 and the real bus.
 
 ## Remaining (production blocked; `install`/`install-check` still refuse)
 
-- Incarnation-bound stop/kill and job draining of anchors (no mutation exists
-  anywhere; UNKNOWN/ANCHORED slots stay fenced until it does).
+- Incarnation-bound stop now exists as a synthetic library
+  ([`systemd-create/README-STOP.md`](../systemd-create/README-STOP.md):
+  `Unit.Kill(all, SIGKILL)` + `Unit.Stop(fail)` on the InvocationID path, its
+  own single-use stop journal, pending jobs refused, never releases). It is not
+  wired here: no reconciler for stop journals, no owner composition, no host
+  acceptance. A stopped unit reports `ControlGroup=` (systemd 259, live), which
+  this reconciler classifies as INVOCATION → UNKNOWN; see the observer note.
 - Credential transition of the workload into the anchored cgroup.
 - Durable capture of the anchor cgroup's device/inode and a retained descriptor
   across owner crashes: today a crash loses the pinned descriptor, so a crashed

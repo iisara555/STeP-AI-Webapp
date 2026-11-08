@@ -113,6 +113,14 @@ not privileged cgroup/systemd lifecycle acceptance or power-loss evidence.
 
 Still missing, deliberately untouched:
 
+- **ControlGroup after stop:** systemd 259 reports `ControlGroup=` (empty) for
+  every loaded inactive/failed service on this host once the cgroup is pruned
+  (read-only `host-probe-stop`). The absence check above requires the
+  launch-time path, so a really stopped anchor classifies as UNKNOWN. A
+  reviewed change must accept the empty value for inactive/failed only when
+  the pinned original descriptor proves `populated 0` (then `st_nlink == 0`),
+  and keep refusing any other path. Not changed in this increment.
+
 - Actual fixed-policy systemd create/start and incarnation-bound stop/kill,
   cancellation/draining of jobs, prevention of external restart/attach, nonreuse
   namespace enforcement, and cgroup confinement/escape prevention. No mutation

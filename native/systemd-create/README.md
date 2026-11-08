@@ -132,11 +132,12 @@ pin-check` itself on a hooked `create.o` in a scratch tree. `make test`
   made. The `SystemCallFilter` reader accepts at most 1024 names (exactly 1024
   passes, 1025 fails); the success fixture uses 400 names (this host's
   `@system-service` expands to 395).
-- `make mutation` applies 81 mutations in a scratch copy: 64 in
-  `mutation/mutations.json` (checked by `test-create`) and 17 in
+- `make mutation` applies 232 mutations in a scratch copy: 64 in
+  `mutation/mutations.json` (checked by `test-create`), 21 in
   `mutation/pin-mutations.json` (`pin-scan.sh`, Makefile `.PHONY`/tripwire,
-  hook marker and `#error`; checked by `make pin-check-phony`). All are
-  killed. Deleting the LTO refusal (PN5) is caught only through the asserted
+  hook marker and `#error` of create.c and stop.c; checked by `make
+pin-check-phony`) and 147 in `mutation/stop-mutations.json` (checked by
+  `test-stop`, see [`README-STOP.md`](README-STOP.md)). All are killed. Deleting the LTO refusal (PN5) is caught only through the asserted
   reason: such an object is still refused by the `strings` sanity check.
 - Keeper identity/argument/pause tests, GCC analyzer, ASan/UBSan, link test
   against the real `libsystemd.so.0`.
@@ -152,7 +153,8 @@ created.
 `make install install-check` refuse on purpose. Missing: host acceptance of the
 hardened unit (the sandbox, syscall allow-list, `LimitNOFILE=64` and readback
 representations have not been exercised by a real root `StartTransientUnit`),
-incarnation-bound stop/kill,
+host acceptance of the incarnation-bound stop ([`README-STOP.md`](README-STOP.md):
+synthetic and read-only-probed only),
 credential transition into the anchored cgroup, composition with
 `launch-composition`, independent review and artifact pins.
 

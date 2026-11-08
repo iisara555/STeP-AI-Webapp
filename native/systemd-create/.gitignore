@@ -9,3 +9,6 @@ test-keeper-sanitize
 core
 host-probe
 fixture-*/
+test-stop
+test-stop-sanitize
+host-probe-stop

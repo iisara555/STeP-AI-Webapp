@@ -66,8 +66,9 @@ done
 # (f) `make pin-check` itself refuses a hooked create.o (scratch copy of the tree;
 #     the hooked object is newer than its sources, so make only scans it)
 t=$d/tree/systemd-create
-mkdir -p "$t" "$d/tree/launch-lifecycle" && cp Makefile create.c create.h pin-scan.sh "$t/" &&
+mkdir -p "$t" "$d/tree/launch-lifecycle" && cp Makefile create.c create.h stop.c stop.h pin-scan.sh "$t/" &&
     cp ../launch-lifecycle/lifecycle.h "$d/tree/launch-lifecycle/" || fail '(f) copy failed'
+cp stop.o "$t/stop.o" && touch "$t/stop.o" || fail '(f) copy failed'
 for o in create.o "$d/b.o"; do
     cp "$o" "$t/create.o" && touch "$t/create.o"
     err=$($MAKE -s -C "$t" pin-check 2>&1); s=$?
@@ -78,5 +79,25 @@ for o in create.o "$d/b.o"; do
         *) fail "(f) make pin-check failed for another reason: $err" ;; esac
     fi
 done
+# (g) the stop backend: same hook rules for stop.c / stop.o
+expect '(g) production stop.o' ACCEPT stop.o
+for g in '' -g0; do
+    if err=$($CC $CFLAGS $g -DLSC_TESTING -c stop.c -o "$d/sa.o" 2>&1); then
+        fail "(g$g) LSC_TESTING compiled stop.c outside the fixture"
+    else
+        case $err in *'#error "LSC_TESTING is only valid when stop.c is #included by test-stop.c"'*) ;;
+        *) fail "(g$g) stop.c LSC_TESTING build failed without the #error: $err" ;; esac
+    fi
+    $CC $CFLAGS $g -DLSC_TESTING -DLSC_FIXTURE_INCLUDE -c stop.c -o "$d/stop-b.o" || { fail "(g$g) hooked stop build failed"; continue; }
+    expect "(g$g) hooked stop.o" 'test hook' "$d/stop-b.o"
+    expect "(g$g) hooked stop.o, nm misses it" 'test hook bytes' "$d/stop-b.o" "NM=$fake hide nm"
+    expect "(g$g) hooked stop.o, strings misses it" 'test hook symbol' "$d/stop-b.o" "STRINGS=$fake hide strings"
+done
+# anchors are per object: the stop object under another name is held to the creator's
+cp stop.o "$d/anchor.o" && expect '(g) stop object under the creator anchors' 'nm output lacks lsc_open' "$d/anchor.o"
+cp create.o "$t/create.o" && touch "$t/create.o" && cp "$d/stop-b.o" "$t/stop.o" && touch "$t/stop.o" || fail '(g) copy failed'
+err=$($MAKE -s -C "$t" pin-check 2>&1); s=$?
+case $s:$err in 0:*) fail '(g) make pin-check accepted a hooked stop.o' ;; *'REFUSED: stop.o: test hook'*) ;;
+*) fail "(g) make pin-check failed for another reason: $err" ;; esac
 [ $fails -eq 0 ] || { echo "pin-check-negative: $fails failure(s)" >&2; exit 1; }
-echo 'pin-check-negative: hooked, LTO and tool-failure builds refused'
+echo 'pin-check-negative: hooked, LTO and tool-failure builds refused (create.o and stop.o)'
