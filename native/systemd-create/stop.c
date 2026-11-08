@@ -475,8 +475,12 @@ int las_reset(struct las *s) {
     if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }
     if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }
     if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }
-    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,"unix:path=/run/dbus/system_bus_socket")<0 ||
-        sd_bus_set_bus_client(s->bus,1)<0 || sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }
+    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,BUS_ADDRESS)<0 ||
+        sd_bus_set_bus_client(s->bus,1)<0) { r=LAS_R_BUS; goto fail; }
+    if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }
+    if (sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }
+    int connected=ready(s->bus,s->deadline);
+    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }
     /* 1. Before anything durable: still exactly our stopped incarnation. */
     if ((r=owner(s)) || (r=verify(s,AFTER))) goto fail;
     /* 2. Durable RESET intent in the reset record before the call. */

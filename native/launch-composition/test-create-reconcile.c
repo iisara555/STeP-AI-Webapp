@@ -5,9 +5,16 @@
 #include "test-composition.c"
 #include "create-reconcile.h"
 #include <sys/file.h>
+#ifndef BUS
 #define BUS "dddddddddddddddddddddddddddddddd"
+#endif
 #define MGR ":1.42"
+#ifndef INV
 #define INV "cccccccccccccccccccccccccccccccc"
+#endif
+#ifndef RINIT_SETUP
+#define RINIT_SETUP(f) ((void)(f))
+#endif
 struct rfx {
     struct composed_fixture f;
     struct lc_entry e;
@@ -69,7 +76,7 @@ static void events(struct rfx *f,const char *text) {
     assert(fd>=0 && write(fd,text,strlen(text))==(ssize_t)strlen(text)); close(fd);
 }
 static void rinit(struct rfx *f) {
-    memset(f,0,sizeof *f); init(&f->f,1);
+    memset(f,0,sizeof *f); init(&f->f,1); RINIT_SETUP(f);
     assert(lco_open(&f->f.config,&f->f.owner)==0);
     assert(lco_prepare(f->f.owner,&f->f.spec,&f->e)==0);
     assert(lco_detach(f->f.owner)==0);
@@ -525,7 +532,10 @@ static void parser_bounds(void) {
     assert(lcr_parse(f.full,f.intent_n,&j,&r)==1 && lcr_parse(f.full,f.intent_n+f.job_n,&j,&r)==2);
     rfinish(&f);
 }
-int main(void) {
+#ifndef RECONCILE_TEST_MAIN
+#define RECONCILE_TEST_MAIN main
+#endif
+int RECONCILE_TEST_MAIN(void) {
     alarm(240); assert(geteuid()!=0);
     parser_bounds(); puts("ok - parser bounds and fields");
     anchored(); puts("ok - ANCHORED: exact live anchor retains capacity, journal unchanged");

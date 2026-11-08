@@ -92,8 +92,12 @@ calling the callback. The callback receives the exact entry, parsed journal
 and observer receipt gate. Production callers must construct the separate
 `las_reset_open` handle with a fresh protected reset record and the same create
 journal open description (or serialize locks explicitly); see
-[`README-STOP.md`](../systemd-create/README-STOP.md). That adapter is tested
-separately, not yet linked into an owner or tested end to end through this seam.
+[`README-STOP.md`](../systemd-create/README-STOP.md). `test-reset-composition` now connects this seam to the real adapter using
+`test-reset-bus.c` (the existing stateful typed stop/reset fake, in a separate
+translation unit). It runs the actual parser, observer receipt, reset handle,
+invocation-path mutation/readback, independent metadata checks and ledger release.
+The fixture is not linked to libsystemd; accidental production observer bus opens
+abort. It is still not service/production-owner wiring.
 
 Return exactly 1 for correlated reset success; otherwise UNKNOWN/RESET is sticky
 while loaded, with capacity retained. Success never releases by itself. A later
@@ -137,9 +141,10 @@ needs root, cgroup2 and the real bus.
   own single-use stop journal, pending jobs refused, never releases). It is not
   wired here: no reconciler for stop journals, no owner composition, no host
   acceptance. Empty stopped ControlGroup is supported, but loss of populated-0
-  evidence before pruning still blocks release. D1 (bus startup can outlive the
-  attempt deadline) and D2 (manager reexec invalidates the historical owner)
-  remain blockers; no owner-binding relaxation is made here.
+  evidence before pruning still blocks release. D1 is bounded for create, stop
+  and the new reset path, including authentication/Hello readiness and readback.
+  D2 remains: manager reexec invalidates the historical owner; no owner-binding
+  relaxation or authorized owner-transition protocol is made here.
 - Credential transition of the workload into the anchored cgroup.
 - Durable capture of the anchor cgroup's device/inode and a retained descriptor
   across owner crashes: today a crash loses the pinned descriptor, so a crashed

@@ -100,6 +100,16 @@ journals exists yet; they are evidence, not authority.
    job `Cancel`, mode `replace`, retries, or touching the create journal or
    ledger. `las_close` only drops local subscriptions.
 
+## Reset readiness deadline
+
+`las_reset` uses the same absolute five-second attempt budget as `las_begin`:
+set the method timeout before `sd_bus_start`, then drive nonblocking readiness
+before owner/GetBusId queries. Readiness never refreshes the budget. The real
+libsystemd `test-deadline-reset` connects only to a private stalled Unix listener,
+requires UNCERTAIN/DEADLINE around five seconds, an empty reset record and no
+`ResetFailed` bytes on that socket. Address/peer overrides remain behind the
+existing compile-guarded, pin-scanned fixture seams.
+
 ## Post-absence reset (separate handle, not installed)
 
 `las_reset_open(config, absent, context, &handle)` uses the same protected
@@ -250,9 +260,10 @@ handling, `render_create` truncation (unreachable after field validation) and
 - Empty stopped ControlGroup and a separately gated post-absence reset now
   exist. Missing pre-pruning populated-0 observation still returns UNKNOWN;
   a removed descriptor is cleanup evidence only, not a new absence proof.
-- **D1:** `sd_bus_start` can block around 90 s despite the 5 s attempt deadline;
-  its bounded-startup fix is a separate increment. This reset path shares that
-  blocker; per-method budgets do not bound connection startup.
+- **D1 addressed for reset:** authentication/Hello readiness now shares the
+  original five-second attempt budget, as do create and stop. The private
+  real-libsystemd stalled-socket regression requires UNCERTAIN/DEADLINE and no
+  ResetFailed wire bytes; it does not establish installed-service acceptance.
 - **D2:** daemon-reexec invalidates the historical manager unique-name binding.
   Keep it fail-closed: same boot/bus/invocation and uid 0 do not establish
   lifetime-fence continuity (outstanding jobs are serialized too). Future work

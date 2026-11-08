@@ -1,5 +1,59 @@
 # Progress
 
+## Reset composition and bounded readiness — isolated synthetic candidate, not installed
+
+- Composed reviewed stop base `f1fef0d`, observer/reset `f22694f` and connection
+  deadline `25a5790` on live integration `4c799c4` in a new isolated worktree.
+  Kept both progress histories and both reset/deadline mutation lists; refreshed
+  overlapping stop patterns without weakening their guards. Integration unchanged.
+- The new six-case `test-reset-composition` actually calls `las_reset_open` /
+  `las_reset` from `lcr_reconcile` with that handle's own `lso_absent` receipt and
+  context. It links the real observer, owner, ledger and quota core to the existing
+  stateful typed reset bus, not libsystemd. An accidental production observer bus
+  open aborts. The bus asserts exact typed ResetFailed on the InvocationID path,
+  never a name. Reset success/error retain capacity until independent cleanup;
+  both unit-first and directory-first cleanup orders are tested. Populated and
+  collected-without-receipt cases never reset; a changed manager stays UNKNOWN.
+- `las_reset` now shares the original five-second deadline with connection/auth/
+  Hello readiness, sets the call budget before starting the bus and never refreshes
+  it afterward. The real-libsystemd private stalled-Unix-socket reset regression
+  requires UNCERTAIN/DEADLINE in 4.9–7 seconds, an empty reset record and no
+  ResetFailed wire bytes. The same guarded fixture address/peer hooks and production
+  pin checks apply. The original pinned populated-0 evidence is still mandatory;
+  an already removed directory cannot manufacture an absence receipt.
+- Verified unprivileged: `clean all test analyze sanitize` passed with saved exit
+  0 in launch-lifecycle, quota-broker, launch-composition and systemd-create.
+  After tightening the cross-proof assertion, launch-composition's full
+  `all test analyze sanitize` rerun also exited 0; systemd-create's final rerun
+  exited 0. The new six-case connected proof runs normally and under ASan/UBSan;
+  real-libsystemd stalled create/stop/reset tests each returned at 5.005 s in
+  both modes. Production pin-negative/phony checks passed. Engine pin remains
+  `90ee71c` (`desktop-v0.6.20`). Both install-check commands deliberately return
+  make exit 2 (refusal), not installation success.
+- Final mutation evidence: **387/387 killed**, zero SURVIVED, BAD-PATTERN,
+  BUILD-FAIL or missing IDs: create 64, pin 21, stop 147, reset 29, deadline 14,
+  create-reconcile/observer 101 and new connected proof 11. Lists and result IDs
+  were compared programmatically, with separate scratch parents and saved command
+  statuses. The first cross batch had one survivor (`X-R80`): a failed absence
+  check could be repeated and masked by the next gate. Requiring exactly one
+  populated-subtree observation killed it on the full 11/11 rerun. The base
+  parser run was split after 19 completed results; the remaining 82 completed in
+  four separate batches. No interrupted/missing result was counted as a pass.
+- Still missing: D2's explicitly authorized manager A-to-B operation-owner
+  transition with proven lifetime-fence continuity (historical equality remains
+  strict); durable retained cgroup identity/FD or absence receipt across crashes;
+  protected slot/journal census and real lifetime fence; stop/reset journal crash
+  recovery; production startup-owner/service and workload credential-transition
+  linkage; real systemd/cgroup/XFS end-to-end acceptance, independent review and
+  deliberate artifact repinning. Both install-check targets still refuse.
+- `npm run check` passed (17 existing engine diagnostics remain delegated to
+  Desktop CI). Its first run failed only Prettier on three mutation JSON files;
+  they were formatted and the complete check reran successfully. Full npm test,
+  DB, engine, browser and privileged acceptance suites were not run here.
+- No root/sudo, installation, host configuration, real systemd mutation, real-data
+  modification, push or integration. Native synthetic evidence is not installed
+  or production acceptance.
+
 ## Stopped-anchor empty ControlGroup and post-absence reset — synthetic, not installed
 
 - Accept empty `ControlGroup` only for the exact inactive/failed invocation

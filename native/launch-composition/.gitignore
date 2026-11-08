@@ -8,3 +8,5 @@ test-systemd-bus
 test-bus-sanitize
 test-create-reconcile
 test-reconcile-sanitize
+test-reset-composition
+test-reset-sanitize

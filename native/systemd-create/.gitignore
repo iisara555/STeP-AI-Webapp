@@ -16,3 +16,5 @@ test-deadline-create
 test-deadline-stop
 test-deadline-create-sanitize
 test-deadline-stop-sanitize
+test-deadline-reset
+test-deadline-reset-sanitize

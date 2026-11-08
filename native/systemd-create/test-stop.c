@@ -757,6 +757,7 @@ static void r_standard(enum r_outcome want,enum las_reason why) {
         assert(resets_sent==(want>=R_SENT));
         journal_is(f.stop,want==R_NOTHING ? "":want==R_DONE_LINE ? RESETL DONEL:RESETL);
     }
+    if (!strcmp(fault,"ready-delay")) assert(s->deadline==6000000 && clock_us==5000000);
     reason_is(s,why); finish(s,f);
 }
 static const char *const RESET_TRACE=
@@ -775,6 +776,7 @@ static void test_reset_success(void) {
     /* inactive (not failed) before, and a still-reported cgroup, are stopped too */
     stopped_unit(NULL,0,0); after_state="inactive"; r_standard(R_RESET,LAS_R_NONE);
     stopped_unit(NULL,0,0); after_cgroup=CGROUP; r_standard(R_RESET,LAS_R_NONE);
+    stopped_unit("ready-delay",1,0); r_standard(R_RESET,LAS_R_NONE);
 }
 static void test_reset_gates(void) {
     /* authority: open, entry, after RESET (not sent), after readback (sent), after RESET-DONE */

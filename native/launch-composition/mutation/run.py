@@ -7,7 +7,7 @@ wt, phase, spec, out = sys.argv[1:5]
 muts = json.load(open(spec))
 base = os.path.join(os.path.dirname(os.path.abspath(out)), 'work-' + phase)
 BUILT = ('*.o', '*.a', 'test-composition', 'test-sanitize', 'test-systemd-observer', 'test-observer-sanitize',
-         'test-systemd-bus', 'test-bus-sanitize', 'test-create-reconcile', 'test-reconcile-sanitize', 'mutation')
+         'test-reset-composition', 'test-reset-sanitize', 'test-systemd-bus', 'test-bus-sanitize', 'test-create-reconcile', 'test-reconcile-sanitize', 'mutation')
 results = []
 def record(result):
     results.append(result)
@@ -21,7 +21,7 @@ for m in muts:
         continue
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(base + '/native')
-    for d in ('launch-composition', 'launch-lifecycle', 'quota-broker'):
+    for d in ('launch-composition', 'launch-lifecycle', 'quota-broker', 'systemd-create'):
         ignore = shutil.ignore_patterns(*BUILT) if d == 'launch-composition' else None
         shutil.copytree(os.path.join(wt, 'native', d), os.path.join(base, 'native', d), ignore=ignore)
     src = os.path.join(base, 'native/launch-composition', m.get('file', 'create-reconcile.c'))

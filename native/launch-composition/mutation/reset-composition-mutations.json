@@ -1,0 +1,87 @@
+[
+  {
+    "id": "X-R80",
+    "desc": "absence failure early return deleted (re-observes)",
+    "after_find": "        if (lso_absent(h->observer,&e)!=1) return verdict(v,r,LCR_UNKNOWN,LCR_R_UNPROVEN,0);\n        h->absent=1;",
+    "after_repl": "        h->absent=lso_absent(h->observer,&e)==1;",
+    "test": "test-reset-composition"
+  },
+  {
+    "id": "X-R81",
+    "desc": "absence receipt not retained",
+    "after_find": "        h->absent=1;\n",
+    "after_repl": "",
+    "test": "test-reset-composition"
+  },
+  {
+    "id": "X-C4",
+    "desc": "reset: sticky failure deleted",
+    "file": "create-reconcile.c",
+    "after_find": "        if (h->reset<0) return verdict(v,r,LCR_UNKNOWN,LCR_R_RESET,0);\n",
+    "after_repl": "",
+    "test": "test-reset-composition"
+  },
+  {
+    "id": "X-C7",
+    "desc": "reset: result ignored",
+    "file": "create-reconcile.c",
+    "after_find": "            if (h->c.reset(h->c.reset_context,&e,&j,lso_absent,h->observer)!=1) return verdict(v,r,LCR_UNKNOWN,LCR_R_RESET,0);",
+    "after_repl": "            (void)h->c.reset(h->c.reset_context,&e,&j,lso_absent,h->observer);",
+    "test": "test-reset-composition"
+  },
+  {
+    "id": "X-C8",
+    "desc": "reset: success not recorded",
+    "file": "create-reconcile.c",
+    "after_find": "            h->reset=1;\n",
+    "after_repl": "",
+    "test": "test-reset-composition"
+  },
+  {
+    "id": "X-C9",
+    "desc": "reset: also on a collected unit (candidate-only deleted)",
+    "file": "create-reconcile.c",
+    "after_find": "if (why==LCR_R_NONE && h->c.reset) {",
+    "after_repl": "if (h->c.reset) {",
+    "test": "test-reset-composition"
+  },
+  {
+    "id": "X-O5",
+    "desc": "observer: populated subtree accepted",
+    "file": "systemd-observer.c",
+    "test": "test-reset-composition",
+    "after_find": "if (o->ops.events(o->ops_context,o->group,&populated)<0 || populated!=0) return 0;",
+    "after_repl": "if (o->ops.events(o->ops_context,o->group,&populated)<0) return 0;"
+  },
+  {
+    "id": "X-unit-cleanup",
+    "desc": "loaded unit wrongly accepted as metadata cleanup",
+    "file": "systemd-observer.c",
+    "test": "test-reset-composition",
+    "after_find": "!read_snapshot(o,&s) || !s.missing ||",
+    "after_repl": "!read_snapshot(o,&s) ||"
+  },
+  {
+    "id": "X-directory-cleanup",
+    "desc": "unit gone wrongly accepted without original directory removal",
+    "file": "systemd-observer.c",
+    "test": "test-reset-composition",
+    "after_find": "o->ops.removed(o->ops_context,o->group)!=1 || !valid(o,e)",
+    "after_repl": "!valid(o,e)"
+  },
+  {
+    "id": "X-reset-by-name",
+    "desc": "reset targets name rather than exact invocation path",
+    "file": "../systemd-create/stop.c",
+    "test": "test-reset-composition",
+    "after_find": "sd_bus_call_method(s->bus,s->c.manager,s->invocation_path,UI,\"ResetFailed\"",
+    "after_repl": "sd_bus_call_method(s->bus,s->c.manager,s->unit,UI,\"ResetFailed\""
+  },
+  {
+    "id": "X-disconnected",
+    "desc": "callback connection bypassed while pretending reset succeeded",
+    "test": "test-reset-composition",
+    "after_find": "if (h->c.reset(h->c.reset_context,&e,&j,lso_absent,h->observer)!=1)",
+    "after_repl": "if (0)"
+  }
+]

@@ -5,14 +5,8 @@
     "file": "create.c",
     "after_find": "if (r!=0) return r>0 ? 1:-1;",
     "after_repl": "if (r>=0) return 1;",
-    "build": [
-      "make",
-      "-s",
-      "test-create"
-    ],
-    "run": [
-      "./test-create"
-    ]
+    "build": ["make", "-s", "test-create"],
+    "run": ["./test-create"]
   },
   {
     "id": "D1-create-prestart",
@@ -20,14 +14,8 @@
     "file": "create.c",
     "after_find": "!budget(s) || sd_bus_start(s->bus)<0",
     "after_repl": "sd_bus_start(s->bus)<0",
-    "build": [
-      "make",
-      "-s",
-      "test-create"
-    ],
-    "run": [
-      "./test-create"
-    ]
+    "build": ["make", "-s", "test-create"],
+    "run": ["./test-create"]
   },
   {
     "id": "D1-create-poll-cap",
@@ -35,14 +23,8 @@
     "file": "create.c",
     "after_find": "if (until>deadline) until=deadline;",
     "after_repl": "if (until>deadline) until=UINT64_MAX;",
-    "build": [
-      "make",
-      "-s",
-      "test-deadline-create"
-    ],
-    "run": [
-      "./test-deadline-create"
-    ]
+    "build": ["make", "-s", "test-deadline-create"],
+    "run": ["./test-deadline-create"]
   },
   {
     "id": "D1-create-budget",
@@ -50,14 +32,8 @@
     "file": "create.c",
     "after_find": "ready(s->bus,s->deadline)",
     "after_repl": "ready(s->bus,UINT64_MAX)",
-    "build": [
-      "make",
-      "-s",
-      "test-deadline-create"
-    ],
-    "run": [
-      "./test-deadline-create"
-    ]
+    "build": ["make", "-s", "test-deadline-create"],
+    "run": ["./test-deadline-create"]
   },
   {
     "id": "D1-stop-ready",
@@ -65,29 +41,17 @@
     "file": "stop.c",
     "after_find": "if (r!=0) return r>0 ? 1:-1;",
     "after_repl": "if (r>=0) return 1;",
-    "build": [
-      "make",
-      "-s",
-      "test-stop"
-    ],
-    "run": [
-      "./test-stop"
-    ]
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"]
   },
   {
     "id": "D1-stop-prestart",
     "desc": "pre-start method timeout removed",
     "file": "stop.c",
-    "after_find": "if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }\n    if (sd_bus_start(s->bus)<0)",
-    "after_repl": "if (sd_bus_start(s->bus)<0)",
-    "build": [
-      "make",
-      "-s",
-      "test-stop"
-    ],
-    "run": [
-      "./test-stop"
-    ]
+    "after_find": "if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }\n    if (sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }\n    int connected=ready(s->bus,s->deadline);\n    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: a replaced",
+    "after_repl": "if (sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }\n    int connected=ready(s->bus,s->deadline);\n    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: a replaced",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"]
   },
   {
     "id": "D1-stop-poll-cap",
@@ -95,29 +59,17 @@
     "file": "stop.c",
     "after_find": "if (until>deadline) until=deadline;",
     "after_repl": "if (until>deadline) until=UINT64_MAX;",
-    "build": [
-      "make",
-      "-s",
-      "test-deadline-stop"
-    ],
-    "run": [
-      "./test-deadline-stop"
-    ]
+    "build": ["make", "-s", "test-deadline-stop"],
+    "run": ["./test-deadline-stop"]
   },
   {
     "id": "D1-stop-budget",
     "desc": "connection readiness budget",
     "file": "stop.c",
-    "after_find": "ready(s->bus,s->deadline)",
-    "after_repl": "ready(s->bus,UINT64_MAX)",
-    "build": [
-      "make",
-      "-s",
-      "test-deadline-stop"
-    ],
-    "run": [
-      "./test-deadline-stop"
-    ]
+    "after_find": "int connected=ready(s->bus,s->deadline);\n    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: a replaced",
+    "after_repl": "int connected=ready(s->bus,UINT64_MAX);\n    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: a replaced",
+    "build": ["make", "-s", "test-deadline-stop"],
+    "run": ["./test-deadline-stop"]
   },
   {
     "id": "D1-create-reset",
@@ -125,13 +77,52 @@
     "file": "create.c",
     "after_find": "uint64_t attempt_left=s->deadline-t; s->state=LSC_PENDING;",
     "after_repl": "s->deadline=t+5000000ULL; uint64_t attempt_left=s->deadline-t; s->state=LSC_PENDING;",
-    "build": [
-      "make",
-      "-s",
-      "test-create"
-    ],
-    "run": [
-      "./test-create"
-    ]
+    "build": ["make", "-s", "test-create"],
+    "run": ["./test-create"]
+  },
+  {
+    "id": "D1-reset-ready",
+    "desc": "reset connection readiness ready",
+    "file": "stop.c",
+    "after_find": "if (r!=0) return r>0 ? 1:-1;",
+    "after_repl": "if (r>=0) return 1;",
+    "build": ["make", "-s", "test-deadline-reset"],
+    "run": ["./test-deadline-reset"]
+  },
+  {
+    "id": "D1-reset-prestart",
+    "desc": "reset pre-start method timeout removed",
+    "file": "stop.c",
+    "after_find": "if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }\n    if (sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }\n    int connected=ready(s->bus,s->deadline);\n    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: still exactly our stopped",
+    "after_repl": "if (sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }\n    int connected=ready(s->bus,s->deadline);\n    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: still exactly our stopped",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"]
+  },
+  {
+    "id": "D1-reset-poll-cap",
+    "desc": "reset connection readiness poll-cap",
+    "file": "stop.c",
+    "after_find": "if (until>deadline) until=deadline;",
+    "after_repl": "if (until>deadline) until=UINT64_MAX;",
+    "build": ["make", "-s", "test-deadline-reset"],
+    "run": ["./test-deadline-reset"]
+  },
+  {
+    "id": "D1-reset-budget",
+    "desc": "reset connection readiness budget",
+    "file": "stop.c",
+    "after_find": "int connected=ready(s->bus,s->deadline);\n    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: still exactly our stopped",
+    "after_repl": "int connected=ready(s->bus,UINT64_MAX);\n    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: still exactly our stopped",
+    "build": ["make", "-s", "test-deadline-reset"],
+    "run": ["./test-deadline-reset"]
+  },
+  {
+    "id": "D1-reset-refresh",
+    "desc": "reset deadline refreshed after authentication",
+    "file": "stop.c",
+    "after_find": "/* 1. Before anything durable: still exactly our stopped incarnation. */",
+    "after_repl": "s->deadline=now()+ATTEMPT_US; /* 1. Before anything durable: still exactly our stopped incarnation. */",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"]
   }
 ]

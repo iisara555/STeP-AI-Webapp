@@ -4,7 +4,7 @@
 #define _GNU_SOURCE
 #define LSC_TESTING 1
 #define LSC_FIXTURE_INCLUDE 1
-#ifdef TEST_STOP
+#if defined(TEST_STOP) || defined(TEST_RESET)
 #include "stop.c"
 #else
 #include "create.c"
@@ -37,14 +37,19 @@ int main(void) {
     strcpy(entry.epoch,EPOCH); strcpy(entry.launch,EPOCH); strcpy(entry.boot,UUID);
     strcpy(entry.user,UUID); strcpy(entry.workspace,UUID); strcpy(entry.container,"step-lc-" EPOCH "-0000000000000001");
     int journal_fd=scratch_file(root,"journal");
-#ifdef TEST_STOP
+#if defined(TEST_STOP) || defined(TEST_RESET)
     lsc_test_create_uid=getuid();
     struct las_config c={.entry=entry,.exclusive=exclusive,.stop_fd=journal_fd,.job=7};
     strcpy(c.bus_id,EPOCH); strcpy(c.manager,":1.42"); strcpy(c.invocation,"01000000000000000000000000000000");
     c.create_fd=scratch_file(root,"create");
     char text[1024]; size_t length=0; assert(render_create(&c,UNIT,text,sizeof text,&length));
     assert(write(c.create_fd,text,length)==(ssize_t)length);
-    struct las *s=NULL; assert(las_open(&c,&s)==0);
+    struct las *s=NULL;
+#ifdef TEST_RESET
+    assert(las_reset_open(&c,exclusive,NULL,&s)==0);
+#else
+    assert(las_open(&c,&s)==0);
+#endif
 #else
     lsc_test_root=root; lsc_test_keeper_uid=getuid();
     assert(snprintf(path,sizeof path,"%s/usr",root)>0 && mkdir(path,0700)==0);
@@ -60,8 +65,13 @@ int main(void) {
     pid_t child=fork(); assert(child>=0);
     if (!child) {
         alarm(8); uint64_t start=now();
-#ifdef TEST_STOP
+#if defined(TEST_STOP) || defined(TEST_RESET)
+#ifdef TEST_RESET
+        assert(las_reset(s)==-1 && las_status(s)==LAS_UNCERTAIN && las_reason(s)==LAS_R_DEADLINE);
+        assert(las_reset(s)==-1);
+#else
         assert(las_begin(s)==-1 && las_status(s)==LAS_UNCERTAIN && las_reason(s)==LAS_R_DEADLINE);
+#endif
         assert(las_begin(s)==-1); las_close(s); close(c.create_fd);
 #else
         assert(lsc_begin(s)==-1 && lsc_status(s)==LSC_UNCERTAIN);
@@ -74,7 +84,17 @@ int main(void) {
         close(listener); close(journal_fd); exit(0);
     }
     int status; assert(waitpid(child,&status,0)==child);
-#ifdef TEST_STOP
+    /* Inspect the private peer's actual wire bytes, not just the empty
+     * journal: authentication may be sent, ResetFailed must never be. */
+    int peer=accept4(listener,NULL,NULL,SOCK_CLOEXEC|SOCK_NONBLOCK); assert(peer>=0);
+    char wire[4096]; size_t used=0;
+    for (;;) {
+        ssize_t n=recv(peer,wire+used,sizeof wire-used,0);
+        if (n==0) break;
+        assert(n>0 && used+(size_t)n<sizeof wire); used+=(size_t)n;
+    }
+    assert(used>0 && !memmem(wire,used,"ResetFailed",11)); close(peer);
+#if defined(TEST_STOP) || defined(TEST_RESET)
     las_close(s); close(c.create_fd); (void)path;
 #else
     lsc_close(s); assert(unlink(path)==0);
@@ -82,7 +102,7 @@ int main(void) {
     assert(snprintf(path,sizeof path,"%s/usr",root)>0 && rmdir(path)==0);
 #endif
     close(listener); close(journal_fd);
-#ifdef TEST_STOP
+#if defined(TEST_STOP) || defined(TEST_RESET)
     assert(snprintf(path,sizeof path,"%s/create",root)>0 && unlink(path)==0);
 #endif
     assert(snprintf(path,sizeof path,"%s/journal",root)>0 && unlink(path)==0);

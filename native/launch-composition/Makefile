@@ -39,12 +39,17 @@ test-systemd-bus: test-systemd-bus.c systemd-observer.c systemd-observer.h $(LIB
 	$(CC) $(CFLAGS) -pthread $< $(LIBS) -o $@
 test-create-reconcile: test-create-reconcile.c test-composition.c create-reconcile.h systemd-observer.h libstep-create-reconcile.a libstep-systemd-observer.a $(LIBS)
 	$(CC) $(CFLAGS) -pthread $< libstep-create-reconcile.a libstep-systemd-observer.a $(LIBS) $(WRAPS) -l:libsystemd.so.0 -o $@
-test: test-composition test-systemd-observer test-systemd-bus test-create-reconcile
+test-reset-composition: test-reset-composition.c test-reset-bus.c test-create-reconcile.c test-composition.c create-reconcile.h systemd-observer.h $(HEADERS) ../systemd-create/test-stop.c ../systemd-create/stop.c ../systemd-create/stop.h libstep-create-reconcile.a libstep-systemd-observer.a $(LIBS)
+	$(CC) $(CFLAGS) -pthread test-reset-composition.c test-reset-bus.c libstep-create-reconcile.a libstep-systemd-observer.a $(LIBS) $(WRAPS) -o $@
+test: test-composition test-systemd-observer test-systemd-bus test-create-reconcile test-reset-composition
 	./test-composition
 	./test-systemd-observer
 	./test-systemd-bus
 	./test-create-reconcile
+	./test-reset-composition
 analyze:
+	$(CC) $(CFLAGS) -pthread -fanalyzer -c test-reset-composition.c -o /dev/null
+	$(CC) $(CFLAGS) -pthread -fanalyzer -c test-reset-bus.c -o /dev/null
 	$(CC) $(CFLAGS) -pthread -fanalyzer -c create-reconcile.c -o /dev/null
 	$(CC) $(CFLAGS) -pthread -fanalyzer -c test-create-reconcile.c -o /dev/null
 	$(CC) $(CFLAGS) -pthread -fanalyzer -c test-systemd-bus.c -o /dev/null
@@ -53,6 +58,8 @@ analyze:
 	$(CC) $(CFLAGS) -pthread -fanalyzer -c composition.c -o /dev/null
 	$(CC) $(CFLAGS) -pthread -fanalyzer -c test-composition.c -o /dev/null
 sanitize:
+	$(CC) $(CFLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -pthread $(SOURCES) systemd-observer.c create-reconcile.c test-reset-composition.c test-reset-bus.c $(WRAPS) -o test-reset-sanitize
+	./test-reset-sanitize
 	$(CC) $(CFLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -pthread $(SOURCES) test-composition.c $(WRAPS) -o test-sanitize
 	./test-sanitize
 	$(CC) $(CFLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -pthread $(SOURCES) systemd-observer.c test-systemd-observer.c $(WRAPS) -l:libsystemd.so.0 -o test-observer-sanitize
@@ -62,10 +69,12 @@ sanitize:
 	$(CC) $(CFLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -pthread $(SOURCES) systemd-observer.c create-reconcile.c test-create-reconcile.c $(WRAPS) -l:libsystemd.so.0 -o test-reconcile-sanitize
 	./test-reconcile-sanitize
 clean:
-	rm -f *.o *.a test-composition test-sanitize test-systemd-observer test-observer-sanitize test-systemd-bus test-bus-sanitize test-create-reconcile test-reconcile-sanitize
+	rm -f test-reset-composition test-reset-sanitize *.o *.a test-composition test-sanitize test-systemd-observer test-observer-sanitize test-systemd-bus test-bus-sanitize test-create-reconcile test-reconcile-sanitize
 # Delete each guarded check of create-reconcile.c in a scratch copy and
 # require test-create-reconcile to fail.
+MUTATION_LISTS = mutation/mutations.json mutation/reset-composition-mutations.json
 mutation:
-	@d=$$(mktemp -d) && python3 mutation/run.py $(CURDIR)/../.. after mutation/mutations.json $$d/after.json > $$d/log; \
-	  s=$$?; cat $$d/log; bad=$$(grep -cv ' KILLED' $$d/log); rm -rf $$d; \
+	@d=$$(mktemp -d) && s=0 && for l in $(MUTATION_LISTS); do \
+	  python3 mutation/run.py $(CURDIR)/../.. after $$l $$d/after.json >> $$d/log || s=1; done; \
+	  cat $$d/log; bad=$$(grep -cv ' KILLED' $$d/log); rm -rf $$d; \
 	  if [ $$s -ne 0 ] || [ $$bad -ne 0 ]; then echo "mutation: $$bad not killed" >&2; exit 1; fi; echo 'mutation: all killed'
