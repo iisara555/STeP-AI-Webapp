@@ -4,6 +4,8 @@
  *   step-quota-broker --bootstrap  ONE-TIME: create the state journal (refuses unless state AND
  *                                  root are empty and the live mount matches the policy)
  *   step-quota-broker --serve      serve the fixed ENSURE protocol on the fixed socket
+ *   step-quota-broker --recover-custody
+ *                                  validate returned custody only, then REFUSE (not wired)
  *   step-quota-broker --add-user UUID
  *                                  OPERATOR: durably grant a new user pool (journal record, fresh
  *                                  never reused project id, no-overcommit check)
@@ -18,8 +20,10 @@
  * stopped, inspect the journal outcome, and retry only the same command when appropriate.
  *
  * Production build: fixed absolute paths, euid 0 required, real XFS adapter. No path, ID, limit,
- * principal or option comes from the environment or the command line; the only input is the
- * root-owned policy file. --serve never bootstraps (a lost/empty state directory must never
+ * principal or option comes from the environment or the command line. The only environment
+ * inputs are systemd notification/activation metadata, strictly validated for custody. Fixed
+ * root-owned policy and recovery manifest files are the only configuration inputs.
+ * --serve never bootstraps (a lost/empty state directory must never
  * silently restart allocation; that needs an owner re-install with a fresh quota census).
  *
  * Testing build (-DQB_BROKER_TESTING): refuses root, takes the five directories as arguments,
@@ -59,7 +63,7 @@
 #define SOCKET_DIR "/run/step-quota-broker"
 #endif
 enum { EXIT_RUNTIME = 1, EXIT_REFUSED = 2 };
-enum command { CHECK, BOOTSTRAP, SERVE, ADD_USER, RAISE_USER };
+enum command { CHECK, BOOTSTRAP, SERVE, ADD_USER, RAISE_USER, RECOVER_CUSTODY };
 
 static void say(const char *what) { fprintf(stderr, "step-quota-broker: %s\n", what); }
 static int refuse(const char *what) {
@@ -123,7 +127,127 @@ static int empty(int fd) {
     return result;
 }
 
+/* Recovery custody is a process-entry concern, not a socket request. Bounded
+ * systemd activation descriptors occupy 3..3+n-1; no FDNAME grants authority.
+ * A separately protected, fixed-path manifest binds each entry to dev/ino/type.
+ * This increment has no manifest writer, FDSTORE deposit, lifecycle or bus calls. */
+#define CUSTODY_MAX 16
+#define CUSTODY_ID 32
+struct custody {
+    unsigned count;
+    char id[CUSTODY_MAX][CUSTODY_ID + 1];
+    uint64_t device[CUSTODY_MAX], inode[CUSTODY_MAX];
+};
+static int custody_number(const char *s, uint64_t *out) {
+    if (!s || !*s || (s[0] == '0' && s[1])) return deny(EINVAL);
+    uint64_t v = 0;
+    for (; *s; s++) {
+        if (*s < '0' || *s > '9') return deny(EINVAL);
+        unsigned d = (unsigned)(*s - '0');
+        if (v > (UINT64_MAX - d) / 10) return deny(EOVERFLOW);
+        v = v * 10 + d;
+    }
+    *out = v;
+    return 0;
+}
+static int custody_id(const char *s) {
+    if (strlen(s) != CUSTODY_ID) return 0;
+    for (unsigned i = 0; i < CUSTODY_ID; i++)
+        if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f'))) return 0;
+    return 1;
+}
+static int custody_capture(struct custody *c) {
+    const char *pid = getenv("LISTEN_PID"), *fds = getenv("LISTEN_FDS"),
+               *names = getenv("LISTEN_FDNAMES");
+    int ok = 0;
+    if (pid || fds || names) {
+        uint64_t p = 0, n = 0;
+        if (custody_number(pid, &p) < 0 || p != (uint64_t)getpid() ||
+            custody_number(fds, &n) < 0 || n > CUSTODY_MAX || !names) goto done;
+        size_t len = strnlen(names, CUSTODY_MAX * 37U);
+        if (len != (n ? n * 37 - 1 : 0)) goto done;
+        for (unsigned i = 0; i < (unsigned)n; i++) {
+            const char *s = names + i * 37;
+            if (memcmp(s, "qbc-", 4) || (i + 1 < n && s[36] != ':')) goto done;
+            memcpy(c->id[i], s + 4, CUSTODY_ID);
+            if (!custody_id(c->id[i])) goto done;
+            for (unsigned j = 0; j < i; j++)
+                if (!strcmp(c->id[i], c->id[j])) goto done;
+            /* Check existence before opening anything that might fill a hole. */
+            if (fcntl(3 + (int)i, F_SETFD, FD_CLOEXEC) < 0) goto done;
+        }
+        c->count = (unsigned)n;
+    }
+    ok = 1;
+done:
+    if (unsetenv("LISTEN_PID") || unsetenv("LISTEN_FDS") || unsetenv("LISTEN_FDNAMES")) ok = 0;
+    /* Preserve only validated names at the bounded activation positions. Invalid
+     * activation closes everything, including descriptors outside that range. */
+    if (close_range(ok ? 3 + c->count : 3, ~0U, 0) < 0) return -1;
+    return ok ? 0 : deny(EINVAL);
+}
+/* No pathname for a cgroup is accepted or reopened, even after a lost pin.
+ * Manifest grammar is deliberately small and versioned:
+ * QB-CUSTODY/1\n<32 lowercase hex entry> <decimal dev> <decimal ino> directory\n
+ * All manifest entries must have exactly one returned descriptor. */
+static int custody_manifest(int pdir, uid_t owner, struct custody *c) {
+    int fd = beneath(pdir, "recovery-custody.v1", O_RDONLY | O_NONBLOCK);
+    if (fd < 0) return -1;
+    struct stat s;
+    char bytes[4097];
+    ssize_t got = -1;
+    int valid = fstat(fd, &s) == 0 && S_ISREG(s.st_mode) && s.st_uid == owner &&
+                (s.st_mode & 07777) == 0600 && s.st_nlink == 1 &&
+                s.st_size > 0 && s.st_size <= 4096;
+    if (valid) got = read(fd, bytes, sizeof(bytes));
+    int saved = errno; close(fd); errno = saved;
+    if (!valid || got != s.st_size || got <= 0 || got > 4096 ||
+        memchr(bytes, 0, (size_t)got)) return deny(EINVAL);
+    bytes[got] = 0;
+    const char header[] = "QB-CUSTODY/1\n";
+    if ((size_t)got < sizeof(header) - 1 || memcmp(bytes, header, sizeof(header) - 1)) return deny(EINVAL);
+    char *line = bytes + sizeof(header) - 1;
+    unsigned seen = 0, count = 0;
+    while (*line) {
+        if (++count > CUSTODY_MAX) return deny(EINVAL);
+        char *end = strchr(line, '\n');
+        if (!end) return deny(EINVAL);
+        *end = 0;
+        char *dev = strchr(line, ' ');
+        if (!dev) return deny(EINVAL);
+        *dev++ = 0;
+        char *ino = strchr(dev, ' ');
+        if (!ino) return deny(EINVAL);
+        *ino++ = 0;
+        char *type = strchr(ino, ' ');
+        if (!type) return deny(EINVAL);
+        *type++ = 0;
+        uint64_t d, in;
+        if (!custody_id(line) || custody_number(dev, &d) < 0 ||
+            custody_number(ino, &in) < 0 || !in || strcmp(type, "directory")) return deny(EINVAL);
+        unsigned i;
+        for (i = 0; i < c->count; i++) if (!strcmp(line, c->id[i])) break;
+        if (i == c->count || (seen & (1U << i))) return deny(EINVAL);
+        seen |= 1U << i;
+        c->device[i] = d; c->inode[i] = in;
+        line = end + 1;
+    }
+    return count == c->count && count ? 0 : deny(ENODATA);
+}
+static int custody_bind(uid_t owner, const struct custody *c) {
+    for (unsigned i = 0; i < c->count; i++) {
+        struct stat s;
+        int flags = fcntl(3 + (int)i, F_GETFL);
+        if (flags < 0 || (flags & O_PATH) || (flags & O_ACCMODE) != O_RDONLY ||
+            fstat(3 + (int)i, &s) < 0 || !S_ISDIR(s.st_mode) ||
+            s.st_uid != owner || (s.st_mode & 022) ||
+            (uint64_t)s.st_dev != c->device[i] || (uint64_t)s.st_ino != c->inode[i]) return deny(ESTALE);
+    }
+    return 0;
+}
+
 #ifdef QB_BROKER_TESTING
+__attribute__((used)) static const char custody_test_marker[] = "QB_CUSTODY_TEST_SEAM";
 /* FAKE quota adapter: per-directory "attributes" and per-project "quota" are small files in a
  * separate test-only directory, so a restarted fake broker observes what it configured. */
 struct fake { int dir; uint8_t uuid[16]; };
@@ -316,22 +440,24 @@ static int usage(void) {
         "--raise-user UUID BYTES INODES --trust-root DIR --policy-dir DIR --broker-dir DIR "
         "--socket-dir DIR --fake-dir DIR");
 #else
-    say("usage: step-quota-broker --check|--bootstrap|--serve | --add-user UUID | "
+    say("usage: step-quota-broker --check|--bootstrap|--serve|--recover-custody | --add-user UUID | "
         "--raise-user UUID BYTES INODES");
 #endif
     return EXIT_REFUSED;
 }
 
 int main(int argc, char **argv) {
+    struct custody custody = {0};
+    if (custody_capture(&custody) < 0) return refuse("custody activation UNKNOWN");
     umask(077);
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) return refuse("no_new_privs");
-    /* Inherit nothing but stdio. */
-    if (close_range(3, ~0U, 0) < 0) return refuse("close_range");
+    /* Entry cleanup already closed every non-custody inherited descriptor. */
     if (argc < 2) return usage();
     enum command command;
     if (!strcmp(argv[1], "--check")) command = CHECK;
     else if (!strcmp(argv[1], "--bootstrap")) command = BOOTSTRAP;
     else if (!strcmp(argv[1], "--serve")) command = SERVE;
+    else if (!strcmp(argv[1], "--recover-custody")) command = RECOVER_CUSTODY;
     else if (!strcmp(argv[1], "--add-user")) command = ADD_USER;
     else if (!strcmp(argv[1], "--raise-user")) command = RAISE_USER;
     else return usage();
@@ -370,9 +496,33 @@ int main(int argc, char **argv) {
     int base = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (base < 0) return refuse("/");
 #endif
+    if (command != RECOVER_CUSTODY && custody.count) {
+        errno = EOPNOTSUPP;
+        return refuse("quota-only command refuses recovery custody");
+    }
     /* 1. Policy: every ancestor root/owner-owned and not group/other-writable. */
     int pdir = open_chain(base, policy_dir, 0, owner, owner);
     if (pdir < 0) return refuse("policy directory (must be owner-owned, ancestors not group/other-writable)");
+    if (command == RECOVER_CUSTODY) {
+        if (custody_manifest(pdir, owner, &custody) < 0) return refuse("custody manifest UNKNOWN");
+        if (custody_bind(owner, &custody) < 0) return refuse("custody identity UNKNOWN");
+        close(pdir); close(base);
+#ifdef QB_BROKER_TESTING
+        /* Observation/barrier only in the fake executable: exercise the actual
+         * main's accepted descriptors across death/reexec. No readiness, proof,
+         * lifetime authority, reconciliation, reset or release is implied. */
+        for (unsigned i = 0; i < custody.count; i++)
+            printf("CUSTODY UNKNOWN %s %llu %llu\n", custody.id[i],
+                   (unsigned long long)custody.device[i], (unsigned long long)custody.inode[i]);
+        fflush(stdout);
+        char byte;
+        ssize_t ignored = read(STDIN_FILENO, &byte, 1);
+        (void)ignored;
+#endif
+        for (unsigned i = 0; i < custody.count; i++) close(3 + (int)i);
+        errno = EOPNOTSUPP;
+        return refuse("recovery unavailable: manifest provisioning, FDSTORE barrier, reconciler and lifetime fence not composed");
+    }
     struct qb_service_policy policy;
     unsigned int line = 0;
     errno = 0;

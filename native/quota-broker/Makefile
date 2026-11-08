@@ -1,7 +1,7 @@
 CC ?= cc
 AR ?= ar
 CFLAGS ?= -std=c11 -O2 -g -Wall -Wextra -Werror -Wconversion -Wshadow -Wstrict-prototypes -D_FORTIFY_SOURCE=3 -fstack-protector-strong
-.PHONY: acceptance-sql-test all test sanitize analyze clean acceptance acceptance-check acceptance-dry-run acceptance-wrapper-test service service-check service-dry-run service-script-test service-verify
+.PHONY: custody-mutation custody-test custody-production-check acceptance-sql-test all test sanitize analyze clean acceptance acceptance-check acceptance-dry-run acceptance-wrapper-test service service-check service-dry-run service-script-test service-verify
 all: libstep-launch-request.a libstep-quota-core.a libstep-quota-xfs.a libstep-quota-transport.a step-quota-broker step-quota-broker-fake
 
 # Installable service binary: real core + REAL xfs adapter + transport + policy loader, fixed
@@ -21,6 +21,24 @@ service-verify: step-quota-broker
 # quota/attribute syscalls. Used by test-broker and the TypeScript socket-client tests.
 step-quota-broker-fake: core.c transport.c policy.c broker-main.c core.h transport.h policy.h
 	$(CC) $(CFLAGS) -pthread -DQB_BROKER_TESTING core.c transport.c policy.c broker-main.c -Wl,--wrap=fstatvfs -o $@
+
+custody-mutation:
+	python3 mutation-custody.py
+
+custody-test: step-quota-broker-fake
+	python3 test-custody.py ./step-quota-broker-fake
+
+# Check an actual production object, independently of the fake executable.
+# Fail closed if inspection tools fail. No unit/installer repinning here.
+custody-production-check:
+	@set -eu; d=$$(mktemp -d "$${TMPDIR:?}/qb-production-XXXXXX"); trap 'rm -rf "$$d"' EXIT; \
+	$(CC) $(SERVICE_CFLAGS) -c broker-main.c -o "$$d/main.o"; \
+	nm "$$d/main.o" > "$$d/nm"; strings -a "$$d/main.o" > "$$d/strings"; \
+	python3 check-custody-production.py "$$d/nm" "$$d/strings"; \
+	$(CC) $(CFLAGS) -g0 -DQB_BROKER_TESTING -c broker-main.c -o "$$d/fake.o"; \
+	nm "$$d/fake.o" > "$$d/nm"; strings -a "$$d/fake.o" > "$$d/strings"; \
+	if python3 check-custody-production.py "$$d/nm" "$$d/strings" > "$$d/refused" 2>&1; then exit 1; fi; \
+	python3 -c 'import pathlib,sys; assert "test seam in production" in pathlib.Path(sys.argv[1]).read_text()' "$$d/refused"
 
 test-policy: policy.c policy.h core.h test-policy.c
 	$(CC) $(CFLAGS) policy.c test-policy.c -o $@
@@ -64,7 +82,7 @@ xfs.o: xfs.c xfs.h core.h
 libstep-quota-xfs.a: xfs.o
 	$(AR) rcs $@ $<
 
-test: test-launch-request test-launch test-core test-capacity-race test-xfs test-transport test-policy test-broker acceptance-sql-test
+test: custody-test custody-production-check test-launch-request test-launch test-core test-capacity-race test-xfs test-transport test-policy test-broker acceptance-sql-test
 	./test-launch-request
 	./test-launch
 	./test-core
