@@ -104,3 +104,60 @@ test(
     }
   },
 );
+
+test('the synthetic assembly reports storage only from an injected usage source', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'step-assembly-storage-'));
+  const authenticate = async (header?: string) =>
+    header === 'Bearer synthetic-a'
+      ? { userId: 'synthetic-a', email: 'a@example.invalid', admin: false }
+      : null;
+  const asked: string[] = [];
+  const make = (storageUsage?: { usage(owner: string): Promise<any> }) =>
+    createSyntheticAssembly({
+      purpose: 'synthetic-only',
+      dataRoot: provisionTestQuota(join(root, storageUsage ? 'with' : 'without'), 2),
+      workspacesPerUser: 2,
+      runtime: { kind: 'namespace', socketRoot: root },
+      authenticate,
+      ...(storageUsage ? { storageUsage } : {}),
+    });
+  const assemblies = [
+    make(),
+    make({
+      usage: async (owner) => {
+        asked.push(owner);
+        return { bytesUsed: 10, bytesHard: 10, inodesUsed: 1, inodesHard: 10 };
+      },
+    }),
+  ];
+  try {
+    const [without, withUsage] = await Promise.all(
+      assemblies.map(async (assembly) => {
+        await new Promise<void>((done) => assembly.server.listen(0, '127.0.0.1', done));
+        const url = `http://127.0.0.1:${(assembly.server.address() as AddressInfo).port}`;
+        return (path: string, body?: unknown) =>
+          fetch(url + path, {
+            method: body === undefined ? 'GET' : 'POST',
+            headers: { authorization: 'Bearer synthetic-a', 'content-type': 'application/json' },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          });
+      }),
+    );
+    assert.deepEqual(await (await without('/api/storage')).json(), { state: 'unavailable' });
+    assert.equal((await without('/api/workspaces', { name: 'ok' })).status, 200);
+    assert.deepEqual(await (await withUsage('/api/storage')).json(), {
+      state: 'available',
+      level: 'full',
+      bytesPercent: 100,
+      inodesPercent: 10,
+      worst: 'bytes',
+    });
+    const refused = await withUsage('/api/workspaces', { name: 'full' });
+    assert.equal(refused.status, 507);
+    assert.deepEqual(await refused.json(), { code: 'STORAGE_FULL' });
+    assert.deepEqual(asked, ['synthetic-a', 'synthetic-a']);
+  } finally {
+    await Promise.all(assemblies.map((assembly) => assembly.close()));
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X, AlertCircle, Copy, LoaderCircle } from './icons.tsx';
 import { errorView } from '../../packages/harness-core/src/index.ts';
 import { ApiError } from './host.ts';
+import { noticeHasAction } from './notice-action.ts';
 import type { Memory } from '../../packages/harness-core/src/contracts.ts';
 import chatArt from './assets/illustrations/chat.webp';
 import connectionsArt from './assets/illustrations/connections.webp';
@@ -136,10 +137,7 @@ export function ErrorNotice({
         <strong>{view.title}</strong>
         <p>{view.detail}</p>
         <div className="inline-actions">
-          {onAction &&
-            /^(UNAUTHENTICATED|ACCESS_DENIED|AI_|HARNESS_|SERVER_NOT_CONFIGURED|GOOGLE_|STORAGE_|DOCUMENT_|FILE_INVALID|UPLOAD_PENDING|NETWORK_ERROR|MEMBER_LIMIT|MEMORY_LIMIT)/.test(
-              code,
-            ) && <button onClick={() => onAction(code)}>{view.action}</button>}
+          {onAction && noticeHasAction(code) && <button onClick={() => onAction(code)}>{view.action}</button>}
           <button
             onClick={() =>
               navigator.clipboard

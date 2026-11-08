@@ -1,5 +1,29 @@
 # Progress
 
+## Storage pool warnings, visible end to end — synthetic only, broker not wired
+
+- `GET /api/storage` returns only the verified caller's pool: `level`
+  (ok/warning/critical/full at 80 %/95 %/100 % of the worse of bytes or files),
+  both percentages and which limit is worse. No configured source, a failing source
+  or a malformed reply gives `{ state: 'unavailable' }`, never numbers.
+- A full pool refuses new saves early with `507 STORAGE_FULL` (create Workspace,
+  new conversation, new run). Reading, starting, stopping and cancelling are not
+  refused; the filesystem quota stays the enforcing limit and an unavailable
+  source does not block saves.
+- The usage source is injected (`storageUsage`) into `createGateway` and the
+  synthetic assembly only; production `main.ts` and identity-trial are unchanged
+  and report nothing. The broker boundary's `usage()` fits the interface
+  type-checked, but no real broker is connected yet.
+- Cloud Workspace banner in Thai: hidden for ok/unknown, amber at warning, red at
+  critical and full; the full message says new saves/uploads fail while existing
+  work stays readable, downloadable and deletable. The refusal notice has no
+  documents action. Cloud mode has no upload or delete route yet, so only
+  conversation history is exercised as "existing data".
+- Tests: gateway owner scoping, unavailable, byte and inode boundaries
+  (79.9/80/94.9/95/100), refusal and unchanged data; web banner states and host
+  call; a Playwright spec with fake usage on :8797/:5176. Remaining: wire the
+  real broker `usage()` with the user mapping, and host acceptance on XFS.
+
 ## Exec-status zero-length classification correction — not installed
 
 - Replaced decoder EOF claim with `ambiguous_terminal`: clean zero-length receive

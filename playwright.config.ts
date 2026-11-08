@@ -50,6 +50,25 @@ export default defineConfig({
         VITE_GOOGLE_CLIENT_ID: 'synthetic-client.apps.googleusercontent.com',
       },
     },
+    // Storage pool banner: its own Gateway with FAKE pool usage per synthetic employee, on separate ports.
+    {
+      command: 'npx tsx server/test/support/e2e-storage-gateway.ts',
+      url: 'http://127.0.0.1:8797/healthz',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30000,
+    },
+    {
+      command: 'npm run dev -w web -- --port 5176 --strictPort',
+      url: 'http://127.0.0.1:5176',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30000,
+      env: {
+        VITE_SUPABASE_URL: '',
+        VITE_SUPABASE_PUBLISHABLE_KEY: '',
+        VITE_GATEWAY_URL: 'http://127.0.0.1:8797',
+        VITE_GOOGLE_CLIENT_ID: 'synthetic-client.apps.googleusercontent.com',
+      },
+    },
   ],
   projects: [
     { name: 'desktop', use: { browserName: 'chromium', viewport: { width: 1440, height: 1000 } } },

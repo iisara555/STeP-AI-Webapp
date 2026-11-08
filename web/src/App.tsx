@@ -15,6 +15,7 @@ import { demoHost } from './demo.ts';
 import { clearCredential, gatewayConfig, gatewayHost, pageAvailable, storedCredential } from './gateway.ts';
 import { CREDENTIAL_EVENT, GoogleSignIn, signOutOfGoogle } from './GoogleSignIn.tsx';
 import { Art, BrandSymbol, Busy, ErrorNotice, Modal } from './components.tsx';
+import { StorageBanner, useStorageStatus } from './StorageBanner.tsx';
 import { Chat, type PreparedText } from './Chat.tsx';
 import { CommandPalette } from './CommandPalette.tsx';
 import { TitleBar, mod, type MenuGroup } from './TitleBar.tsx';
@@ -314,6 +315,9 @@ export function App() {
     navigate(pagePaths[p] + (demo ? '?demo=1' : ''));
   };
   const fail = useCallback((e: unknown) => setError(e), []);
+  // Cloud Workspace only: the employee's storage pool, read again after a save is refused as full.
+  const storageFull = error instanceof ApiError && error.code === 'STORAGE_FULL' ? error : null;
+  const storage = useStorageStatus(host, Boolean(gateway && !demo && signedIn && data), storageFull);
   const useSkill = (selected: Skill) => {
     if (selected.skill_key === 'receipt-audit') changePage('receipt');
     else {
@@ -682,6 +686,7 @@ export function App() {
               </div>
             </header>
           )}
+          <StorageBanner status={storage} />
           <div className={'page ' + (page === 'chat' ? 'chat-page' : '')}>
             <Suspense fallback={<Busy />}>
               {page === 'chat' && (

@@ -11,9 +11,12 @@ import type { ChatMessage, Conversation, Run, Snapshot } from '../packages/harne
 import type { Authenticator } from '../server/src/gateway/auth.ts';
 import { createGateway } from '../server/src/gateway/http.ts';
 import { RunService } from '../server/src/gateway/runs.ts';
+import type { StorageUsageSource } from '../server/src/gateway/storage-usage.ts';
 import { RuntimeManager } from '../server/src/workspace/manager.ts';
 import { heldDriver } from '../server/test/support/held-driver.ts';
 import { CLOUD_TENANT, credentialClaims, gatewayHost } from '../web/src/gateway.ts';
+import { ApiError } from '../web/src/host.ts';
+import type { StorageStatus } from '../web/src/storage.ts';
 
 async function withGateway(
   fn: (g: {
@@ -21,6 +24,7 @@ async function withGateway(
     runtime: ReturnType<typeof heldDriver>;
     host: (who?: string, onUnauthorized?: () => void) => ReturnType<typeof gatewayHost>;
   }) => Promise<void>,
+  storageUsage?: StorageUsageSource,
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-web-gateway-'));
   const runtime = heldDriver();
@@ -32,7 +36,13 @@ async function withGateway(
   const authenticate: Authenticator = async (header) =>
     header === 'Bearer alice' ? { userId: 'alice', email: 'alice@step.example', admin: false } : null;
   const audit = () => {};
-  const server = createGateway({ manager, runs: new RunService(manager, audit), authenticate, audit });
+  const server = createGateway({
+    manager,
+    runs: new RunService(manager, audit),
+    authenticate,
+    audit,
+    ...(storageUsage ? { storageUsage } : {}),
+  });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
@@ -246,4 +256,37 @@ test('the ID token is only read for who and until when; malformed ones are rejec
   });
   for (const bad of ['', 'only-one-part', 'h.%%%.s', `h.${Buffer.from('{"sub":1}').toString('base64url')}.s`])
     assert.equal(credentialClaims(bad), null, bad);
+});
+
+test('the storage banner reads only the signed-in employee’s pool, and a full pool refuses a new task by code', async () => {
+  await withGateway(async ({ host }) => {
+    assert.deepEqual(await host().call<StorageStatus>('storage.status'), { state: 'unavailable' });
+  });
+  const asked: string[] = [];
+  let used = 850;
+  await withGateway(
+    async ({ host: make }) => {
+      const host = make();
+      assert.deepEqual(await host.call<StorageStatus>('storage.status'), {
+        state: 'available',
+        level: 'warning',
+        bytesPercent: 85,
+        inodesPercent: 1,
+        worst: 'bytes',
+      });
+      used = 1000;
+      assert.equal((await host.call<StorageStatus & { level: string }>('storage.status')).level, 'full');
+      await assert.rejects(
+        host.call('session.create', { tenant: CLOUD_TENANT, workspace: null, title: 'งานใหม่' }),
+        (error: unknown) => error instanceof ApiError && error.code === 'STORAGE_FULL',
+      );
+      assert.deepEqual(new Set(asked), new Set(['alice']));
+    },
+    {
+      async usage(owner) {
+        asked.push(owner);
+        return { bytesUsed: used, bytesHard: 1000, inodesUsed: 10, inodesHard: 1000 };
+      },
+    },
+  );
 });

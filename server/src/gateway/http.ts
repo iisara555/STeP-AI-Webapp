@@ -16,6 +16,7 @@ import {
   type Quotas,
   type RunService,
 } from './runs.ts';
+import { storageStatus, type StorageUsageSource } from './storage-usage.ts';
 
 export type GatewayOptions = {
   manager: RuntimeManager;
@@ -29,6 +30,8 @@ export type GatewayOptions = {
   baseInvitations?: () => Set<string> | Promise<Set<string>>;
   heartbeatMs?: number;
   now?: () => number;
+  /** Per-user pool usage for warnings and the early full-pool refusal; absent means 'unavailable'. */
+  storageUsage?: StorageUsageSource;
 };
 
 const BODY_LIMIT = 64 * 1024;
@@ -48,6 +51,7 @@ const STATUS: Record<string, number> = {
   RUN_NOT_ACTIVE: 409,
   RUNTIME_NOT_RUNNING: 409,
   BODY_TOO_LARGE: 413,
+  STORAGE_FULL: 507,
   QUOTA_WORKSPACES: 429,
   QUOTA_ACTIVE_RUNS: 429,
   QUOTA_DAILY_RUNS: 429,
@@ -82,6 +86,13 @@ export function createGateway(options: GatewayOptions) {
     return options.invitations ? options.invitations.dispatch(who.email, admit) : admit();
   };
 
+  /** New saves are refused before any work once the caller's pool is full. Reading, starting, stopping and
+   * cancelling are never refused here, so existing work stays reachable. */
+  const refuseWhenFull = async (who: Identity) => {
+    const status = await storageStatus(options.storageUsage, who.userId);
+    if (status.state === 'available' && status.level === 'full') throw new GatewayError('STORAGE_FULL');
+  };
+
   const startAuthority = (req: IncomingMessage, who: Identity) => ({
     authorize: async () => {
       const current = await authenticate(req.headers.authorization);
@@ -93,12 +104,15 @@ export function createGateway(options: GatewayOptions) {
 
   const routes: Route[] = [
     ['GET', /^\/api\/me$/, async ({ who }) => who],
+    // Only the caller's own pool: the owner comes from the verified identity, never from the request.
+    ['GET', /^\/api\/storage$/, async ({ who }) => storageStatus(options.storageUsage, who.userId)],
     ['GET', /^\/api\/workspaces$/, async ({ who }) => manager.list(who.userId)],
     [
       'POST',
       /^\/api\/workspaces$/,
       async ({ req, who }) => {
         const { name } = parseBody(CreateWorkspace, await readJson(req));
+        await refuseWhenFull(who);
         const workspace = await manager.create(who.userId, { name }, (publish) => dispatch(who, publish));
         audit({
           actor: who.userId,
@@ -161,6 +175,7 @@ export function createGateway(options: GatewayOptions) {
       'POST',
       new RegExp(`^/api/workspaces/${WS}/conversations$`),
       async ({ req, who, params }) => {
+        await refuseWhenFull(who);
         const conversation = await manager.newConversation(
           who.userId,
           params[0],
@@ -192,6 +207,7 @@ export function createGateway(options: GatewayOptions) {
       new RegExp(`^/api/workspaces/${WS}/runs$`),
       async ({ req, res, who, params }) => {
         const input = parseBody(AskInput, await readJson(req));
+        await refuseWhenFull(who);
         res.statusCode = 202;
         return runs.start(
           who.userId,

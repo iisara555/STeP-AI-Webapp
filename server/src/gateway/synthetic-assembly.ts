@@ -6,6 +6,7 @@ import { stepRunnerDriver, type StepRunnerOptions } from '../workspace/step-runn
 import type { Authenticator } from './auth.ts';
 import { createGateway } from './http.ts';
 import { DEFAULT_QUOTAS, RunService } from './runs.ts';
+import type { StorageUsageSource } from './storage-usage.ts';
 
 export type SyntheticAssemblyOptions = {
   purpose: 'synthetic-only';
@@ -21,6 +22,9 @@ export type SyntheticAssemblyOptions = {
         /** Explicit disposable-fixture access provisioning; never widen production/home permissions. */
         prepareWorkspace: (spec: RuntimeSpec) => Promise<void>;
       };
+  /** Optional per-user pool usage (a fake in tests, later the broker boundary's usage()). Without it the
+   * storage endpoint reports 'unavailable' and no early full-pool refusal happens. */
+  storageUsage?: StorageUsageSource;
 };
 
 /** Both paths run the real RuntimeManager and pinned engine; neither opens a listener automatically.
@@ -77,6 +81,7 @@ export function createSyntheticAssembly(options: SyntheticAssemblyOptions) {
     audit,
     quotas,
     runs: new RunService(manager, audit, quotas),
+    ...(options.storageUsage ? { storageUsage: options.storageUsage } : {}),
   });
   let closing: Promise<void> | undefined;
   return {
