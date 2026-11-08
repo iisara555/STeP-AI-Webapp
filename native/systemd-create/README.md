@@ -109,14 +109,35 @@ workload inside it. It never starts a workload, parses commands or reads files.
   directory, symlinked ancestor/root, wrong owner — at open and between open and
   begin; journal mode/owner/nlink 0/2/FIFO/O_WRONLY/O_RDONLY/nonempty/flock).
   `LSC_TESTING` only compiles together with `LSC_FIXTURE_INCLUDE` (set by
-  `test-create.c`), and the hook plants a `used` marker that survives `-O2`.
-  `make pin-check` refuses a `create.o` whose symbols or bytes contain the hook;
-  `make pin-check-negative` (part of `make test`) proves both a bare
-  `-DLSC_TESTING` build failing and a hooked object being refused. Defaults are
-  asserted to be `/` and uid 0.
-- `make mutation` deletes each of 55 guarded checks in a scratch copy and
-  requires `test-create` to fail; all are killed (before/after list in the
-  commit history).
+  `test-create.c`), and the hook plants a `used` marker that survives `-O2`;
+  the Makefile also refuses `LSC_` in `CC`/`CFLAGS`/`CPPFLAGS`. `make
+pin-check` runs `pin-scan.sh`, which fails closed: it refuses LTO objects
+  (`.gnu.lto_*` bytecode hides the marker from `nm` and `strings`), any
+  missing/failing `readelf`/`nm`/`strings` or implausibly empty output, and a
+  hook name in the symbol table or raw bytes. `make pin-check-negative`
+  (`pin-negative.sh`) proves each refusal with its reason: a bare
+  `-DLSC_TESTING` build stops at the `#error` (stderr checked, `-g` and
+  `-g0`); hooked objects are refused at `-g` and `-g0` (where only the marker
+  carries the name) and by each scan arm alone (`pin-fake-tool.sh` hides the
+  name from the other tool); production and hooked `-flto` objects; missing,
+  failing-after-output and silent tools; the make tripwire; and `make
+pin-check` itself on a hooked `create.o` in a scratch tree. `make test`
+  runs both through `pin-check-phony`, which first creates files named
+  `pin-check`/`pin-check-negative` so a lost `.PHONY` entry fails. Defaults
+  are asserted to be `/` and uid 0.
+- Readback budget: the fake bus asserts at every method call and property Get
+  during readback that the timeout in force is at most the time left before
+  the deadline; slow `GetNameOwner`/`GetConnectionUnixUser`/property calls
+  (past the deadline and landing exactly on it) prove the next call is never
+  made. The `SystemCallFilter` reader accepts at most 1024 names (exactly 1024
+  passes, 1025 fails); the success fixture uses 400 names (this host's
+  `@system-service` expands to 395).
+- `make mutation` applies 81 mutations in a scratch copy: 64 in
+  `mutation/mutations.json` (checked by `test-create`) and 17 in
+  `mutation/pin-mutations.json` (`pin-scan.sh`, Makefile `.PHONY`/tripwire,
+  hook marker and `#error`; checked by `make pin-check-phony`). All are
+  killed. Deleting the LTO refusal (PN5) is caught only through the asserted
+  reason: such an object is still refused by the `strings` sanity check.
 - Keeper identity/argument/pause tests, GCC analyzer, ASan/UBSan, link test
   against the real `libsystemd.so.0`.
 

@@ -30,7 +30,7 @@ enum { REQ=1, REPLY, SIGNAL, PROP };
 struct tok { char k, ct; const char *sig, *str; uint64_t n; const void *p; size_t len; };
 struct sd_bus { int unused; };
 struct sd_bus_slot { int alive; };
-/* room for the oversized SystemCallFilter reply (1100 names + framing) */
+/* room for the largest SystemCallFilter reply (1025 names + framing) */
 #define MSG_TOKENS 1200
 struct sd_bus_message { int refs, kind, error, depth; size_t n, pos; struct tok t[MSG_TOKENS]; const char *sender; };
 static struct sd_bus bus;
@@ -132,13 +132,30 @@ int sd_bus_set_address(sd_bus *b,const char *a) { assert(b==&bus && !strcmp(a,"u
 int sd_bus_set_bus_client(sd_bus *b,int x) { assert(b==&bus && x==1); return 0; }
 int sd_bus_start(sd_bus *b) { assert(b==&bus); return hit("start") ? -ECONNREFUSED:0; }
 int sd_bus_get_bus_id(sd_bus *b,sd_id128_t *id) { assert(b==&bus); memset(id->bytes,hit("busid") ? 0x12:0x11,16); return 0; }
-static uint64_t call_timeout_max, call_timeout_calls;
+static uint64_t call_timeout_max, call_timeout_calls, call_timeout_now;
 int sd_bus_set_method_call_timeout(sd_bus *b,uint64_t t) {
     assert(b==&bus && t>0 && t<=2000000);
-    call_timeout_calls++; if (call_timeout_calls>1 && t>call_timeout_max) call_timeout_max=t; return 0;
+    call_timeout_now=t; call_timeout_calls++; if (call_timeout_calls>1 && t>call_timeout_max) call_timeout_max=t; return 0;
+}
+/* Every blocking call made during readback must already be bounded by the time
+ * left: the timeout in force (last value set) may not outlast the deadline. */
+static void bounded_call(void) {
+    const struct lsc *l=method_ctx;
+    if (!l || !l->readback) return;
+    if (!(clock_us<l->deadline && call_timeout_now<=l->deadline-clock_us)) {
+        fprintf(stderr,"unbounded readback call: timeout %llu, left %lld (fault %s nth %d)\n",(unsigned long long)call_timeout_now,
+            (long long)l->deadline-(long long)clock_us,fault,nth);
+        assert(0);
+    }
+}
+/* slow:<site> advances the fake clock past the deadline, or exactly onto it. */
+static int slow_to_deadline;
+static void slow(const char *site) {
+    if (!hit(site)) return;
+    if (slow_to_deadline) { const struct lsc *l=method_ctx; assert(l); clock_us=l->deadline; } else clock_us+=6000000;
 }
 sd_bus *sd_bus_unref(sd_bus *b) { if (b) { assert(b==&bus && bus_live); bus_live=0; } return NULL; }
-sd_bus_slot *sd_bus_slot_unref(sd_bus_slot *s) { if (s) { assert(s==&call_slot || s==&match_slot); s->alive=0; } return NULL; }
+sd_bus_slot *sd_bus_slot_unref(sd_bus_slot *s) { if (s) { assert(s==&call_slot || s==&match_slot); s->alive=0; if (s==&call_slot) method_ctx=NULL; } return NULL; }
 /* --- request serialization --- */
 int sd_bus_message_new_method_call(sd_bus *b,sd_bus_message **m,const char *dest,const char *path,const char *iface,const char *member) {
     assert(b==&bus && !strcmp(dest,":1.42") && !strcmp(path,"/org/freedesktop/systemd1") && !strcmp(iface,"org.freedesktop.systemd1.Manager") && !strcmp(member,"StartTransientUnit"));
@@ -174,12 +191,12 @@ int sd_bus_add_match(sd_bus *b,sd_bus_slot **s,const char *rule,sd_bus_message_h
     match_slot.alive=1; *s=&match_slot; signal_cb=cb; signal_ctx=ctx; return 0;
 }
 int sd_bus_call_method(sd_bus *b,const char *dest,const char *path,const char *iface,const char *member,sd_bus_error *e,sd_bus_message **out,const char *types,...) {
-    assert(b==&bus && !e && out); va_list a; va_start(a,types); sd_bus_message *r=NULL; int rc=1;
+    assert(b==&bus && !e && out); bounded_call(); va_list a; va_start(a,types); sd_bus_message *r=NULL; int rc=1;
     if (!strcmp(member,"GetNameOwner") || !strcmp(member,"GetConnectionUnixUser")) {
         assert(!strcmp(dest,"org.freedesktop.DBus") && !strcmp(path,"/org/freedesktop/DBus") && !strcmp(iface,"org.freedesktop.DBus") && !strcmp(types,"s"));
         const char *arg=va_arg(a,const char *); r=msg(REPLY);
-        if (member[3]=='N') { assert(!strcmp(arg,"org.freedesktop.systemd1")); put_s(r,'s',hit("GetNameOwner") ? ":1.99":":1.42"); }
-        else { assert(!strcmp(arg,":1.42")); if (hit("slow:GetConnectionUnixUser")) clock_us+=6000000; put_n(r,'u',hit("GetConnectionUnixUser") ? 1000:0); }
+        if (member[3]=='N') { assert(!strcmp(arg,"org.freedesktop.systemd1")); slow("slow:GetNameOwner"); put_s(r,'s',hit("GetNameOwner") ? ":1.99":":1.42"); }
+        else { assert(!strcmp(arg,":1.42")); slow("slow:GetConnectionUnixUser"); put_n(r,'u',hit("GetConnectionUnixUser") ? 1000:0); }
     } else {
         assert(!strcmp(dest,":1.42") && !strcmp(path,"/org/freedesktop/systemd1") && !strcmp(iface,"org.freedesktop.systemd1.Manager"));
         if (!strcmp(member,"Subscribe")) {
@@ -218,12 +235,17 @@ static void b_deny(sd_bus_message *m,int v) {
     close_(m);
 }
 static void b_families(sd_bus_message *m,int v) { static const char *const unix_[]={"AF_UNIX"}; open_(m,'r',"bas"); put_n(m,'b',v!=1); strv_(m,unix_,v==2 ? 1:0); close_(m); }
+/* Distinct names; systemd resolves @system-service to roughly 400. v0: 400
+ * (accepted), v5: 1025 (one over the cap), v6: exactly 1024 (accepted). */
+#define FILTER_MAX 1024
+static const char *filter_names[FILTER_MAX+1];
 static void b_filter(sd_bus_message *m,int v) {
-    static const char *const ok[]={"close","execve","exit_group","pause","read"}, *const nopause[]={"close","execve","read"}, *const sock[]={"pause","socket"};
+    static const char *const nopause[]={"close","execve","read"}, *const sock[]={"pause","socket"};
+    static char storage[FILTER_MAX+1][16];
+    if (!filter_names[0]) for (size_t i=0;i<=FILTER_MAX;i++) { (void)snprintf(storage[i],sizeof storage[i],"sc_%04zu",i); filter_names[i]=i==200 ? "pause":storage[i]; }
     open_(m,'r',"bas"); put_n(m,'b',v!=1);
-    static const char *big[1100];
-    if (v==5) { for (size_t i=0;i<1100;i++) big[i]=i==7 ? "pause":"read"; strv_(m,big,1100); }
-    else if (v==2) strv_(m,nopause,3); else if (v==3) strv_(m,sock,2); else if (v==4) strv_(m,NULL,0); else strv_(m,ok,5);
+    if (v==5) strv_(m,filter_names,FILTER_MAX+1); else if (v==6) strv_(m,filter_names,FILTER_MAX);
+    else if (v==2) strv_(m,nopause,3); else if (v==3) strv_(m,sock,2); else if (v==4) strv_(m,NULL,0); else strv_(m,filter_names,400);
     close_(m);
 }
 static void b_archs(sd_bus_message *m,int v) { static const char *const n[]={"native","x32"}, *const x[]={"x86-64"}; strv_(m,v==1 ? x:n,v==3 ? 0:v==2 ? 2:1); }
@@ -258,11 +280,11 @@ static struct fprop props[]={
 };
 #define NPROPS (sizeof props/sizeof *props)
 int sd_bus_get_property(sd_bus *b,const char *dest,const char *path,const char *iface,const char *key,sd_bus_error *e,sd_bus_message **out,const char *type) {
-    assert(b==&bus && !e && out && !strcmp(dest,":1.42") && !strcmp(path,UNIT_PATH));
+    assert(b==&bus && !e && out && !strcmp(dest,":1.42") && !strcmp(path,UNIT_PATH)); bounded_call();
     struct fprop *f=NULL; for (size_t i=0;i<NPROPS;i++) if (!strcmp(props[i].iface,iface) && !strcmp(props[i].name,key)) f=&props[i];
     assert(f && !strcmp(type,f->sig)); f->queried++;
     char site[96];
-    (void)snprintf(site,sizeof site,"slow:%s",key); if (hit(site)) clock_us+=6000000;
+    (void)snprintf(site,sizeof site,"slow:%s",key); slow(site);
     (void)snprintf(site,sizeof site,"fail:%s",key); if (hit(site)) return -EIO;
     (void)snprintf(site,sizeof site,"prop:%s",key); int v=hit(site) ? variant:0;
     sd_bus_message *m=msg(PROP); open_(m,'v',f->sig);
@@ -303,7 +325,7 @@ static int prop_queried(const char *name) {
 static void reset(const char *f,int n,int v) {
     snprintf(fault,sizeof fault,"%s",f ? f:""); nth=n; variant=v; ncounts=0;
     sent=synced=bus_live=timeout_fail=process_fail=bypass_arg2=endless=reply_delivered=0; bus_events=1; bus_timeout=UINT64_MAX;
-    clock_us=1000000; call_timeout_max=call_timeout_calls=0; process_calls=0; trace_n=0; trace[0]=0; qh=qt=0; call_slot.alive=match_slot.alive=0; method_cb=signal_cb=NULL;
+    clock_us=1000000; call_timeout_max=call_timeout_calls=call_timeout_now=0; slow_to_deadline=0; method_ctx=signal_ctx=NULL; process_calls=0; trace_n=0; trace[0]=0; qh=qt=0; call_slot.alive=match_slot.alive=0; method_cb=signal_cb=NULL;
     for (size_t i=0;i<NPROPS;i++) props[i].queried=0;
 }
 static int journal_file(int flags,const char *name) {
@@ -339,6 +361,7 @@ static void standard(enum outcome want) {
     q_reply(JOB7,0,0); q_event();
     for (int i=0;i<4 && lsc_status(s)==LSC_PENDING;i++) (void)lsc_poll(s);
     if (want==O_ANCHORED) {
+        if (lsc_status(s)!=LSC_ANCHORED) fprintf(stderr,"not anchored (fault %s nth %d variant %d)\n",fault,nth,variant);
         assert(lsc_status(s)==LSC_ANCHORED); struct lsc_receipt r; assert(lsc_receipt(s,&r)==0);
         assert(r.job==7 && !strcmp(r.invocation,"01000000000000000000000000000000") && !strcmp(r.cgroup,CGROUP));
         journal_is(fd,INTENT JOBLINE ANCHOR);
@@ -436,6 +459,25 @@ static void test_dispatch(void) {
     assert(lsc_poll(s)==1 && call_timeout_calls>50 && call_timeout_max==300000); expect(s,fd,LSC_ANCHORED,INTENT JOBLINE ANCHOR);
     reset("clock",2,0); standard(O_POLL0);
     reset("clock",3,0); standard(O_JOB);
+    /* each blocking call of the readback-entry owner() and GetUnit is budgeted:
+     * a slow GetNameOwner (3rd: readback entry) or GetConnectionUnixUser stops
+     * the next call from being made at all; past the deadline, then exactly on it */
+    for (int exact=0;exact<2;exact++) {
+        reset("slow:GetNameOwner",3,0); slow_to_deadline=exact; fd=journal_file(O_RDWR,"j"); s=pending(fd); q_reply(JOB7,0,0); q_event();
+        assert(lsc_poll(s)==-1 && count("GetNameOwner")==3 && count("GetConnectionUnixUser")==2 && count("GetUnit")==0);
+        expect(s,fd,LSC_UNCERTAIN,INTENT JOBLINE);
+        reset("slow:GetConnectionUnixUser",3,0); slow_to_deadline=exact; fd=journal_file(O_RDWR,"j"); s=pending(fd); q_reply(JOB7,0,0); q_event();
+        assert(lsc_poll(s)==-1 && count("GetConnectionUnixUser")==3 && count("GetUnit")==0 && prop_queried("ActiveState")==0);
+        expect(s,fd,LSC_UNCERTAIN,INTENT JOBLINE);
+        /* a slow property Get: the next Get is never made */
+        reset("slow:SubState",1,0); slow_to_deadline=exact; fd=journal_file(O_RDWR,"j"); s=pending(fd); q_reply(JOB7,0,0); q_event();
+        assert(lsc_poll(s)==-1 && prop_queried("SubState")==1 && prop_queried("Transient")==0); expect(s,fd,LSC_UNCERTAIN,INTENT JOBLINE);
+    }
+    /* last readback call lands exactly on the deadline: only the post-readback check sees it */
+    reset("slow:GetConnectionUnixUser",4,0); slow_to_deadline=1; standard(O_JOB);
+    /* poll entered exactly at the deadline: nothing dispatched */
+    reset(NULL,0,0); fd=journal_file(O_RDWR,"j"); s=pending(fd); q_reply(JOB7,0,0); q_event(); clock_us=s->deadline;
+    assert(lsc_poll(s)==-1 && process_calls==0); expect(s,fd,LSC_UNCERTAIN,INTENT);
 }
 static void test_events(void) {
     static const struct { unsigned job; const char *path, *unit, *result; } bad[]={
@@ -474,6 +516,8 @@ static void test_readback(void) {
         snprintf(site,sizeof site,"fail:%s",props[i].name); reset(site,1,0); standard(O_JOB);
     }
     for (int v=1;v<=3;v++) { reset("GetUnit",1,v); standard(O_JOB); }
+    /* cap boundary: exactly 1024 names is accepted (1025 is variant 5 above) */
+    reset("prop:SystemCallFilter",1,6); standard(O_ANCHORED);
 }
 static void test_api(void) {
     reset(NULL,0,0); int fd=journal_file(O_RDWR,"j"); struct lsc_config c=config(fd); struct lsc *s=NULL; uint64_t us=1;

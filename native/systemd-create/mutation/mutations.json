@@ -372,21 +372,75 @@
     "after_repl": ""
   },
   {
-    "id": "D1",
+    "id": "B1",
     "desc": "SystemCallFilter 1024-entry cap removed",
-    "after_find": "if (r<0 || i>=1024) { ok=0; break; }",
-    "after_repl": "if (r<0) { ok=0; break; }"
+    "after_find": "        if (i>=SYSCALL_FILTER_MAX) { ok=0; break; } /* name number i+1 > cap */\n",
+    "after_repl": ""
   },
   {
-    "id": "D2",
+    "id": "B2",
     "desc": "per-call budget not applied to property Gets",
     "after_find": "return budget(s) && sd_bus_get_property(",
     "after_repl": "return sd_bus_get_property("
   },
   {
-    "id": "D3",
+    "id": "B3",
     "desc": "per-call timeout not capped at time left",
     "after_find": "uint64_t left=s->deadline-t;",
     "after_repl": "uint64_t left=CALL_CEILING_US;"
+  },
+  {
+    "id": "B4",
+    "desc": "owner(): budget before GetNameOwner deleted",
+    "after_find": "    if (!budget(s)) return 0;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "B5",
+    "desc": "owner(): budget before GetConnectionUnixUser deleted",
+    "after_find": "if (!ok || !budget(s)) return 0;",
+    "after_repl": "if (!ok) return 0;"
+  },
+  {
+    "id": "B6",
+    "desc": "readback: budget before GetUnit deleted",
+    "after_find": "if (!held(s) || !owner(s) || !budget(s) || sd_bus_call_method",
+    "after_repl": "if (!held(s) || !owner(s) || sd_bus_call_method"
+  },
+  {
+    "id": "B7",
+    "desc": "budget(): exact deadline accepted (t>deadline, timeout 0 = sd-bus default)",
+    "after_find": "if (!t || t>=s->deadline) return 0;",
+    "after_repl": "if (!t || t>s->deadline) return 0;"
+  },
+  {
+    "id": "B8",
+    "desc": "SystemCallFilter cap lowered to 6",
+    "after_find": "#define SYSCALL_FILTER_MAX 1024U",
+    "after_repl": "#define SYSCALL_FILTER_MAX 6U"
+  },
+  {
+    "id": "B9",
+    "desc": "SystemCallFilter cap lowered to 1023",
+    "after_find": "#define SYSCALL_FILTER_MAX 1024U",
+    "after_repl": "#define SYSCALL_FILTER_MAX 1023U"
+  },
+  {
+    "id": "B10",
+    "desc": "SystemCallFilter cap raised to 1025",
+    "after_find": "#define SYSCALL_FILTER_MAX 1024U",
+    "after_repl": "#define SYSCALL_FILTER_MAX 1025U"
+  },
+  {
+    "id": "E1",
+    "desc": "lsc_poll entry: exact deadline accepted",
+    "after_find": " || t>=s->deadline || !held(s)) goto uncertain;",
+    "after_repl": " || t>s->deadline || !held(s)) goto uncertain;"
+  },
+  {
+    "id": "E2",
+    "desc": "post-readback: exact deadline accepted",
+    "after_find": "t=now(); if (!t || t>=s->deadline) goto uncertain;",
+    "after_repl": "t=now(); if (!t || t>s->deadline) goto uncertain;"
   }
 ]

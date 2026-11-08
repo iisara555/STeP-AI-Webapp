@@ -1,7 +1,12 @@
 CC ?= cc
 AR ?= ar
 CFLAGS ?= -std=c11 -O2 -g -Wall -Wextra -Werror -Wconversion -Wshadow -Wstrict-prototypes -D_FORTIFY_SOURCE=3 -fstack-protector-strong
-.PHONY: all test analyze sanitize clean install install-check host-check pin-check mutation
+# Tripwire: the LSC_TESTING scratch-root hook is only valid inside test-create.c
+# (which #defines it); refuse any build that injects LSC_* macros.
+ifneq ($(findstring LSC_,$(CC) $(CFLAGS) $(CPPFLAGS)),)
+$(error REFUSED: LSC_ test macros in CC/CFLAGS/CPPFLAGS; the hook is only valid inside test-create.c)
+endif
+.PHONY: all test analyze sanitize clean install install-check host-check pin-check pin-check-negative pin-check-phony mutation
 all: libstep-systemd-create.a step-container-keeper test-link
 create.o: create.c create.h ../launch-lifecycle/lifecycle.h
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -18,19 +23,27 @@ test-keeper: test-keeper.c keeper.c
 host-probe: host-probe.c create.c create.h
 	$(CC) $(CFLAGS) $< -l:libsystemd.so.0 -o $@
 # The archive object must not carry the LSC_TESTING scratch-root hook.
-# Checks both the symbol table and raw bytes, because -O2 can fold the hook
-# variables away; the hook also plants a `used` marker that survives.
-PIN_REFUSE = nm $(1) | grep -q 'lsc_test_' || strings -a $(1) | grep -q 'lsc_test_'
-pin-check: create.o
-	@if $(call PIN_REFUSE,create.o); then echo 'REFUSED: test hook in create.o' >&2; exit 1; fi
+# pin-scan.sh fails closed: it refuses LTO objects (.gnu.lto_* bytecode hides
+# names from nm/strings), any nm/strings/readelf failure or empty output, and a
+# hook name in the symbol table OR the raw bytes (-O2 folds the hook variables
+# away; the hook also plants a `used` marker that survives).
+pin-check: create.o pin-scan.sh
+	@sh ./pin-scan.sh create.o
 	@echo 'pin-check: create.o has no test hook; keeper root "/" and uid 0 pinned'
-# Negative proof: (a) -DLSC_TESTING alone must not compile; (b) an object built
-# with the hook the way the fixture enables it must be refused by the same check.
-pin-check-negative: create.c create.h
-	@if $(CC) $(CFLAGS) -DLSC_TESTING -c create.c -o pin-neg-a.o 2>/dev/null; then rm -f pin-neg-a.o; echo 'FAIL: LSC_TESTING compiled outside the fixture' >&2; exit 1; fi
-	@$(CC) $(CFLAGS) -DLSC_TESTING -DLSC_FIXTURE_INCLUDE -c create.c -o pin-neg-b.o
-	@if $(call PIN_REFUSE,pin-neg-b.o); then rm -f pin-neg-b.o; echo 'pin-check-negative: hooked builds refused'; else rm -f pin-neg-b.o; echo 'FAIL: hooked object passed pin-check' >&2; exit 1; fi
-test: test-create test-keeper test-link pin-check pin-check-negative
+# Negative proof (see pin-negative.sh): bare -DLSC_TESTING stops at the #error,
+# hooked objects (-g and -g0, each scan arm alone), LTO objects and failing or
+# missing tools are refused, and make refuses LSC_ macros in CC/CFLAGS/CPPFLAGS.
+pin-check-negative: create.o create.c create.h pin-scan.sh pin-fake-tool.sh pin-negative.sh
+	@CC='$(CC)' CFLAGS='$(CFLAGS)' MAKE='$(MAKE)' sh ./pin-negative.sh
+# Both checks are phony: a stray file named pin-check/pin-check-negative must
+# not make them up to date (vacuous). Proven by running them with such files.
+pin-check-phony: create.o
+	@rm -f pin-check pin-check-negative; touch pin-check pin-check-negative; \
+	  out=$$($(MAKE) -s pin-check pin-check-negative 2>&1); s=$$?; rm -f pin-check pin-check-negative; \
+	  case $$s:$$out in 0:*'pin-check: create.o has no test hook'*'pin-check-negative: hooked, LTO and tool-failure builds refused'*) \
+	    echo 'pin-check-phony: pin-check and pin-check-negative ran despite same-named files';; \
+	  *) printf '%s\n' "$$out" >&2; echo 'FAIL: pin-check/pin-check-negative skipped or failed' >&2; exit 1;; esac
+test: test-create test-keeper test-link pin-check-phony
 	./test-create
 	./test-keeper
 	./test-link
@@ -52,9 +65,14 @@ install install-check:
 	@printf '%s\n' 'REFUSED: production unavailable; exclusive authority/recovery, stop, credential transition, runtime composition, host acceptance of the hardened unit, review and artifact pins missing' >&2
 	@exit 1
 clean:
-	rm -f *.o *.a step-container-keeper test-create test-keeper test-link test-sanitize test-keeper-sanitize host-probe
-# Delete each guarded check in a scratch copy and require test-create to fail.
+	rm -f *.o *.a step-container-keeper test-create test-keeper test-link test-sanitize test-keeper-sanitize host-probe pin-check pin-check-negative
+# Delete each guarded check in a scratch copy and require its check to fail:
+# mutations.json -> test-create; pin-mutations.json (pin-scan.sh, Makefile,
+# hook marker/#error) -> make pin-check-phony (runs pin-check and the negatives).
+MUTATION_LISTS = mutation/mutations.json mutation/pin-mutations.json
 mutation:
-	@d=$$(mktemp -d) && python3 mutation/run.py $(CURDIR)/../.. after mutation/mutations.json $$d/after.json > $$d/log; \
-	  s=$$?; cat $$d/log; bad=$$(grep -cv ' KILLED' $$d/log); rm -rf $$d; \
-	  if [ $$s -ne 0 ] || [ $$bad -ne 0 ]; then echo "mutation: $$bad not killed" >&2; exit 1; fi; echo 'mutation: all killed'
+	@d=$$(mktemp -d) && s=0 && for l in $(MUTATION_LISTS); do \
+	  python3 mutation/run.py $(CURDIR)/../.. after $$l $$d/after.json >> $$d/log || s=1; done; \
+	  cat $$d/log; total=$$(wc -l < $$d/log); bad=$$(grep -cv ' KILLED' $$d/log); rm -rf $$d; \
+	  if [ $$s -ne 0 ] || [ $$bad -ne 0 ]; then echo "mutation: $$bad of $$total not killed" >&2; exit 1; fi; \
+	  echo "mutation: all $$total killed"

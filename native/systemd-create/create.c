@@ -402,15 +402,19 @@ static int no_families(struct lsc *s) {
     sd_bus_message_unref(m); return ok;
 }
 /* The effective filter is a host-resolved syscall-name list: require an
- * allow-list containing pause and none of a few never-granted names. */
+ * allow-list containing pause and none of a few never-granted names. At most
+ * SYSCALL_FILTER_MAX names are accepted (exactly 1024 passes, 1025 fails);
+ * @system-service resolves to roughly 400 on current systemd. */
+#define SYSCALL_FILTER_MAX 1024U
 static int syscall_filter(struct lsc *s) {
     sd_bus_message *m=NULL; int allow=0, pause_seen=0;
     int ok=get(s,SI,"SystemCallFilter","(bas)",&m) && sd_bus_message_enter_container(m,'r',"bas")>0 &&
         sd_bus_message_read(m,"b",&allow)>0 && allow==1 && sd_bus_message_enter_container(m,'a',"s")>0;
     for (unsigned i=0;ok;i++) {
         const char *v=NULL; int r=sd_bus_message_at_end(m,0);
-        if (r<0 || i>=1024) { ok=0; break; }
+        if (r<0) { ok=0; break; }
         if (r>0) break;
+        if (i>=SYSCALL_FILTER_MAX) { ok=0; break; } /* name number i+1 > cap */
         ok=sd_bus_message_read(m,"s",&v)>0 && v;
         if (ok) pause_seen|=!strcmp(v,"pause");
         for (size_t k=0;ok && k<sizeof DENIED_SYSCALLS/sizeof *DENIED_SYSCALLS;k++) ok=strcmp(v,DENIED_SYSCALLS[k])!=0;
