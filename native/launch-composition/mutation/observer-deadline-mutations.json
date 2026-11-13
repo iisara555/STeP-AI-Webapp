@@ -1,0 +1,138 @@
+[
+  {
+    "id": "OD1",
+    "desc": "readiness phase removed before first blocking call",
+    "file": "systemd-observer.c",
+    "test": "test-observer-deadline",
+    "after_find": " || sd_bus_start(b)<0 || lso_ready(b,deadline)!=1) goto done;",
+    "after_repl": " || sd_bus_start(b)<0 || (0 && lso_ready(b,deadline)!=1)) goto done;"
+  },
+  {
+    "id": "OD2",
+    "desc": "readiness phase removed (fixture: call before ready)",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": " || sd_bus_start(b)<0 || lso_ready(b,deadline)!=1) goto done;",
+    "after_repl": " || sd_bus_start(b)<0 || (0 && lso_ready(b,deadline)!=1)) goto done;"
+  },
+  {
+    "id": "OD3",
+    "desc": "per-round readiness deadline check removed",
+    "file": "systemd-observer.c",
+    "test": "test-observer-deadline",
+    "after_find": "        uint64_t t=lso_now();\n        if (!t || t>=deadline) return 0;\n        unsigned i;",
+    "after_repl": "        uint64_t t=lso_now();\n        (void)t;\n        unsigned i;"
+  },
+  {
+    "id": "OD4",
+    "desc": "sd-bus timeout not capped at the attempt deadline",
+    "file": "systemd-observer.c",
+    "test": "test-observer-deadline",
+    "after_find": "        if (until>deadline) until=deadline;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "OD5",
+    "desc": "buffered-work yield removed (sleeps with work pending)",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "        if (i==LSO_DISPATCH_BOUND) left=0; /* buffered work: yield, do not sleep */\n",
+    "after_repl": ""
+  },
+  {
+    "id": "OD6",
+    "desc": "readiness error ignored",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "            if (r!=0) return r>0 ? 1:-1;",
+    "after_repl": "            if (r>0) return 1;"
+  },
+  {
+    "id": "OD7",
+    "desc": "process() failure ignored",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "            r=sd_bus_process(bus,NULL);\n            if (r<0) return -1;\n",
+    "after_repl": "            r=sd_bus_process(bus,NULL);\n"
+  },
+  {
+    "id": "OD8",
+    "desc": "per-call ceiling removed (timeout = whole time left)",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "left<LSO_CALL_CEILING_US ? left:LSO_CALL_CEILING_US",
+    "after_repl": "left"
+  },
+  {
+    "id": "OD9",
+    "desc": "budget before GetNameOwner removed",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "    if (!lso_budget(b,deadline)) return 0;\n    int r=sd_bus_call_method(",
+    "after_repl": "    int r=sd_bus_call_method("
+  },
+  {
+    "id": "OD10",
+    "desc": "budget before GetConnectionUnixUser removed",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "    if (!ok || !lso_budget(b,deadline)) return 0;",
+    "after_repl": "    if (!ok) return 0;"
+  },
+  {
+    "id": "OD11",
+    "desc": "budget before GetUnit removed",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "    if (!lso_budget(b,deadline)) goto done;\n    int r=sd_bus_call_method(b,manager,",
+    "after_repl": "    int r=sd_bus_call_method(b,manager,"
+  },
+  {
+    "id": "OD12",
+    "desc": "budget before string property removed",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "    if (!lso_budget(b,deadline)) return 0;\n    int r=sd_bus_get_property_string(",
+    "after_repl": "    (void)deadline;\n    int r=sd_bus_get_property_string("
+  },
+  {
+    "id": "OD13",
+    "desc": "budget before InvocationID removed",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "    if (!lso_budget(b,deadline)) goto done;\n    if (sd_bus_get_property(b,manager,object,\"org.freedesktop.systemd1.Unit\",\"InvocationID\"",
+    "after_repl": "    if (sd_bus_get_property(b,manager,object,\"org.freedesktop.systemd1.Unit\",\"InvocationID\""
+  },
+  {
+    "id": "OD14",
+    "desc": "budget before Job removed",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "    if (!lso_budget(b,deadline) ||\n        sd_bus_get_property(b,manager,object,\"org.freedesktop.systemd1.Unit\",\"Job\"",
+    "after_repl": "    if (sd_bus_get_property(b,manager,object,\"org.freedesktop.systemd1.Unit\",\"Job\""
+  },
+  {
+    "id": "OD15",
+    "desc": "closing whole-snapshot deadline check removed",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "|| !lso_budget(b,deadline) || copy(out->manager",
+    "after_repl": "|| copy(out->manager"
+  },
+  {
+    "id": "OD16",
+    "desc": "connection not started before readiness",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": " || sd_bus_start(b)<0 || lso_ready(",
+    "after_repl": " || lso_ready("
+  },
+  {
+    "id": "OD17",
+    "desc": "fixed peer uid check removed",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "peer_length!=sizeof peer || peer.uid!=LSO_PEER_UID) goto done;",
+    "after_repl": "peer_length!=sizeof peer) goto done;"
+  }
+]

@@ -10,3 +10,5 @@ test-create-reconcile
 test-reconcile-sanitize
 test-reset-composition
 test-reset-sanitize
+test-observer-deadline
+test-observer-deadline-sanitize

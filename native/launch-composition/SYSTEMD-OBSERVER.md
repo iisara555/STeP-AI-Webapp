@@ -29,8 +29,17 @@ ownership. A trusted startup owner must supply that separate authority.
    peer, expected root-owned manager connection, and calls directed to its exact
    unique name. It checks bus-instance identity too: a restarted bus can reuse
    unique-name strings. Manager ownership is bracketed around each snapshot.
-   Calls have a two-second per-method timeout; they are synchronous and cannot
-   be cancelled by a socket deadline. Hosts whose bus peer is not root are
+   The whole snapshot (connect, authentication/Hello, every query and the
+   closing owner bracket) is bounded by one absolute 5 s monotonic deadline that
+   is never refreshed. `sd_bus_start` only queues authentication, so readiness
+   is driven nonblockingly (`sd_bus_is_ready` + at most 32 `sd_bus_process` per
+   round + a `ppoll` capped at the deadline) before any method call; otherwise a
+   stalled peer blocks in the 90 s auth timeout. Each blocking call then gets
+   `min(time left, 2 s)`. Real-libsystemd regression: a private socket that
+   never answers authentication is refused in about 5.005 s with no method call
+   on the wire (`test-observer-deadline`; the address/peer seam is `LSO_TESTING`
+   only, and `make pin-check`/`pin-check-negative` refuse a hooked object).
+   Hosts whose bus peer is not root are
    conservatively unsupported (UNKNOWN); do not relax this to peer-selected UID.
 5. Absence requires the expected boot, manager/bus and InvocationID. ControlGroup
    must equal the launch-time path, or be empty for an inactive/failed unit only;

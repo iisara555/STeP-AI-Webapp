@@ -2048,3 +2048,16 @@ analyzer, ASan/UBSan, mutation list and a read-only host probe; no real
 Kill/Stop was sent. Found: stopped units report `ControlGroup=` on systemd 259,
 so the observer cannot yet prove absence for a really stopped anchor. Details
 and remaining gates: `native/systemd-create/README-STOP.md`.
+
+### Observer bus readiness deadline — synthetic, not installed
+
+The read-only observer (`lso_bus_snapshot`) could block about 90 s in libsystemd
+authentication before its first call, despite the 2 s method timeout (found by
+independent review of the composed reset candidate). It now uses the same
+bounded readiness pattern as create/stop/reset: one 5 s deadline for the whole
+snapshot, nonblocking readiness before any call, every blocking call capped at
+the time left. Verified: launch-composition `clean all test analyze sanitize`,
+real-libsystemd stalled-socket regression (refused in 5.005 s, no method call
+sent), fixture readiness/flood/error cases, pin-check plus negative proof at
+`-g`/`-g0`, 17/17 new deletion mutations killed. Strict manager binding (D2)
+unchanged. Details: `native/launch-composition/SYSTEMD-OBSERVER.md`.
