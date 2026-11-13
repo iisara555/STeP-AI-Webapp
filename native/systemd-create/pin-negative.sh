@@ -5,7 +5,7 @@
 # the expected reason, so one layer cannot mask a deleted check in another.
 set -u
 : "${CC:?}" "${CFLAGS:?}" "${MAKE:=make}"
-d=$(mktemp -d "${TMPDIR:-/tmp}/pin-neg.XXXXXX") || exit 1
+d=$(mktemp -d "${TMPDIR:?TMPDIR must name a private scratch directory}/pin-neg.XXXXXX") || exit 1
 trap 'rm -rf "$d"' EXIT
 fails=0
 fail() { printf 'FAIL: %s\n' "$*" >&2; fails=$((fails+1)); }

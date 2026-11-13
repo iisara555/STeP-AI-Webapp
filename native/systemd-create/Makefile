@@ -107,8 +107,13 @@ clean:
 # hook marker/#error) -> make pin-check-phony (runs pin-check and the negatives).
 MUTATION_LISTS = mutation/mutations.json mutation/pin-mutations.json mutation/stop-mutations.json mutation/reset-mutations.json mutation/deadline-mutations.json
 mutation:
-	@d=$$(mktemp -d) && s=0 && for l in $(MUTATION_LISTS); do \
-	  python3 mutation/run.py $(CURDIR)/../.. after $$l $$d/after.json >> $$d/log || s=1; done; \
-	  cat $$d/log; total=$$(wc -l < $$d/log); bad=$$(grep -cv ' KILLED' $$d/log); rm -rf $$d; \
-	  if [ $$s -ne 0 ] || [ $$bad -ne 0 ]; then echo "mutation: $$bad of $$total not killed" >&2; exit 1; fi; \
+	@set -eu; s=0; \
+	  d=$$(mktemp -d "$${TMPDIR:?TMPDIR must name a private scratch directory}/sc-mutation.XXXXXX") || { echo 'mutation: NOT RUN (no scratch directory)' >&2; exit 1; }; \
+	  expected=$$(python3 -c 'import json,sys; print(sum(1 for f in sys.argv[1:] for m in json.load(open(f)) if "after_find" in m))' $(MUTATION_LISTS)) || { rm -rf -- "$$d"; echo 'mutation: NOT RUN (unreadable list)' >&2; exit 1; }; \
+	  for l in $(MUTATION_LISTS); do \
+	    python3 mutation/run.py "$(CURDIR)/../.." after "$$l" "$$d/after.json" >> "$$d/log" || s=1; done; \
+	  touch "$$d/log"; cat "$$d/log"; \
+	  total=$$(wc -l < "$$d/log"); killed=$$(grep -c ' KILLED' "$$d/log" || true); rm -rf -- "$$d"; \
+	  if [ "$$s" -ne 0 ] || [ "$$expected" -eq 0 ] || [ "$$total" -ne "$$expected" ] || [ "$$killed" -ne "$$expected" ]; then \
+	    echo "mutation: FAILED ($$killed killed, $$total results, $$expected expected)" >&2; exit 1; fi; \
 	  echo "mutation: all $$total killed"
