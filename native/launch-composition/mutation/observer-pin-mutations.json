@@ -1,0 +1,177 @@
+[
+  {
+    "id": "PO1",
+    "desc": "hook: used marker removed (-g0 hooked object then has no hook name)",
+    "file": "systemd-observer.c",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "__attribute__((used)) static const char lso_test_hook_marker[]=\"lso_test_hook_marker\";\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PO2",
+    "desc": "hook: #error weakened to #warning (still fails only under -Werror)",
+    "file": "systemd-observer.c",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "#error \"LSO_TESTING is only valid",
+    "after_repl": "#warning \"LSO_TESTING is only valid"
+  },
+  {
+    "id": "PO3",
+    "desc": "review: nm hook arm removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $symbols in *lso_test_*) refuse 'test hook symbol' ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PO4",
+    "desc": "review: strings hook arm removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $bytes in *lso_test_*) refuse 'test hook bytes' ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PO5",
+    "desc": "review: LTO refusal removed (was backstopped by the bus-address string check)",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $sections in *'.gnu.lto_'*) refuse 'LTO object (.gnu.lto_* sections) cannot be scanned' ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PO6",
+    "desc": "readelf failure ignored (fail open)",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "|| refuse 'readelf failed'",
+    "after_repl": ""
+  },
+  {
+    "id": "PO7",
+    "desc": "nm failure ignored (fail open)",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "|| refuse 'nm failed'",
+    "after_repl": ""
+  },
+  {
+    "id": "PO8",
+    "desc": "strings failure ignored (fail open)",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "|| refuse 'strings failed'",
+    "after_repl": ""
+  },
+  {
+    "id": "PO9",
+    "desc": "readelf empty-output (.text) check removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $sections in *' .text '*) ;; *) refuse 'readelf output lacks a .text section' ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PO10",
+    "desc": "review: nm known-symbol (lso_bus_snapshot) check removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $symbols in *' T lso_bus_snapshot'*) ;; *) refuse 'nm output lacks lso_bus_snapshot' ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PO11",
+    "desc": "review: strings bus-address check removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $bytes in *'unix:path=/run/dbus/system_bus_socket'*) ;; *) refuse 'strings output lacks the system bus address' ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PO12",
+    "desc": "pin-check-negative missing from .PHONY",
+    "file": "Makefile",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "pin-check pin-check-negative pin-check-phony\n",
+    "after_repl": "pin-check pin-check-phony\n"
+  },
+  {
+    "id": "PO13",
+    "desc": "pin-check missing from .PHONY",
+    "file": "Makefile",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "mutation pin-check pin-check-negative",
+    "after_repl": "mutation pin-check-negative"
+  },
+  {
+    "id": "PO14",
+    "desc": "review: LSO_ make $(error) tripwire removed",
+    "file": "Makefile",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "$(error REFUSED: LSO_ test macros in CC/CFLAGS/CPPFLAGS; the hook is only valid inside test-observer-deadline.c)\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PO15",
+    "desc": "LSO_ tripwire ignores CC",
+    "file": "Makefile",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "$(findstring LSO_,$(CC) $(CFLAGS) $(CPPFLAGS))",
+    "after_repl": "$(findstring LSO_,$(CFLAGS) $(CPPFLAGS))"
+  },
+  {
+    "id": "PO16",
+    "desc": "LSO_ tripwire ignores CPPFLAGS",
+    "file": "Makefile",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "$(findstring LSO_,$(CC) $(CFLAGS) $(CPPFLAGS))",
+    "after_repl": "$(findstring LSO_,$(CC) $(CFLAGS))"
+  },
+  {
+    "id": "PO17",
+    "desc": "LSO_ tripwire ignores CFLAGS",
+    "file": "Makefile",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "$(findstring LSO_,$(CC) $(CFLAGS) $(CPPFLAGS))",
+    "after_repl": "$(findstring LSO_,$(CC) $(CPPFLAGS))"
+  },
+  {
+    "id": "PO18",
+    "desc": "pin-check no longer runs pin-scan.sh",
+    "file": "Makefile",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "\t@sh ./pin-scan.sh systemd-observer.o\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PO19",
+    "desc": "make test no longer runs pin-check-phony",
+    "file": "Makefile",
+    "build": ["make", "-s", "systemd-observer.o"],
+    "run": [
+      "sh",
+      "-c",
+      "make -p -q __no_such_target__ 2>/dev/null | grep -Eq '^test:.* pin-check-phony( |$)'"
+    ],
+    "after_find": " test-observer-deadline pin-check-phony\n",
+    "after_repl": " test-observer-deadline\n"
+  }
+]

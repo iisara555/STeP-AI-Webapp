@@ -3,9 +3,23 @@
 #define main stop_fixture_suite_main
 #include "../systemd-create/test-stop.c"
 #undef main
-/* Production observer connection entry points are forbidden in this fixture;
- * lcr_open_with_ops supplies only its read-only snapshot seam. */
-int sd_bus_open_system(sd_bus **out) { (void)out; assert(0); return -EPERM; }
+/* The production observer is forbidden in this fixture: lcr_open_with_ops
+ * supplies only its read-only snapshot seam. The observer connects through
+ * sd_bus_new, which here is test-stop.c's fake (an accidental production
+ * snapshot would quietly return -1), so the tripwire sits at the observer's own
+ * entry points: the Makefile links this binary with
+ * -Wl,--wrap=lso_bus_snapshot -Wl,--wrap=lso_open and these wrappers abort. */
+#include "systemd-observer.h"
+int __wrap_lso_bus_snapshot(void *ctx,const char *unit,const char *manager,struct lso_snapshot *out);
+int __wrap_lso_bus_snapshot(void *ctx,const char *unit,const char *manager,struct lso_snapshot *out) {
+    (void)ctx; (void)unit; (void)manager; (void)out;
+    fprintf(stderr,"FAIL: production lso_bus_snapshot reached from the reset fixture\n"); abort();
+}
+int __wrap_lso_open(const struct lso_config *c,struct lso **out);
+int __wrap_lso_open(const struct lso_config *c,struct lso **out) {
+    (void)c; (void)out;
+    fprintf(stderr,"FAIL: production lso_open reached from the reset fixture\n"); abort();
+}
 int sd_bus_get_property_string(sd_bus *b,const char *d,const char *p,const char *i,const char *k,sd_bus_error *e,char **out) {
     (void)b; (void)d; (void)p; (void)i; (void)k; (void)e; (void)out; assert(0); return -EPERM;
 }

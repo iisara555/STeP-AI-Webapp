@@ -134,5 +134,157 @@
     "test": "test-systemd-bus",
     "after_find": "peer_length!=sizeof peer || peer.uid!=LSO_PEER_UID) goto done;",
     "after_repl": "peer_length!=sizeof peer) goto done;"
+  },
+  {
+    "id": "OD18",
+    "desc": "review X1: expired-deadline refusal dropped in lso_budget",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "    uint64_t t=lso_now();\n    if (!t || t>=deadline) return 0;\n    uint64_t left=deadline-t;",
+    "after_repl": "    uint64_t t=lso_now();\n    if (!t) return 0;\n    uint64_t left=t<deadline ? deadline-t:LSO_CALL_CEILING_US;"
+  },
+  {
+    "id": "OD19",
+    "desc": "review X2b: budget always the 2 s ceiling (min with left dropped)",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "left<LSO_CALL_CEILING_US ? left:LSO_CALL_CEILING_US",
+    "after_repl": "((void)left,LSO_CALL_CEILING_US)"
+  },
+  {
+    "id": "OD20",
+    "desc": "review X8: deadline refreshed after readiness",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "lso_ready(b,deadline)!=1) goto done;",
+    "after_repl": "lso_ready(b,deadline)!=1) goto done;\n    deadline=lso_now()+LSO_ATTEMPT_US;"
+  },
+  {
+    "id": "OD21",
+    "desc": "review X4: dispatch loop no break on idle (busy spin)",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "            if (!r) break;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "OD22",
+    "desc": "review X5: sd_bus_get_timeout failure ignored",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "if (fd<0 || events<0 || sd_bus_get_timeout(bus,&until)<0) return -1;",
+    "after_repl": "if (fd<0 || events<0) return -1;\n        (void)sd_bus_get_timeout(bus,&until);"
+  },
+  {
+    "id": "OD23",
+    "desc": "review X6: ppoll errors ignored",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "if (ppoll(&p,1,&timeout,NULL)<0 && errno!=EINTR) return -1;",
+    "after_repl": "(void)ppoll(&p,1,&timeout,NULL);"
+  },
+  {
+    "id": "OD24",
+    "desc": "review X14: sleep length uses stale round-start time (no fresh clock)",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "        t=lso_now(); /* fresh, for the sleep length only */\n        if (!t) return 0;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "OD25",
+    "desc": "EINTR from ppoll treated as an error",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "if (ppoll(&p,1,&timeout,NULL)<0 && errno!=EINTR) return -1;",
+    "after_repl": "if (ppoll(&p,1,&timeout,NULL)<0) return -1;"
+  },
+  {
+    "id": "OD26",
+    "desc": "lso_budget clock-failure refusal dropped",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "    if (!t || t>=deadline) return 0;\n    uint64_t left",
+    "after_repl": "    if (t>=deadline) return 0;\n    uint64_t left"
+  },
+  {
+    "id": "OD27",
+    "desc": "readiness round clock-failure refusal dropped",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "        if (!t || t>=deadline) return 0;\n        unsigned i;",
+    "after_repl": "        if (t>=deadline) return 0;\n        unsigned i;"
+  },
+  {
+    "id": "OD28",
+    "desc": "readiness sleep clock-failure refusal dropped",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "t=lso_now(); /* fresh, for the sleep length only */\n        if (!t) return 0;\n",
+    "after_repl": "t=lso_now(); /* fresh, for the sleep length only */\n"
+  },
+  {
+    "id": "OD29",
+    "desc": "lso_budget boundary: deadline itself still budgeted (timeout 0)",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "    if (!t || t>=deadline) return 0;\n    uint64_t left",
+    "after_repl": "    if (!t || t>deadline) return 0;\n    uint64_t left"
+  },
+  {
+    "id": "OD30",
+    "desc": "readiness boundary: deadline itself still polls readiness",
+    "file": "systemd-observer.c",
+    "test": "test-systemd-bus",
+    "after_find": "        if (!t || t>=deadline) return 0;\n        unsigned i;",
+    "after_repl": "        if (!t || t>deadline) return 0;\n        unsigned i;"
+  },
+  {
+    "id": "OD31",
+    "desc": "real libsystemd: no budget before sd_bus_start (Hello waits the 25 s default)",
+    "file": "systemd-observer.c",
+    "test": "test-observer-deadline",
+    "after_find": "!lso_budget(b,deadline) || sd_bus_start(b)<0",
+    "after_repl": "sd_bus_start(b)<0"
+  },
+  {
+    "id": "OD32",
+    "desc": "real libsystemd: per-call ceiling removed (GetNameOwner waits the whole time left)",
+    "file": "systemd-observer.c",
+    "test": "test-observer-deadline",
+    "after_find": "left<LSO_CALL_CEILING_US ? left:LSO_CALL_CEILING_US",
+    "after_repl": "left"
+  },
+  {
+    "id": "OD33",
+    "desc": "real libsystemd: peer check moved after the first method call",
+    "file": "systemd-observer.c",
+    "test": "test-observer-deadline",
+    "after_find": "    struct ucred peer; socklen_t peer_length=sizeof peer;\n    int bus_fd=sd_bus_get_fd(b);\n    if (bus_fd<0 || getsockopt(bus_fd,SOL_SOCKET,SO_PEERCRED,&peer,&peer_length)<0 ||\n        peer_length!=sizeof peer || peer.uid!=LSO_PEER_UID) goto done;\n    if (!owner(b,manager,deadline)) goto done;\n",
+    "after_repl": "    if (!owner(b,manager,deadline)) goto done;\n    struct ucred peer; socklen_t peer_length=sizeof peer;\n    int bus_fd=sd_bus_get_fd(b);\n    if (bus_fd<0 || getsockopt(bus_fd,SOL_SOCKET,SO_PEERCRED,&peer,&peer_length)<0 ||\n        peer_length!=sizeof peer || peer.uid!=LSO_PEER_UID) goto done;\n"
+  },
+  {
+    "id": "OD34",
+    "desc": "peer-uid seam has no effect (hooked build still pins uid 0)",
+    "file": "systemd-observer.c",
+    "test": "test-observer-deadline",
+    "after_find": "#define LSO_PEER_UID lso_test_peer_uid",
+    "after_repl": "#define LSO_PEER_UID ((uid_t)0)"
+  },
+  {
+    "id": "OD35",
+    "desc": "reset fixture: reconciler also calls the production lso_bus_snapshot (wrap must abort)",
+    "file": "create-reconcile.c",
+    "test": "test-reset-composition",
+    "after_find": "    struct lso_snapshot s; memset(&s,0,sizeof s);\n    if (h->ops.snapshot(",
+    "after_repl": "    struct lso_snapshot s; memset(&s,0,sizeof s);\n    (void)lso_bus_snapshot(NULL,j->unit,j->manager,&s); memset(&s,0,sizeof s);\n    if (h->ops.snapshot("
+  },
+  {
+    "id": "OD36",
+    "desc": "reset fixture: reconciler also tries the production lso_open (wrap must abort)",
+    "file": "create-reconcile.c",
+    "test": "test-reset-composition",
+    "after_find": "int rc=h->production ? lso_open(&c,&h->observer):",
+    "after_repl": "int rc=(lso_open(&c,&h->observer)==0 || h->production) ? -1:"
   }
 ]

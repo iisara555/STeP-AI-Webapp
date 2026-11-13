@@ -35,10 +35,27 @@ ownership. A trusted startup owner must supply that separate authority.
    is driven nonblockingly (`sd_bus_is_ready` + at most 32 `sd_bus_process` per
    round + a `ppoll` capped at the deadline) before any method call; otherwise a
    stalled peer blocks in the 90 s auth timeout. Each blocking call then gets
-   `min(time left, 2 s)`. Real-libsystemd regression: a private socket that
-   never answers authentication is refused in about 5.005 s with no method call
-   on the wire (`test-observer-deadline`; the address/peer seam is `LSO_TESTING`
-   only, and `make pin-check`/`pin-check-negative` refuse a hooked object).
+   `min(time left, 2 s)`. Real-libsystemd regression (`test-observer-deadline`,
+   a private socket peer in the test process; `$TMPDIR` is required): a peer
+   that never answers authentication is refused in about 5.005 s (auth never
+   completes, so only elapsed time is asserted); one that never answers Hello
+   is refused at the 2 s Hello budget; one that answers Hello but never
+   GetNameOwner sees exactly Hello + one GetNameOwner and a refusal at 2 s;
+   with the peer-uid seam left at the production 0 the same peer sees only
+   Hello (the peer check precedes every method call). The address/peer seam is
+   `LSO_TESTING` only. `make pin-check` runs `pin-scan.sh` (distinct refusal
+   reasons); `pin-check-negative` (`pin-negative.sh`, fake-tool wrapper) proves
+   each scan arm alone, LTO/tool-failure refusals, the exact `#error`, the make
+   `LSO_` tripwire and `make pin-check` itself; `pin-check-phony` proves both
+   run with same-named files present (wired into `make test`).
+   The ABI fixture (`test-systemd-bus`) owns the monotonic clock
+   (`clock_gettime` renamed before the include) and asserts every budget and
+   readiness sleep against the true time left: jumps inside each call
+   (including the last), inside readiness, idle rounds (no busy spin),
+   `sd_bus_get_timeout`/`ppoll` faults, EINTR and clock failure at every read.
+   `test-reset-composition` links with `--wrap=lso_bus_snapshot` and
+   `--wrap=lso_open` to aborting wrappers, so the production observer cannot be
+   reached through the stop fixture's fake `sd_bus_new`.
    Hosts whose bus peer is not root are
    conservatively unsupported (UNKNOWN); do not relax this to peer-selected UID.
 5. Absence requires the expected boot, manager/bus and InvocationID. ControlGroup

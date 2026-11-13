@@ -2061,3 +2061,33 @@ real-libsystemd stalled-socket regression (refused in 5.005 s, no method call
 sent), fixture readiness/flood/error cases, pin-check plus negative proof at
 `-g`/`-g0`, 17/17 new deletion mutations killed. Strict manager binding (D2)
 unchanged. Details: `native/launch-composition/SYSTEMD-OBSERVER.md`.
+
+### Observer deadline review gaps — synthetic, not installed
+
+Closed the five gaps left by independent review of `4550249` test-first; no
+production behaviour changed (`systemd-observer.c` untouched; D2, fixed bus
+address and uid 0 unchanged).
+
+- `test-systemd-bus` owns the monotonic clock and asserts every per-call budget
+  and readiness sleep against the true time left: jumps inside each call
+  (including the last), inside readiness, idle rounds, `sd_bus_get_timeout` /
+  `ppoll` faults, EINTR and clock failure at every read. Reviewer survivors
+  X1, X2b, X8, X4, X5, X6 and X14 are now killed (X14 is not equivalent: a
+  clock jump inside dispatch makes a stale sleep overrun the deadline).
+- Pin checks moved to `pin-scan.sh` (distinct refusal reasons) with
+  `pin-negative.sh` proving each arm alone through a fake-tool wrapper, LTO
+  (slim and fat), tool failure, the exact `#error`, the make `LSO_` tripwire
+  and `make pin-check`; `pin-check-phony` (in `make test`) proves both run with
+  same-named files present. Scratch requires `$TMPDIR`.
+- `test-reset-composition` links `--wrap=lso_bus_snapshot --wrap=lso_open` to
+  aborting wrappers (the dead `sd_bus_open_system` stub is gone); two mutants
+  that reach the production observer survived before and abort now.
+- `test-observer-deadline` plays the bus in-process: stalled auth (elapsed only;
+  no wire claim), unanswered Hello (2 s Hello budget), unanswered GetNameOwner
+  (exactly Hello + one GetNameOwner) and the production peer uid 0 (only Hello:
+  the peer check precedes every call, so the uid seam is now exercised).
+- Verified: launch-composition `clean all test analyze sanitize`,
+  `install-check` still refuses, `npm run check`, `make mutation` 167/167
+  killed (129 previous + 19 in `observer-deadline-mutations.json` OD18–OD36 +
+  19 in new `observer-pin-mutations.json` PO1–PO19), no SURVIVED, BUILD-FAIL or
+  BAD-PATTERN. Real bus not contacted; no root, install or host acceptance.
