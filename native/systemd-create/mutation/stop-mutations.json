@@ -1,0 +1,1325 @@
+[
+  {
+    "id": "S1",
+    "desc": "hex: nonzero requirement deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    return nz;\n}\nstatic int uuid",
+    "after_repl": "    return 1;\n}\nstatic int uuid"
+  },
+  {
+    "id": "S2",
+    "desc": "hex: character class deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "for (size_t i=0;i<32;i++) { if (!((p[i]>='0' && p[i]<='9') || (p[i]>='a' && p[i]<='f'))) return 0; nz|=p[i]!='0'; }",
+    "after_repl": "for (size_t i=0;i<32;i++) { nz|=p[i]!='0'; }"
+  },
+  {
+    "id": "S3",
+    "desc": "hex: length deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (strnlen(p,33)!=32) return 0;\n    int nz=0;",
+    "after_repl": "    int nz=0;"
+  },
+  {
+    "id": "S4",
+    "desc": "uuid: length deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (strnlen(p,37)!=36) return 0;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "S5",
+    "desc": "uuid: dash positions deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "{ if (p[i]!='-') return 0; }",
+    "after_repl": "{ }"
+  },
+  {
+    "id": "S6",
+    "desc": "uuid: hex class deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "        else if (!((p[i]>='0' && p[i]<='9') || (p[i]>='a' && p[i]<='f'))) return 0;\n    }\n    return 1;",
+    "after_repl": "    }\n    return 1;"
+  },
+  {
+    "id": "S8",
+    "desc": "unique_name: terminator bound deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (n>=max || p[0]!=':') return 0;",
+    "after_repl": "if (p[0]!=':') return 0;"
+  },
+  {
+    "id": "S9",
+    "desc": "unique_name: leading colon deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (n>=max || p[0]!=':') return 0;",
+    "after_repl": "if (n>=max) return 0;"
+  },
+  {
+    "id": "S10",
+    "desc": "unique_name: empty digit run before dot accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (p[i]!='.' || !run) return 0;",
+    "after_repl": "if (p[i]!='.') return 0;"
+  },
+  {
+    "id": "S11",
+    "desc": "unique_name: non-dot non-digit accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (p[i]!='.' || !run) return 0;\n        dots++;",
+    "after_repl": "if (p[i]=='.' && !run) return 0;\n        dots++;"
+  },
+  {
+    "id": "S12",
+    "desc": "unique_name: exactly one dot deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    return dots==1 && run>0;",
+    "after_repl": "    return dots>=1 && run>0;"
+  },
+  {
+    "id": "S13",
+    "desc": "unique_name: trailing digits deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    return dots==1 && run>0;",
+    "after_repl": "    return dots==1;"
+  },
+  {
+    "id": "S14",
+    "desc": "job_number: prefix deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (!path || strncmp(path,JOB_PREFIX,sizeof JOB_PREFIX-1)) return 0;",
+    "after_repl": "if (!path) return 0;"
+  },
+  {
+    "id": "S15",
+    "desc": "job_number: leading zero accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (*p<'1' || *p>'9') return 0;",
+    "after_repl": "if (*p<'0' || *p>'9') return 0;"
+  },
+  {
+    "id": "S16",
+    "desc": "job_number: non-digit accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "{ if (*p<'0' || *p>'9') return 0; n=n*10",
+    "after_repl": "{ n=n*10"
+  },
+  {
+    "id": "S17",
+    "desc": "job_number: UINT32 overflow deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "n=n*10+(unsigned)(*p-'0'); if (n>UINT32_MAX) return 0; }",
+    "after_repl": "n=n*10+(unsigned)(*p-'0'); }"
+  },
+  {
+    "id": "S18",
+    "desc": "create_unchanged: owner deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "st.st_uid!=CREATE_UID || (st.st_mode&07777)!=0600 || st.st_nlink!=1) return 0;\n    ssize_t",
+    "after_repl": "(st.st_mode&07777)!=0600 || st.st_nlink!=1) return 0;\n    ssize_t"
+  },
+  {
+    "id": "S19",
+    "desc": "create_unchanged: mode deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "st.st_uid!=CREATE_UID || (st.st_mode&07777)!=0600 || st.st_nlink!=1) return 0;\n    ssize_t",
+    "after_repl": "st.st_uid!=CREATE_UID || st.st_nlink!=1) return 0;\n    ssize_t"
+  },
+  {
+    "id": "S20",
+    "desc": "create_unchanged: nlink deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "(st.st_mode&07777)!=0600 || st.st_nlink!=1) return 0;\n    ssize_t",
+    "after_repl": "(st.st_mode&07777)!=0600) return 0;\n    ssize_t"
+  },
+  {
+    "id": "S21",
+    "desc": "create_unchanged: length deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "return r==(ssize_t)s->create_length && !memcmp",
+    "after_repl": "return r>=0 && !memcmp"
+  },
+  {
+    "id": "S22",
+    "desc": "create_unchanged: content deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "return r==(ssize_t)s->create_length && !memcmp(buf,s->create_bytes,s->create_length);",
+    "after_repl": "return r==(ssize_t)s->create_length;"
+  },
+  {
+    "id": "S23",
+    "desc": "budget: clock failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!t || t>=s->deadline) return 0;\n    uint64_t left",
+    "after_repl": "    if (t>=s->deadline) return 0;\n    uint64_t left"
+  },
+  {
+    "id": "S24",
+    "desc": "budget: deadline deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!t || t>=s->deadline) return 0;\n    uint64_t left",
+    "after_repl": "    if (!t) return 0;\n    uint64_t left"
+  },
+  {
+    "id": "S25",
+    "desc": "budget: per-call cap at time left deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "sd_bus_set_method_call_timeout(s->bus,left<CALL_CEILING_US ? left:CALL_CEILING_US)>=0;",
+    "after_repl": "sd_bus_set_method_call_timeout(s->bus,((void)left,CALL_CEILING_US))>=0;"
+  },
+  {
+    "id": "S26",
+    "desc": "owner: peer uid deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "length!=sizeof peer || peer.uid!=PEER_UID) return LAS_R_OWNER;",
+    "after_repl": "length!=sizeof peer) return LAS_R_OWNER;\n    (void)PEER_UID;"
+  },
+  {
+    "id": "S27",
+    "desc": "owner: bus id deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (strcmp(bus_id,s->c.bus_id)) return LAS_R_OWNER;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "S28",
+    "desc": "owner: budget before GetNameOwner deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!budget(s)) return LAS_R_DEADLINE;\n    int r=sd_bus_call_method",
+    "after_repl": "    int r=sd_bus_call_method"
+  },
+  {
+    "id": "S29",
+    "desc": "owner: manager name deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "name && !strcmp(name,s->c.manager) && sd_bus_message_at_end(m,1)>0;",
+    "after_repl": "name && sd_bus_message_at_end(m,1)>0;"
+  },
+  {
+    "id": "S30",
+    "desc": "owner: GetNameOwner trailing deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "name && !strcmp(name,s->c.manager) && sd_bus_message_at_end(m,1)>0;",
+    "after_repl": "name && !strcmp(name,s->c.manager);"
+  },
+  {
+    "id": "S31",
+    "desc": "owner: budget before GetConnectionUnixUser deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!budget(s)) return LAS_R_DEADLINE;\n    r=sd_bus_call_method",
+    "after_repl": "    r=sd_bus_call_method"
+  },
+  {
+    "id": "S32",
+    "desc": "owner: manager uid deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "&uid)>0 && uid==0 && sd_bus_message_at_end(m,1)>0;",
+    "after_repl": "&uid)>0 && sd_bus_message_at_end(m,1)>0;"
+  },
+  {
+    "id": "S33",
+    "desc": "owner: GetConnectionUnixUser trailing deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "&uid)>0 && uid==0 && sd_bus_message_at_end(m,1)>0;",
+    "after_repl": "&uid)>0 && uid==0;"
+  },
+  {
+    "id": "S34",
+    "desc": "owner: DEADLINE reported as OWNER",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!budget(s)) return LAS_R_DEADLINE;\n    int r=sd_bus_call_method",
+    "after_repl": "    if (!budget(s)) return LAS_R_OWNER;\n    int r=sd_bus_call_method"
+  },
+  {
+    "id": "S35",
+    "desc": "property_end: trailing outer argument accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "return sd_bus_message_exit_container(m)>0 && sd_bus_message_at_end(m,1)>0;",
+    "after_repl": "return sd_bus_message_exit_container(m)>0;"
+  },
+  {
+    "id": "S36",
+    "desc": "get: budget deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    *m=NULL;\n    if (!budget(s)) return LAS_R_DEADLINE;\n",
+    "after_repl": "    *m=NULL;\n"
+  },
+  {
+    "id": "S37",
+    "desc": "string_prop: length bound deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "v && strlen(v)<n && property_end(m)",
+    "after_repl": "v && ((void)n,1) && property_end(m)"
+  },
+  {
+    "id": "S38",
+    "desc": "string_prop: property_end deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "v && strlen(v)<n && property_end(m)",
+    "after_repl": "v && strlen(v)<n"
+  },
+  {
+    "id": "S39",
+    "desc": "by_invocation: budget deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "ly=NULL; sd_bus_error e={0}; const char *p=NULL; enum las_reason r=LAS_R_QUERY;\n    if (!budget(s)) return LAS_R_DEADLINE;\n    if (sd_bus_message_new_method_call(s->bus,&m,s->c.manager,MANAGER,MI,\"GetUnitByInvocationID\")<0 ||\n        sd_bus_message_append_array(m,'y',s->invocation,16)<0) goto out;\n ",
+    "after_repl": "ly=NULL; sd_bus_error e={0}; const char *p=NULL; enum las_reason r=LAS_R_QUERY;\n    if (sd_bus_message_new_method_call(s->bus,&m,s->c.manager,MANAGER,MI,\"GetUnitByInvocationID\")<0 ||\n        sd_bus_message_append_array(m,'y',s->invocation,16)<0) goto out;\n "
+  },
+  {
+    "id": "S40",
+    "desc": "by_invocation: NoUnitForInvocationID not classified as REPLACED",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "{ if (e.name && !strcmp(e.name,NO_INVOCATION)) r=LAS_R_REPLACED; goto out; }",
+    "after_repl": "{ goto out; }"
+  },
+  {
+    "id": "S41",
+    "desc": "by_invocation: any error classified as REPLACED",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "{ if (e.name && !strcmp(e.name,NO_INVOCATION)) r=LAS_R_REPLACED; goto out; }",
+    "after_repl": "{ r=LAS_R_REPLACED; goto out; }"
+  },
+  {
+    "id": "S42",
+    "desc": "by_invocation: call error ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (sd_bus_call(s->bus,m,0,&e,&reply)<0) { if (e.name && !strcmp(e.name,NO_INVOCATION)) r=LAS_R_REPLACED; goto out; }\n",
+    "after_repl": "    (void)sd_bus_call(s->bus,m,0,&e,&reply); if (!reply) goto out;\n"
+  },
+  {
+    "id": "S43",
+    "desc": "by_invocation: trailing deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "ON)) r=LAS_R_REPLACED; goto out; }\n    if (sd_bus_message_read(reply,\"o\",&p)<=0 || !p || sd_bus_message_at_end(reply,1)<=0) goto out;\n    r=strcmp(p,s->invocation_path) ? LAS_R_REPLACED:LAS_R_NONE;\nout:\n    sd_bus",
+    "after_repl": "ON)) r=LAS_R_REPLACED; goto out; }\n    if (sd_bus_message_read(reply,\"o\",&p)<=0 || !p) goto out;\n    r=strcmp(p,s->invocation_path) ? LAS_R_REPLACED:LAS_R_NONE;\nout:\n    sd_bus"
+  },
+  {
+    "id": "S44",
+    "desc": "by_invocation: path comparison deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "cmp(e.name,NO_INVOCATION)) r=LAS_R_REPLACED; goto out; }\n    if (sd_bus_message_read(reply,\"o\",&p)<=0 || !p || sd_bus_message_at_end(reply,1)<=0) goto out;\n    r=strcmp(p,s->invocation_path) ? LAS_R_REPLACED:LAS_R_NONE;\nout:\n    sd_bus_error_free(&e); sd_bus_message_unref(reply); sd_bus_message_unref(m); return r;\n}\nenum phase { BEFORE, AFTER };\n/* Exact incarnation: invocatio",
+    "after_repl": "cmp(e.name,NO_INVOCATION)) r=LAS_R_REPLACED; goto out; }\n    if (sd_bus_message_read(reply,\"o\",&p)<=0 || !p || sd_bus_message_at_end(reply,1)<=0) goto out;\n    r=LAS_R_NONE;\nout:\n    sd_bus_error_free(&e); sd_bus_message_unref(reply); sd_bus_message_unref(m); return r;\n}\nenum phase { BEFORE, AFTER };\n/* Exact incarnation: invocatio"
+  },
+  {
+    "id": "S45",
+    "desc": "verify: by_invocation result ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    enum las_reason r=by_invocation(s);\n",
+    "after_repl": "    enum las_reason r=LAS_R_NONE; (void)by_invocation(s);\n"
+  },
+  {
+    "id": "S46",
+    "desc": "verify: Id comparison deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (strcmp(text,s->unit)) return LAS_R_REPLACED;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "S47",
+    "desc": "verify: InvocationID length deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "&bytes,&n)>0 && n==16 && bytes && property_end(m)",
+    "after_repl": "&bytes,&n)>0 && bytes && property_end(m)"
+  },
+  {
+    "id": "S48",
+    "desc": "verify: InvocationID property_end deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "&bytes,&n)>0 && n==16 && bytes && property_end(m)",
+    "after_repl": "&bytes,&n)>0 && n==16 && bytes"
+  },
+  {
+    "id": "S49",
+    "desc": "verify: InvocationID comparison deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!r && memcmp(bytes,s->invocation,16)) r=LAS_R_REPLACED;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "S50",
+    "desc": "verify: ControlGroup comparison deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (strcmp(text,s->cgroup) && (ph==BEFORE || *text)) return LAS_R_REPLACED;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "S51",
+    "desc": "verify: empty ControlGroup accepted BEFORE",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (strcmp(text,s->cgroup) && (ph==BEFORE || *text)) return",
+    "after_repl": "if (strcmp(text,s->cgroup) && *text) return"
+  },
+  {
+    "id": "S52",
+    "desc": "verify: empty ControlGroup refused AFTER",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (strcmp(text,s->cgroup) && (ph==BEFORE || *text)) return",
+    "after_repl": "if (strcmp(text,s->cgroup)) return"
+  },
+  {
+    "id": "S53",
+    "desc": "verify: BEFORE state check deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (ph==BEFORE ? strcmp(text,\"active\")!=0:strcmp",
+    "after_repl": "if (ph==BEFORE ? 0:strcmp"
+  },
+  {
+    "id": "S54",
+    "desc": "verify: AFTER state check deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "!=0:strcmp(text,\"inactive\") && strcmp(text,\"failed\")) return LAS_R_STATE;",
+    "after_repl": "!=0:0) return LAS_R_STATE;"
+  },
+  {
+    "id": "S55",
+    "desc": "verify: AFTER inactive refused",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "!=0:strcmp(text,\"inactive\") && strcmp(text,\"failed\")) return LAS_R_STATE;",
+    "after_repl": "!=0:strcmp(text,\"failed\")!=0) return LAS_R_STATE;"
+  },
+  {
+    "id": "S56",
+    "desc": "verify: AFTER state not recorded",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (ph==AFTER) strcpy(s->receipt.state,text);\n",
+    "after_repl": ""
+  },
+  {
+    "id": "S57",
+    "desc": "verify: Job property_end deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "&job,&p)>0 && p && property_end(m) ? LAS_R_NONE:LAS_R_QUERY;",
+    "after_repl": "&job,&p)>0 && p ? LAS_R_NONE:LAS_R_QUERY;"
+  },
+  {
+    "id": "S58",
+    "desc": "verify: pending job id deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (!r && (job!=0 || strcmp(p,\"/\"))) r=LAS_R_JOB;",
+    "after_repl": "if (!r && strcmp(p,\"/\")) r=LAS_R_JOB;"
+  },
+  {
+    "id": "S59",
+    "desc": "verify: pending job path deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (!r && (job!=0 || strcmp(p,\"/\"))) r=LAS_R_JOB;",
+    "after_repl": "if (!r && job!=0) r=LAS_R_JOB;"
+  },
+  {
+    "id": "S60",
+    "desc": "verify: Job read failure accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "&job,&p)>0 && p && property_end(m) ? LAS_R_NONE:LAS_R_QUERY;",
+    "after_repl": "&job,&p)>=0 ? LAS_R_NONE:LAS_R_NONE;"
+  },
+  {
+    "id": "S61",
+    "desc": "method_reply: method error accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (sd_bus_message_is_method_error(m,NULL)>0 || sd_bus_message_read(m,\"o\",&path)<=0 ||",
+    "after_repl": "if (sd_bus_message_read(m,\"o\",&path)<=0 ||"
+  },
+  {
+    "id": "S62",
+    "desc": "method_reply: trailing accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "        sd_bus_message_at_end(m,1)<=0 || !job_number(path,&s->job)) { terminal(s,LAS_R_STOP); return 0; }",
+    "after_repl": "        !job_number(path,&s->job)) { terminal(s,LAS_R_STOP); return 0; }"
+  },
+  {
+    "id": "S63",
+    "desc": "method_reply: job path validation deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "        sd_bus_message_at_end(m,1)<=0 || !job_number(path,&s->job)) { terminal(s,LAS_R_STOP); return 0; }",
+    "after_repl": "        sd_bus_message_at_end(m,1)<=0 || (job_number(path,&s->job),0)) { terminal(s,LAS_R_STOP); return 0; }"
+  },
+  {
+    "id": "S64",
+    "desc": "method_reply: JOB fsync failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (journal(s,line)<0) terminal(s,LAS_R_JOURNAL); else s->got_reply=1;",
+    "after_repl": "    (void)journal(s,line); s->got_reply=1;"
+  },
+  {
+    "id": "S65",
+    "desc": "removed: malformed body accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (sd_bus_message_read(m,\"uoss\",&job,&path,&unit,&result)<=0 || sd_bus_message_at_end(m,1)<=0) { terminal(s,LAS_R_EVENT); return 0; }",
+    "after_repl": "if (sd_bus_message_read(m,\"uoss\",&job,&path,&unit,&result)<=0) { terminal(s,LAS_R_EVENT); return 0; }"
+  },
+  {
+    "id": "S66",
+    "desc": "removed: other units not ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (strcmp(unit,s->unit)) return 0; /* the arg2",
+    "after_repl": "    (void)unit; /* the arg2"
+  },
+  {
+    "id": "S67",
+    "desc": "removed: path/id agreement deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (parsed!=job || strcmp(result",
+    "after_repl": "    if (strcmp(result"
+  },
+  {
+    "id": "S69",
+    "desc": "removed: result done deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (parsed!=job || strcmp(result,\"done\") || s->got_event)",
+    "after_repl": "    if (parsed!=job || s->got_event)"
+  },
+  {
+    "id": "S70",
+    "desc": "removed: duplicate event accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (parsed!=job || strcmp(result,\"done\") || s->got_event)",
+    "after_repl": "    if (parsed!=job || strcmp(result,\"done\"))"
+  },
+  {
+    "id": "S72",
+    "desc": "journal_empty: owner deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "S_ISREG(st.st_mode) && st.st_uid==JOURNAL_UID && (st.st_mode&07777)==0600",
+    "after_repl": "S_ISREG(st.st_mode) && (st.st_mode&07777)==0600"
+  },
+  {
+    "id": "S73",
+    "desc": "journal_empty: mode deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "st.st_uid==JOURNAL_UID && (st.st_mode&07777)==0600 && st.st_nlink==1",
+    "after_repl": "st.st_uid==JOURNAL_UID && st.st_nlink==1"
+  },
+  {
+    "id": "S74",
+    "desc": "journal_empty: nlink deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "(st.st_mode&07777)==0600 && st.st_nlink==1 && st.st_size==0;",
+    "after_repl": "(st.st_mode&07777)==0600 && st.st_size==0;"
+  },
+  {
+    "id": "S75",
+    "desc": "journal_empty: empty deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "(st.st_mode&07777)==0600 && st.st_nlink==1 && st.st_size==0;",
+    "after_repl": "(st.st_mode&07777)==0600 && st.st_nlink==1;"
+  },
+  {
+    "id": "S76",
+    "desc": "open: slot zero accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (!c || !c->exclusive || !c->entry.slot || !c->job ||",
+    "after_repl": "if (!c || !c->exclusive || !c->job ||"
+  },
+  {
+    "id": "S77",
+    "desc": "open: job zero accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (!c || !c->exclusive || !c->entry.slot || !c->job ||",
+    "after_repl": "if (!c || !c->exclusive || !c->entry.slot ||"
+  },
+  {
+    "id": "S78",
+    "desc": "open: RESERVED/RELEASED/other states accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "(c->entry.state!=LC_STARTING && c->entry.state!=LC_RUNNING &&\n        c->entry.state!=LC_STOPPING && c->entry.state!=LC_FENCED) ||",
+    "after_repl": "0 ||"
+  },
+  {
+    "id": "S79",
+    "desc": "open: epoch validation deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "|| !hex(c->entry.epoch) || !hex(c->entry.launch) ||",
+    "after_repl": "|| !hex(c->entry.launch) ||"
+  },
+  {
+    "id": "S80",
+    "desc": "open: launch validation deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "|| !hex(c->entry.epoch) || !hex(c->entry.launch) ||",
+    "after_repl": "|| !hex(c->entry.epoch) ||"
+  },
+  {
+    "id": "S81",
+    "desc": "open: bus id validation deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "        !hex(c->bus_id) || !hex(c->invocation) ||",
+    "after_repl": "        !hex(c->invocation) ||"
+  },
+  {
+    "id": "S82",
+    "desc": "open: invocation validation deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "        !hex(c->bus_id) || !hex(c->invocation) ||",
+    "after_repl": "        !hex(c->bus_id) ||"
+  },
+  {
+    "id": "S83",
+    "desc": "open: boot validation deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "!uuid(c->entry.boot) || !uuid(c->entry.user)",
+    "after_repl": "!uuid(c->entry.user)"
+  },
+  {
+    "id": "S84",
+    "desc": "open: user validation deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "!uuid(c->entry.user) || !uuid(c->entry.workspace)",
+    "after_repl": "!uuid(c->entry.workspace)"
+  },
+  {
+    "id": "S85",
+    "desc": "open: workspace validation deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "|| !uuid(c->entry.workspace) ||\n        !unique_name",
+    "after_repl": "||\n        !unique_name"
+  },
+  {
+    "id": "S86",
+    "desc": "open: manager validation deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "        !unique_name(c->manager,sizeof c->manager)) return -1;",
+    "after_repl": "        !(unique_name(c->manager,sizeof c->manager)|1)) return -1;"
+  },
+  {
+    "id": "S88",
+    "desc": "open: container binding deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (strcmp(container,c->entry.container)) return -1;",
+    "after_repl": "    (void)container;"
+  },
+  {
+    "id": "S89",
+    "desc": "open: stop journal O_RDWR deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if ((fcntl(c->stop_fd,F_GETFL)&O_ACCMODE)!=O_RDWR) return -1;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "S90",
+    "desc": "open: create journal flock deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "flock(s->create,LOCK_EX|LOCK_NB)<0 || flock(s->fd",
+    "after_repl": "flock(s->fd"
+  },
+  {
+    "id": "S91",
+    "desc": "open: stop journal flock deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "|| flock(s->fd,LOCK_EX|LOCK_NB)<0 ||\n        !create_unchanged(s)",
+    "after_repl": " ||\n        !create_unchanged(s)"
+  },
+  {
+    "id": "S92",
+    "desc": "open: create journal comparison deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "        !create_unchanged(s) || !journal_empty(s->fd) || lseek",
+    "after_repl": "        !journal_empty(s->fd) || lseek"
+  },
+  {
+    "id": "S93",
+    "desc": "open: stop journal attributes deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "        !create_unchanged(s) || !journal_empty(s->fd) || lseek",
+    "after_repl": "        !create_unchanged(s) || lseek"
+  },
+  {
+    "id": "S94",
+    "desc": "open: stop journal offset trusted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "|| lseek(s->fd,0,SEEK_SET)<0 || !held(s)) goto fail;",
+    "after_repl": "|| !held(s)) goto fail;"
+  },
+  {
+    "id": "S95",
+    "desc": "open: authority deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "|| lseek(s->fd,0,SEEK_SET)<0 || !held(s)) goto fail;",
+    "after_repl": "|| lseek(s->fd,0,SEEK_SET)<0) goto fail;"
+  },
+  {
+    "id": "S96",
+    "desc": "begin: single-use deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!s || s->state!=LAS_NEW) return -1;\n    s->state=LAS_UNCERTAIN;",
+    "after_repl": "    if (!s) return -1;\n    s->state=LAS_UNCERTAIN;"
+  },
+  {
+    "id": "S97",
+    "desc": "begin: clock failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": " r;\n    sd_bus_message *sub=NULL, *kill=NULL, *stop=NULL;\n    uint64_t t=now();\n    if (!t) { r=LAS_R_DEADLINE; goto fail; }\n    s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!crea",
+    "after_repl": " r;\n    sd_bus_message *sub=NULL, *kill=NULL, *stop=NULL;\n    uint64_t t=now();\n    s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!crea"
+  },
+  {
+    "id": "S98",
+    "desc": "begin: entry authority deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": " *stop=NULL;\n    uint64_t t=now();\n    if (!t) { r=LAS_R_DEADLINE; goto fail; }\n    s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if (sd_bus_new(",
+    "after_repl": " *stop=NULL;\n    uint64_t t=now();\n    if (!t) { r=LAS_R_DEADLINE; goto fail; }\n    s->deadline=t+ATTEMPT_US;\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if (sd_bus_new("
+  },
+  {
+    "id": "S99",
+    "desc": "begin: entry create comparison deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "  s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,BUS_ADDRESS",
+    "after_repl": "  s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,BUS_ADDRESS"
+  },
+  {
+    "id": "S100",
+    "desc": "begin: bus start failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (sd_bus_start(s->bus)<0) { r=LAS_R_BUS; goto fail; }\n    int connected=ready(s->bus,s->deadline);\n    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: a replaced",
+    "after_repl": "    (void)sd_bus_start(s->bus);\n    int connected=ready(s->bus,s->deadline);\n    if (connected!=1) { r=connected==0 ? LAS_R_DEADLINE:LAS_R_BUS; goto fail; }\n    /* 1. Before anything durable: a replaced"
+  },
+  {
+    "id": "S101",
+    "desc": "begin: pre-STOP owner deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if ((r=owner(s)) || (r=verify(s,BEFORE))) goto fail;\n    char match",
+    "after_repl": "    if ((r=verify(s,BEFORE))) goto fail;\n    char match"
+  },
+  {
+    "id": "S102",
+    "desc": "begin: pre-STOP verify deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if ((r=owner(s)) || (r=verify(s,BEFORE))) goto fail;\n    char match",
+    "after_repl": "    if ((r=owner(s))) goto fail;\n    char match"
+  },
+  {
+    "id": "S103",
+    "desc": "begin: match failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (sd_bus_add_match(s->bus,&s->match,match,removed,s)<0) { r=LAS_R_BUS; goto fail; }",
+    "after_repl": "    (void)sd_bus_add_match(s->bus,&s->match,match,removed,s);"
+  },
+  {
+    "id": "S104",
+    "desc": "begin: budget before Subscribe deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }\n    if (sd_bus_call_method(s->bus,s->c.manager,MANAGER,MI,\"Subscribe\"",
+    "after_repl": "    if (sd_bus_call_method(s->bus,s->c.manager,MANAGER,MI,\"Subscribe\""
+  },
+  {
+    "id": "S105",
+    "desc": "begin: Subscribe error ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "\"Subscribe\",NULL,&sub,\"\")<0 || sd_bus_message_at_end(sub,1)<=0)",
+    "after_repl": "\"Subscribe\",NULL,&sub,\"\")<0 && 0)"
+  },
+  {
+    "id": "S106",
+    "desc": "begin: Subscribe trailing accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "\"Subscribe\",NULL,&sub,\"\")<0 || sd_bus_message_at_end(sub,1)<=0)",
+    "after_repl": "\"Subscribe\",NULL,&sub,\"\")<0)"
+  },
+  {
+    "id": "S107",
+    "desc": "begin: stop journal recheck deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "try.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (!journal_empty(s->fd) || journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    /* 3. Immediately before acting: authority, create evidence, bus/manager\n  ",
+    "after_repl": "try.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    /* 3. Immediately before acting: authority, create evidence, bus/manager\n  "
+  },
+  {
+    "id": "S108",
+    "desc": "begin: STOP fsync failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "try.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (!journal_empty(s->fd) || journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    /* 3. Immediately before acting: authority, create evidence, bus/manager\n  ",
+    "after_repl": "try.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (!journal_empty(s->fd)) { r=LAS_R_JOURNAL; goto fail; }\n    (void)journal(s,line);\n    /* 3. Immediately before acting: authority, create evidence, bus/manager\n  "
+  },
+  {
+    "id": "S109",
+    "desc": "begin: post-STOP authority deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if ((r=owner(s)) || (r=verify(s,BEFORE))) goto fail;\n    /* 4.",
+    "after_repl": "    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if ((r=owner(s)) || (r=verify(s,BEFORE))) goto fail;\n    /* 4."
+  },
+  {
+    "id": "S110",
+    "desc": "begin: post-STOP create comparison deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if ((r=owner(s)) || (r=verify(s,BEFORE))) goto fail;\n    /* 4.",
+    "after_repl": "    if ((r=owner(s)) || (r=verify(s,BEFORE))) goto fail;\n    /* 4."
+  },
+  {
+    "id": "S111",
+    "desc": "begin: pre-Kill owner deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if ((r=owner(s)) || (r=verify(s,BEFORE))) goto fail;\n    /* 4.",
+    "after_repl": "    if ((r=verify(s,BEFORE))) goto fail;\n    /* 4."
+  },
+  {
+    "id": "S112",
+    "desc": "begin: pre-Kill verify deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if ((r=owner(s)) || (r=verify(s,BEFORE))) goto fail;\n    /* 4.",
+    "after_repl": "    if ((r=owner(s))) goto fail;\n    /* 4."
+  },
+  {
+    "id": "S113",
+    "desc": "begin: budget before Kill deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }\n    if (sd_bus_call_method(s->bus,s->c.manager,s->invocation_path,UI,\"Kill\"",
+    "after_repl": "    if (sd_bus_call_method(s->bus,s->c.manager,s->invocation_path,UI,\"Kill\""
+  },
+  {
+    "id": "S114",
+    "desc": "begin: Kill error ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "\"Kill\",NULL,&kill,\"si\",\"all\",(int32_t)SIGKILL)<0 ||\n        sd_bus_message_at_end(kill,1)<=0)",
+    "after_repl": "\"Kill\",NULL,&kill,\"si\",\"all\",(int32_t)SIGKILL)<0 && 0)"
+  },
+  {
+    "id": "S115",
+    "desc": "begin: Kill trailing accepted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "\"Kill\",NULL,&kill,\"si\",\"all\",(int32_t)SIGKILL)<0 ||\n        sd_bus_message_at_end(kill,1)<=0)",
+    "after_repl": "\"Kill\",NULL,&kill,\"si\",\"all\",(int32_t)SIGKILL)<0)"
+  },
+  {
+    "id": "S116",
+    "desc": "begin: KILL fsync failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (journal(s,\"KILL all 9\\n\")<0) { r=LAS_R_JOURNAL; goto fail; }",
+    "after_repl": "    (void)journal(s,\"KILL all 9\\n\");"
+  },
+  {
+    "id": "S117",
+    "desc": "begin: pre-Stop authority deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if ((r=owner(s))) goto fail;\n    t=now();",
+    "after_repl": "    if ((r=owner(s))) goto fail;\n    t=now();"
+  },
+  {
+    "id": "S118",
+    "desc": "begin: pre-Stop owner deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if ((r=owner(s))) goto fail;\n    t=now();",
+    "after_repl": "    t=now();"
+  },
+  {
+    "id": "S119",
+    "desc": "begin: pre-Stop deadline deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!t || t>=s->deadline) { r=LAS_R_DEADLINE; goto fail; }\n    uint64_t left",
+    "after_repl": "    if (!t) { r=LAS_R_DEADLINE; goto fail; }\n    uint64_t left"
+  },
+  {
+    "id": "S120",
+    "desc": "begin: Stop reply timeout not capped at time left",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "method_reply,s,left<CALL_CEILING_US ? left:CALL_CEILING_US)<0)",
+    "after_repl": "method_reply,s,((void)left,CALL_CEILING_US))<0)"
+  },
+  {
+    "id": "S121",
+    "desc": "begin: Stop mode replace",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "sd_bus_message_append(stop,\"s\",\"fail\")",
+    "after_repl": "sd_bus_message_append(stop,\"s\",\"replace\")"
+  },
+  {
+    "id": "S122",
+    "desc": "begin: Kill signal SIGTERM",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "\"si\",\"all\",(int32_t)SIGKILL)",
+    "after_repl": "\"si\",\"all\",(int32_t)SIGTERM)"
+  },
+  {
+    "id": "S123",
+    "desc": "begin: Kill whom main",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "\"si\",\"all\",(int32_t)SIGKILL)",
+    "after_repl": "\"si\",\"main\",(int32_t)SIGKILL)"
+  },
+  {
+    "id": "S124",
+    "desc": "begin: Stop enqueue failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "method_reply,s,left<CALL_CEILING_US ? left:CALL_CEILING_US)<0) { r=LAS_R_STOP; goto fail; }",
+    "after_repl": "method_reply,s,left<CALL_CEILING_US ? left:CALL_CEILING_US)<0) { }"
+  },
+  {
+    "id": "S125",
+    "desc": "poll: state guard deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "int las_poll(struct las *s) {\n    if (!s || s->state!=LAS_PENDING) return -1;",
+    "after_repl": "int las_poll(struct las *s) {\n    if (!s) return -1;"
+  },
+  {
+    "id": "S126",
+    "desc": "poll: entry deadline deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!t || t>=s->deadline) return terminal(s,LAS_R_DEADLINE);\n    if (!held(s)) return terminal(s,LAS_R_AUTHORITY);\n    for",
+    "after_repl": "    if (!t) return terminal(s,LAS_R_DEADLINE);\n    if (!held(s)) return terminal(s,LAS_R_AUTHORITY);\n    for"
+  },
+  {
+    "id": "S127",
+    "desc": "poll: entry clock failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!t || t>=s->deadline) return terminal(s,LAS_R_DEADLINE);\n    if (!held(s)) return terminal(s,LAS_R_AUTHORITY);\n    for",
+    "after_repl": "    if (t>=s->deadline) return terminal(s,LAS_R_DEADLINE);\n    if (!held(s)) return terminal(s,LAS_R_AUTHORITY);\n    for"
+  },
+  {
+    "id": "S128",
+    "desc": "poll: entry authority deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!held(s)) return terminal(s,LAS_R_AUTHORITY);\n    for",
+    "after_repl": "    for"
+  },
+  {
+    "id": "S129",
+    "desc": "poll: dispatch bound deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "for (unsigned i=0;i<DISPATCH_BOUND;i++) {",
+    "after_repl": "for (unsigned i=0;;i++) {"
+  },
+  {
+    "id": "S130",
+    "desc": "poll: sd_bus_process error ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (r<0) return terminal(s,LAS_R_DISPATCH); if (!r ||",
+    "after_repl": "if (r<0) break; if (!r ||"
+  },
+  {
+    "id": "S131",
+    "desc": "poll: dispatch continues past terminal state",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (!r || s->state!=LAS_PENDING) break; }",
+    "after_repl": "if (!r) break; }"
+  },
+  {
+    "id": "S132",
+    "desc": "poll: terminal state after dispatch ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (s->state!=LAS_PENDING) return -1;\n    if (!s->got_reply",
+    "after_repl": "    if (!s->got_reply"
+  },
+  {
+    "id": "S133",
+    "desc": "poll: reply required deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!s->got_reply || !s->got_event) return 0;",
+    "after_repl": "    if (!s->got_event) return 0;"
+  },
+  {
+    "id": "S134",
+    "desc": "poll: event required deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!s->got_reply || !s->got_event) return 0;",
+    "after_repl": "    if (!s->got_reply) return 0;"
+  },
+  {
+    "id": "S135",
+    "desc": "poll: reply/event job correlation deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (s->job!=s->event_job) return terminal(s,LAS_R_EVENT);",
+    "after_repl": ""
+  },
+  {
+    "id": "S136",
+    "desc": "poll: readback-entry authority deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    enum las_reason r;\n    if (!held(s)) return terminal(s,LAS_R_AUTHORITY);\n",
+    "after_repl": "    enum las_reason r;\n"
+  },
+  {
+    "id": "S137",
+    "desc": "poll: readback-entry owner deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if ((r=owner(s)) || (r=verify(s,AFTER)) || (r=owner(s)))",
+    "after_repl": "if ((r=verify(s,AFTER)) || (r=owner(s)))"
+  },
+  {
+    "id": "S138",
+    "desc": "poll: AFTER verify deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if ((r=owner(s)) || (r=verify(s,AFTER)) || (r=owner(s)))",
+    "after_repl": "if ((r=owner(s)) || (r=owner(s)))"
+  },
+  {
+    "id": "S139",
+    "desc": "poll: readback-end owner deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if ((r=owner(s)) || (r=verify(s,AFTER)) || (r=owner(s)))",
+    "after_repl": "if ((r=owner(s)) || (r=verify(s,AFTER)))"
+  },
+  {
+    "id": "S140",
+    "desc": "poll: readback-end authority deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!held(s)) return terminal(s,LAS_R_AUTHORITY);\n    t=now();",
+    "after_repl": "    t=now();"
+  },
+  {
+    "id": "S141",
+    "desc": "poll: post-readback deadline deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    t=now(); if (!t || t>=s->deadline) return terminal(s,LAS_R_DEADLINE); /* readback",
+    "after_repl": "    t=now(); if (!t) return terminal(s,LAS_R_DEADLINE); /* readback"
+  },
+  {
+    "id": "S142",
+    "desc": "poll: post-readback clock failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    t=now(); if (!t || t>=s->deadline) return terminal(s,LAS_R_DEADLINE); /* readback",
+    "after_repl": "    t=now(); if (t>=s->deadline) return terminal(s,LAS_R_DEADLINE); /* readback"
+  },
+  {
+    "id": "S143",
+    "desc": "poll: STOPPED fsync failure ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (journal(s,line)<0) return terminal(s,LAS_R_JOURNAL);\n    if (!held(s))",
+    "after_repl": "    (void)journal(s,line);\n    if (!held(s))"
+  },
+  {
+    "id": "S144",
+    "desc": "poll: post-STOPPED authority deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (journal(s,line)<0) return terminal(s,LAS_R_JOURNAL);\n    if (!held(s)) return terminal(s,LAS_R_AUTHORITY);\n",
+    "after_repl": "    if (journal(s,line)<0) return terminal(s,LAS_R_JOURNAL);\n"
+  },
+  {
+    "id": "S145",
+    "desc": "las_fd: state guard deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "int las_fd(const struct las *s) { return s && s->state==LAS_PENDING ?",
+    "after_repl": "int las_fd(const struct las *s) { return s && s->bus ?"
+  },
+  {
+    "id": "S146",
+    "desc": "las_events: state guard deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "int las_events(const struct las *s) { return s && s->state==LAS_PENDING ?",
+    "after_repl": "int las_events(const struct las *s) { return s && s->bus ?"
+  },
+  {
+    "id": "S147",
+    "desc": "las_timeout: state guard deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (!s || !usec || s->state!=LAS_PENDING || !t ||",
+    "after_repl": "if (!s || !usec || !s->bus || !t ||"
+  },
+  {
+    "id": "S148",
+    "desc": "las_timeout: bus timeout ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    uint64_t until=bus<s->deadline ? bus:s->deadline;",
+    "after_repl": "    uint64_t until=s->deadline; (void)bus;"
+  },
+  {
+    "id": "S149",
+    "desc": "las_timeout: sd_bus_get_timeout error ignored",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "|| !t || sd_bus_get_timeout(s->bus,&bus)<0) return -1;",
+    "after_repl": "|| !t) return -1;\n    (void)sd_bus_get_timeout(s->bus,&bus);"
+  },
+  {
+    "id": "S150",
+    "desc": "las_receipt: state guard deleted",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (!s || !r || (s->state!=LAS_STOPPED && s->state!=LAS_RESET)) return -1;",
+    "after_repl": "if (!s || !r) return -1;"
+  },
+  {
+    "id": "S151",
+    "desc": "removed: job_number no longer computes the event job",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    (void)job_number(path,&parsed);\n",
+    "after_repl": "    parsed=job;\n"
+  }
+]

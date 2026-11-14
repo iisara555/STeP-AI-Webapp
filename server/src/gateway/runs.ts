@@ -2,9 +2,10 @@
 // it: closing the browser ends only the event stream, the runtime keeps working, and a client that comes back
 // replays what it missed from the Workspace's feed and can still cancel.
 import { randomUUID } from 'node:crypto';
-import type { AskResult, RuntimeEvent } from '../workspace/contract.ts';
-import type { RuntimeManager } from '../workspace/manager.ts';
+import type { AskResult, RuntimeEvent, SessionRef } from '../workspace/contract.ts';
+import type { RuntimeManager, StartAuthority } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
+import type { QuotaStore } from './quota-store.ts';
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -44,6 +45,8 @@ export class GatewayError extends Error {
 
 /** Events kept per Workspace for a returning client; older ones are replaced by a `reset` telling it to reload. */
 const FEED_LIMIT = 2_000;
+/** Maximum replay that fits the HTTP stream's pending-event budget. */
+export const STREAM_PENDING_LIMIT = 128;
 /** Finished runs kept for status reads; the answers themselves stay in the Workspace's conversations. */
 const FINISHED_LIMIT = 500;
 
@@ -64,7 +67,8 @@ class Feed {
   since(after: number): FeedEvent[] {
     if (after >= this.seq) return [];
     const first = this.events[0]?.id ?? this.seq + 1;
-    if (after < first - 1) return [{ id: this.seq, type: 'reset', data: {} }];
+    if (after < first - 1 || this.seq - after > STREAM_PENDING_LIMIT)
+      return [{ id: this.seq, type: 'reset', data: {} }];
     return this.events.filter((event) => event.id > after);
   }
 }
@@ -95,51 +99,116 @@ export class RunService {
     private readonly audit: Audit,
     private readonly quotas: Quotas = DEFAULT_QUOTAS,
     private readonly now: () => number = Date.now,
+    private readonly quotaStore?: QuotaStore,
   ) {}
 
-  async start(actor: string, workspaceId: string, input: { text: string; sessionId?: string }): Promise<Run> {
+  async start(
+    actor: string,
+    workspaceId: string,
+    input: { text: string; sessionId?: string },
+    authorize: () => Promise<void> = async () => {},
+    dispatch: (send: () => Promise<AskResult>) => Promise<AskResult> = (send) => send(),
+    dispatchConversation: (send: () => Promise<SessionRef>) => Promise<SessionRef> = (send) => send(),
+    authority?: StartAuthority,
+  ): Promise<Run> {
     await this.manager.get(actor, workspaceId);
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
     const dayKey = `${actor}:${this.day()}`;
-    if ((this.daily.get(dayKey) ?? 0) >= this.quotas.runsPerUserPerDay)
+    if (!this.quotaStore && (this.daily.get(dayKey) ?? 0) >= this.quotas.runsPerUserPerDay)
       throw new GatewayError('QUOTA_DAILY_RUNS');
     if (input.sessionId && this.active.has(this.sessionKey(actor, workspaceId, input.sessionId)))
       throw new GatewayError('RUN_ALREADY_ACTIVE');
 
-    // Listen before asking, so the first streamed words are in the feed.
-    const feed = await this.feed(actor, workspaceId);
-    const sessionId = input.sessionId ?? (await this.manager.newConversation(actor, workspaceId)).sessionId;
-    const key = this.sessionKey(actor, workspaceId, sessionId);
-    if (this.active.has(key)) throw new GatewayError('RUN_ALREADY_ACTIVE');
-    // Checked again after the awaits above, so two requests at once cannot both pass the limit.
-    if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
+    // Reserve before any runtime subscription or conversation creation. Failed setup returns the slot;
+    // a process crash may conservatively consume one until the UTC day changes.
+    const day = this.day();
+    const admissionKey = `${actor}:${day}`;
+    if (this.quotaStore) {
+      if (!this.quotaStore.reserve(actor, day, this.quotas.runsPerUserPerDay))
+        throw new GatewayError('QUOTA_DAILY_RUNS');
+    } else if ((this.daily.get(admissionKey) ?? 0) >= this.quotas.runsPerUserPerDay) {
+      throw new GatewayError('QUOTA_DAILY_RUNS');
+    }
+    if (!this.quotaStore) this.daily.set(admissionKey, (this.daily.get(admissionKey) ?? 0) + 1);
+    let admitted = false;
+    try {
+      await authorize();
+      // Listen before asking, so the first streamed words are in the feed.
+      const feed = await this.feed(actor, workspaceId);
+      await authorize();
+      const sessionId =
+        input.sessionId ??
+        (await this.manager.newConversation(actor, workspaceId, dispatchConversation, authority)).sessionId;
+      await authorize();
+      const key = this.sessionKey(actor, workspaceId, sessionId);
+      if (this.active.has(key)) throw new GatewayError('RUN_ALREADY_ACTIVE');
+      // Checked again after the awaits above, so two requests at once cannot both pass the limit.
+      if (this.activeCount(actor) >= this.quotas.activeRunsPerUser)
+        throw new GatewayError('QUOTA_ACTIVE_RUNS');
 
-    let dispatched!: () => void;
-    const run: OwnedRun = {
-      id: `run_${randomUUID().replaceAll('-', '')}`,
-      ownerId: actor,
-      workspaceId,
-      sessionId,
-      status: 'running',
-      startedAt: new Date(this.now()).toISOString(),
-      dispatched: new Promise((done) => (dispatched = done)),
-    };
-    this.runs.set(run.id, run);
-    this.active.set(key, run.id);
-    this.daily.set(dayKey, (this.daily.get(dayKey) ?? 0) + 1);
-    this.count('started');
-    feed.push('run', this.view(run));
-    this.audit({ actor, action: 'run.start', workspaceId, runId: run.id, outcome: 'accepted' });
+      let dispatched!: () => void;
+      const run: OwnedRun = {
+        id: `run_${randomUUID().replaceAll('-', '')}`,
+        ownerId: actor,
+        workspaceId,
+        sessionId,
+        status: 'running',
+        startedAt: new Date(this.now()).toISOString(),
+        dispatched: new Promise((done) => (dispatched = done)),
+      };
+      this.runs.set(run.id, run);
+      this.active.set(key, run.id);
+      admitted = true;
+      this.count('started');
+      feed.push('run', this.view(run));
+      this.audit({ actor, action: 'run.start', workspaceId, runId: run.id, outcome: 'accepted' });
 
-    // Deliberately not awaited: the run outlives the request that started it.
-    void this.manager.ask(actor, workspaceId, { text: input.text, sessionId }, dispatched).then(
-      (result) => this.finish(run, feed, result),
-      (error) => {
-        dispatched();
-        this.finish(run, feed, undefined, codeOf(error));
-      },
-    );
-    return this.view(run);
+      let pendingSettlement: Promise<void> | undefined;
+      // Deliberately not awaited: the run outlives the request that started it.
+      void this.manager
+        .ask(
+          actor,
+          workspaceId,
+          { text: input.text, sessionId },
+          dispatched,
+          dispatch,
+          authority,
+          (settled) => {
+            pendingSettlement = settled;
+          },
+        )
+        .then(
+          (result) => this.finish(run, feed, result),
+          async (error) => {
+            dispatched();
+            // Admission failure does not prove that IPC had no effect. Expose the
+            // error code while retaining the active run until the sent work settles.
+            run.code = codeOf(error);
+            if (pendingSettlement) await pendingSettlement;
+            this.finish(run, feed, undefined, codeOf(error));
+          },
+        );
+      return this.view(run);
+    } finally {
+      if (!admitted) {
+        if (this.quotaStore) {
+          try {
+            this.quotaStore.release(actor, day);
+          } catch {
+            // Keep the original setup error. The durable count remains authoritative even if
+            // the release outcome is uncertain; do not admit based on a local approximation.
+            try {
+              this.audit({ actor, action: 'quota.release', workspaceId, outcome: 'failed' });
+            } catch {
+              // An audit sink failure must not replace the setup error either.
+            }
+          }
+        } else {
+          const count = this.daily.get(admissionKey);
+          if (count !== undefined) this.daily.set(admissionKey, Math.max(0, count - 1));
+        }
+      }
+    }
   }
 
   get(actor: string, workspaceId: string, runId: string): Run {
@@ -154,13 +223,26 @@ export class RunService {
   }
 
   /** Asks the runtime to stop; the run ends as `cancelled` when the engine has stopped it. */
-  async cancel(actor: string, workspaceId: string, runId: string): Promise<Run> {
+  async cancel(
+    actor: string,
+    workspaceId: string,
+    runId: string,
+    dispatch: (send: () => Promise<{ ok: true }>) => Promise<{ ok: true }> = (send) => send(),
+  ): Promise<Run> {
     const run = this.owned(actor, workspaceId, runId);
     if (run.status !== 'running') throw new GatewayError('RUN_NOT_ACTIVE');
     // A cancel right after the start must not overtake the request it cancels.
     await run.dispatched;
     if (run.status !== 'running') throw new GatewayError('RUN_NOT_ACTIVE');
-    await this.manager.cancel(actor, workspaceId, run.sessionId);
+    // Recheck inside the authorization fence, immediately before enqueueing. The manager and
+    // fence can both await; meanwhile this run may finish and a new run may use the session.
+    // There must be no await between this check and send: the runtime channel preserves order.
+    await this.manager.cancel(actor, workspaceId, run.sessionId, (send) =>
+      dispatch(() => {
+        if (run.status !== 'running') throw new GatewayError('RUN_NOT_ACTIVE');
+        return send();
+      }),
+    );
     this.audit({ actor, action: 'run.cancel', workspaceId, runId, outcome: 'requested' });
     return this.view(run);
   }

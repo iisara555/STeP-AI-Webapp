@@ -2,7 +2,8 @@
   STeP CI digital palette, shared with the Desktop app (desktop/src/theme.css in STeP-AI-Harness):
   STeP Yellow #FFC709 and STeP Dark #231F20. Every other value is a legibility choice, not a brand colour.
   --accent is a fill and always carries --on-accent; --accent-ink is the accent for text and icons.
-  --success / --danger and their soft fills are the only state colours; both themes define them.
+  --success / --warning / --danger and their soft fills are the only state colours; both themes define them.
+  --warning is the amber of the storage pool notice (80 %); it is not the brand yellow.
 */
 :root {
   --surface: #fafaf8;
@@ -24,6 +25,8 @@
   --danger: #b3261e;
   --on-danger: #fff;
   --danger-soft: #fbeae8;
+  --warning: #8a4b00;
+  --warning-soft: #fff1d6;
   --success: #286740;
   --success-soft: #e9f2ea;
   --disabled-bg: #e7e4de;
@@ -53,6 +56,8 @@
   --danger: #f2a197;
   --on-danger: #231f20;
   --danger-soft: #3b2321;
+  --warning: #f2b766;
+  --warning-soft: #3a2b14;
   --success: #98c379;
   --success-soft: #24301f;
   --disabled-bg: #37312f;
@@ -79,6 +84,8 @@
     --danger: #f2a197;
     --on-danger: #231f20;
     --danger-soft: #3b2321;
+    --warning: #f2b766;
+    --warning-soft: #3a2b14;
     --success: #98c379;
     --success-soft: #24301f;
     --disabled-bg: #37312f;
@@ -1061,6 +1068,43 @@ summary {
 }
 
 /* Notices */
+.storage-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 12px 26px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+}
+.storage-banner > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.storage-banner p {
+  font-size: 13px;
+  margin: 2px 0 0;
+}
+.storage-banner.warning {
+  background: var(--warning-soft);
+  border-color: var(--warning);
+}
+.storage-banner.warning > svg,
+.storage-banner.warning strong {
+  color: var(--warning);
+}
+.storage-banner.critical,
+.storage-banner.full {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+.storage-banner.critical > svg,
+.storage-banner.critical strong,
+.storage-banner.full > svg,
+.storage-banner.full strong {
+  color: var(--danger);
+}
 .global-notice {
   padding: 12px 26px 0;
 }

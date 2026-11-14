@@ -1,0 +1,191 @@
+[
+  {
+    "id": "PN1",
+    "desc": "hook: used marker removed (-g0 hooked object then has no hook name)",
+    "file": "create.c",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "__attribute__((used)) static const char lsc_test_hook_marker[]=\"lsc_test_hook_marker\";\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PN2",
+    "desc": "hook: #error weakened to #warning (still fails only under -Werror)",
+    "file": "create.c",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "#error \"LSC_TESTING is only valid",
+    "after_repl": "#warning \"LSC_TESTING is only valid"
+  },
+  {
+    "id": "PN3",
+    "desc": "nm arm removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $symbols in *lsc_test_*) refuse 'test hook symbol' ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PN4",
+    "desc": "strings arm removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $bytes in *lsc_test_*) refuse 'test hook bytes' ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PN5",
+    "desc": "LTO refusal removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $sections in *'.gnu.lto_'*) refuse 'LTO object (.gnu.lto_* sections) cannot be scanned' ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PN6",
+    "desc": "readelf failure ignored (fail open)",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "|| refuse 'readelf failed'",
+    "after_repl": ""
+  },
+  {
+    "id": "PN7",
+    "desc": "nm failure ignored (fail open)",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "|| refuse 'nm failed'",
+    "after_repl": ""
+  },
+  {
+    "id": "PN8",
+    "desc": "strings failure ignored (fail open)",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "|| refuse 'strings failed'",
+    "after_repl": ""
+  },
+  {
+    "id": "PN9",
+    "desc": "readelf empty-output check removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $sections in *' .text '*) ;; *) refuse 'readelf output lacks a .text section' ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PN10",
+    "desc": "nm empty-output check removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $symbols in *\" T $want_symbol\"*) ;; *) refuse \"nm output lacks $want_symbol\" ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PN11",
+    "desc": "strings empty-output check removed",
+    "file": "pin-scan.sh",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "case $bytes in *\"$want_string\"*) ;; *) refuse \"strings output lacks $want_string\" ;; esac\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PN12",
+    "desc": "pin-check-negative missing from .PHONY",
+    "file": "Makefile",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "pin-check pin-check-negative pin-check-phony mutation",
+    "after_repl": "pin-check pin-check-phony mutation"
+  },
+  {
+    "id": "PN13",
+    "desc": "pin-check missing from .PHONY",
+    "file": "Makefile",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "host-check pin-check pin-check-negative",
+    "after_repl": "host-check pin-check-negative"
+  },
+  {
+    "id": "PN14",
+    "desc": "LSC_ make tripwire removed",
+    "file": "Makefile",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "$(error REFUSED: LSC_ test macros in CC/CFLAGS/CPPFLAGS; the hook is only valid inside test-create.c and test-stop.c)\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PN15",
+    "desc": "LSC_ tripwire ignores CC",
+    "file": "Makefile",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "$(findstring LSC_,$(CC) $(CFLAGS) $(CPPFLAGS))",
+    "after_repl": "$(findstring LSC_,$(CFLAGS) $(CPPFLAGS))"
+  },
+  {
+    "id": "PN16",
+    "desc": "LSC_ tripwire ignores CPPFLAGS",
+    "file": "Makefile",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "$(findstring LSC_,$(CC) $(CFLAGS) $(CPPFLAGS))",
+    "after_repl": "$(findstring LSC_,$(CC) $(CFLAGS))"
+  },
+  {
+    "id": "PN17",
+    "desc": "pin-check no longer runs pin-scan.sh",
+    "file": "Makefile",
+    "build": ["make", "-s", "create.o"],
+    "run": ["make", "-s", "pin-check-phony"],
+    "after_find": "\t@sh ./pin-scan.sh create.o\n",
+    "after_repl": ""
+  },
+  {
+    "id": "PN18",
+    "desc": "pin-check no longer scans stop.o",
+    "file": "Makefile",
+    "after_find": "\t@sh ./pin-scan.sh stop.o\n",
+    "after_repl": "",
+    "build": ["make", "-s", "create.o", "stop.o"],
+    "run": ["make", "-s", "pin-check-phony"]
+  },
+  {
+    "id": "PN19",
+    "desc": "stop.c hook: used marker removed",
+    "file": "stop.c",
+    "after_find": "__attribute__((used)) static const char lsc_test_hook_marker[]=\"lsc_test_hook_marker\";\n",
+    "after_repl": "",
+    "build": ["make", "-s", "create.o", "stop.o"],
+    "run": ["make", "-s", "pin-check-phony"]
+  },
+  {
+    "id": "PN20",
+    "desc": "stop.c hook: #error weakened to #warning",
+    "file": "stop.c",
+    "after_find": "#error \"LSC_TESTING is only valid when stop.c",
+    "after_repl": "#warning \"LSC_TESTING is only valid when stop.c",
+    "build": ["make", "-s", "create.o", "stop.o"],
+    "run": ["make", "-s", "pin-check-phony"]
+  },
+  {
+    "id": "PN21",
+    "desc": "pin-scan: stop.o plausibility anchors replaced by the creator's",
+    "file": "pin-scan.sh",
+    "after_find": "    *stop*.o) want_symbol=las_open want_string=GetUnitByInvocationID ;;\n",
+    "after_repl": "",
+    "build": ["make", "-s", "create.o", "stop.o"],
+    "run": ["make", "-s", "pin-check-phony"]
+  }
+]

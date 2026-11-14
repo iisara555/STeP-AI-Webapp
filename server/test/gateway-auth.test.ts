@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { googleIdTokenAuth } from '../src/gateway/auth.ts';
+import { credentialStillValid, googleIdTokenAuth, identityExpired } from '../src/gateway/auth.ts';
 
 // A synthetic signing key stands in for Google's; no request leaves the machine.
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -49,7 +49,26 @@ test('an invited, verified Google account of the organization signs in with a st
     userId: 'g110169484474386276334',
     email: 'staff@step.example',
     admin: true,
+    tokenExpiresAt: valid.exp,
   });
+});
+
+test('verified credential freshness uses the same inclusive skew as authentication', async () => {
+  let now = NOW;
+  const check = googleIdTokenAuth({
+    clientId: CLIENT,
+    domains: ['step.example'],
+    invited: () => new Set(['staff@step.example']),
+    keys: async () => [{ ...publicKey.export({ format: 'jwk' }), kid: KID }],
+    now: () => now,
+  });
+  const identity = await check(token({ ...valid, exp: NOW / 1000 }));
+  assert.ok(identity);
+  now = NOW + 60_999;
+  assert.equal(credentialStillValid(identity), true);
+  now = NOW + 61_000;
+  assert.equal(credentialStillValid(identity), false);
+  assert.equal(await check(token({ ...valid, exp: NOW / 1000 })), null);
 });
 
 test('every other token is refused', async () => {
@@ -87,4 +106,52 @@ test('removing someone from the invite list takes effect on their next request',
   assert.ok(await check(token(valid)));
   invited.delete('staff@step.example');
   assert.equal(await check(token(valid)), null);
+});
+
+test('persistent administrator changes control verified Google identities on the next request', async () => {
+  const { InvitationStore } = await import('../src/gateway/invitation-store.ts');
+  const store = new InvitationStore(':memory:', ['step.example'], new Set(['root@step.example']));
+  const base = new Set(['root@step.example', 'staff@step.example']);
+  const check = googleIdTokenAuth({
+    clientId: CLIENT,
+    domains: ['step.example'],
+    invited: () => store.invited(base),
+    keys: async () => [{ ...publicKey.export({ format: 'jwk' }), kid: KID }],
+    now: () => NOW,
+  });
+  try {
+    assert.ok(await check(token(valid)));
+    store.change('root@step.example', 'staff@step.example', false, base);
+    assert.equal(await check(token(valid)), null);
+    store.change('root@step.example', 'staff@step.example', true, base);
+    assert.ok(await check(token(valid)));
+  } finally {
+    store.close();
+  }
+});
+
+test('synchronous expiry uses verified claims and the verifier skew boundary', async () => {
+  const identity = (await auth()(token(valid)))!;
+  assert.equal(identity.tokenExpiresAt, valid.exp);
+  assert.equal(identityExpired(identity, (valid.exp + 60) * 1000 + 999), false);
+  assert.equal(identityExpired(identity, (valid.exp + 61) * 1000), true);
+  assert.ok(
+    await googleIdTokenAuth({
+      clientId: CLIENT,
+      domains: ['step.example'],
+      invited: () => new Set(['staff@step.example']),
+      keys: async () => [{ ...publicKey.export({ format: 'jwk' }), kid: KID }],
+      now: () => (valid.exp + 60) * 1000,
+    })(token(valid)),
+  );
+  assert.equal(
+    await googleIdTokenAuth({
+      clientId: CLIENT,
+      domains: ['step.example'],
+      invited: () => new Set(['staff@step.example']),
+      keys: async () => [{ ...publicKey.export({ format: 'jwk' }), kid: KID }],
+      now: () => (valid.exp + 61) * 1000,
+    })(token(valid)),
+    null,
+  );
 });

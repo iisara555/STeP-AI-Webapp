@@ -1,0 +1,263 @@
+[
+  {
+    "id": "Z1",
+    "desc": "stop handle isolation",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (s && s->reset_mode) return -1;\n",
+    "after_repl": ""
+  },
+  {
+    "id": "Z2",
+    "desc": "reset handle isolation",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (!s || !s->reset_mode || s->state!=LAS_NEW)",
+    "after_repl": "if (!s || s->state!=LAS_NEW)"
+  },
+  {
+    "id": "Z3",
+    "desc": "reset single attempt",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "s->state=LAS_UNCERTAIN; /* consumed even by pre-RESET failures; one attempt per record */",
+    "after_repl": "/* attempt not consumed */"
+  },
+  {
+    "id": "Z4",
+    "desc": "absence at reset open",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!absence(s)) { las_close(s); *out=NULL; return -1; }\n",
+    "after_repl": ""
+  },
+  {
+    "id": "Z5",
+    "desc": "reset gate required",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!absent || las_open(c,out)<0) return -1;",
+    "after_repl": "    if (las_open(c,out)<0) return -1;"
+  },
+  {
+    "id": "Z6",
+    "desc": "absence at entry",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if (sd_bus_new",
+    "after_repl": "    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if (sd_bus_new"
+  },
+  {
+    "id": "Z7",
+    "desc": "absence after intent",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if ((r=owner(s))",
+    "after_repl": "    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if ((r=owner(s))"
+  },
+  {
+    "id": "Z8",
+    "desc": "reset reply shape",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (sd_bus_message_at_end(reply,1)<=0) { r=LAS_R_RESET; goto fail; }\n",
+    "after_repl": ""
+  },
+  {
+    "id": "Z9",
+    "desc": "reset error result",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "r=e.name && !strcmp(e.name,NO_INVOCATION) ? LAS_R_REPLACED:LAS_R_RESET; goto fail;",
+    "after_repl": "r=LAS_R_RESET; goto fail;"
+  },
+  {
+    "id": "Z10",
+    "desc": "reset readback required",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if ((r=reset_readback(s)) || (r=owner(s)))",
+    "after_repl": "if ((void)reset_readback, (r=owner(s)))"
+  },
+  {
+    "id": "Z11",
+    "desc": "post-reset owner",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if ((r=reset_readback(s)) || (r=owner(s)))",
+    "after_repl": "if ((r=reset_readback(s)))"
+  },
+  {
+    "id": "Z12",
+    "desc": "post-reset state",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    return strcmp(s->receipt.state,\"inactive\") ? LAS_R_STATE:LAS_R_NONE;",
+    "after_repl": "    return LAS_R_NONE;"
+  },
+  {
+    "id": "Z13",
+    "desc": "post-reset exact verification",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if ((r=verify(s,AFTER))) return r; /* same path, Id, InvocationID, cgroup, no job */",
+    "after_repl": "    /* skipped verify */"
+  },
+  {
+    "id": "Z14",
+    "desc": "post-reset path equality",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "ONE; }\n        goto out;\n    }\n    const char *p=NULL;\n    if (sd_bus_message_read(reply,\"o\",&p)<=0 || !p || sd_bus_message_at_end(reply,1)<=0) goto out;\n    r=strcmp(p,s->invocation_path) ? LAS_R_REPLACED:LAS_R_NONE;\nout:\n    sd_bus_error_free(&e); sd_bus_message_unref(reply); sd_bus_message_unref(m);\n    if (r || !strcmp(s->receipt.state,\"collected\")) return r;\n",
+    "after_repl": "ONE; }\n        goto out;\n    }\n    const char *p=NULL;\n    if (sd_bus_message_read(reply,\"o\",&p)<=0 || !p || sd_bus_message_at_end(reply,1)<=0) goto out;\n    r=LAS_R_NONE;\nout:\n    sd_bus_error_free(&e); sd_bus_message_unref(reply); sd_bus_message_unref(m);\n    if (r || !strcmp(s->receipt.state,\"collected\")) return r;\n"
+  },
+  {
+    "id": "Z15",
+    "desc": "readback NoInvocation only",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (e.name && !strcmp(e.name,NO_INVOCATION)) { strcpy(s->receipt.state,\"collected\");",
+    "after_repl": "if (e.name) { strcpy(s->receipt.state,\"collected\");"
+  },
+  {
+    "id": "Z16",
+    "desc": "readback budget",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "m=NULL, *reply=NULL; sd_bus_error e={0}; enum las_reason r=LAS_R_QUERY;\n    if (!budget(s)) return LAS_R_DEADLINE;\n    if (sd_bus_message_new_method_call(s->bus,&m,s->c.manager,MANAGER,MI,\"GetUnitByInvoc",
+    "after_repl": "m=NULL, *reply=NULL; sd_bus_error e={0}; enum las_reason r=LAS_R_QUERY;\n    if (sd_bus_message_new_method_call(s->bus,&m,s->c.manager,MANAGER,MI,\"GetUnitByInvoc"
+  },
+  {
+    "id": "Z17",
+    "desc": "reset call budget",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (!budget(s)) { r=LAS_R_DEADLINE; goto fail; }\n    if (sd_bus_call_method(s->bus,s->c.manager,s->invocation_path,UI,\"ResetFailed\"",
+    "after_repl": "    if (sd_bus_call_method(s->bus,s->c.manager,s->invocation_path,UI,\"ResetFailed\""
+  },
+  {
+    "id": "Z18",
+    "desc": "reset done durable",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "    if (journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    memcpy(s->receipt.invocation",
+    "after_repl": "    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    memcpy(s->receipt.invocation"
+  },
+  {
+    "id": "Z19",
+    "desc": "reset authority #1",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "if (!t) { r=LAS_R_DEADLINE; goto fail; }\n    s->deadline=t+ATTEMPT_US;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }\n    if (!create_unchanged(s)) { r=LA",
+    "after_repl": "if (!t) { r=LAS_R_DEADLINE; goto fail; }\n    s->deadline=t+ATTEMPT_US;\n    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }\n    if (!create_unchanged(s)) { r=LA"
+  },
+  {
+    "id": "Z20",
+    "desc": "reset authority #2",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "create\n     *    evidence, owner and the exact stopped incarnation. */\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }\n    if (!create_unchanged(s)) { r=LA",
+    "after_repl": "create\n     *    evidence, owner and the exact stopped incarnation. */\n    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }\n    if (!create_unchanged(s)) { r=LA"
+  },
+  {
+    "id": "Z21",
+    "desc": "reset authority #3",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": " owner checks. */\n    if ((r=reset_readback(s)) || (r=owner(s))) goto fail;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    t=now(); if (!t || t>=s->deadline) { r=LAS_R_DEADLINE; goto fail; }\n    (void)sn",
+    "after_repl": " owner checks. */\n    if ((r=reset_readback(s)) || (r=owner(s))) goto fail;\n    t=now(); if (!t || t>=s->deadline) { r=LAS_R_DEADLINE; goto fail; }\n    (void)sn"
+  },
+  {
+    "id": "Z22",
+    "desc": "reset authority #4",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": ">receipt.state);\n    if (journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    memcpy(s->receipt.invocation,s->c.invocation,sizeof s->receipt.invocation);\n    ",
+    "after_repl": ">receipt.state);\n    if (journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    memcpy(s->receipt.invocation,s->c.invocation,sizeof s->receipt.invocation);\n    "
+  },
+  {
+    "id": "Z23",
+    "desc": "reset create unchanged #1",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "RITY; goto fail; }\n    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,BUS_ADDRESS",
+    "after_repl": "RITY; goto fail; }\n    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }\n    if (sd_bus_new(&s->bus)<0 || sd_bus_set_address(s->bus,BUS_ADDRESS"
+  },
+  {
+    "id": "Z24",
+    "desc": "reset create unchanged #2",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "RITY; goto fail; }\n    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if ((r=owner(s)) || (r=verify(s,AFTER))) goto fail;\n    /* 4. Typed Unit.ResetFailed",
+    "after_repl": "RITY; goto fail; }\n    if (!absence(s)) { r=LAS_R_ABSENCE; goto fail; }\n    if ((r=owner(s)) || (r=verify(s,AFTER))) goto fail;\n    /* 4. Typed Unit.ResetFailed"
+  },
+  {
+    "id": "Z25",
+    "desc": "reset owner + stopped incarnation #1",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "   /* 1. Before anything durable: still exactly our stopped incarnation. */\n    if ((r=owner(s)) || (r=verify(s,AFTER))) goto fail;\n    /* 2. Durable RESET intent in the reset record before the call. */\n    char line",
+    "after_repl": "   /* 1. Before anything durable: still exactly our stopped incarnation. */\n    /* 2. Durable RESET intent in the reset record before the call. */\n    char line"
+  },
+  {
+    "id": "Z26",
+    "desc": "reset owner + stopped incarnation #2",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    if ((r=owner(s)) || (r=verify(s,AFTER))) goto fail;\n    /* 4. Typed Unit.ResetFailed() on the invocation path: systemd resolves it\n     ",
+    "after_repl": "; goto fail; }\n    if (!create_unchanged(s)) { r=LAS_R_CREATE; goto fail; }\n    /* 4. Typed Unit.ResetFailed() on the invocation path: systemd resolves it\n     "
+  },
+  {
+    "id": "Z27",
+    "desc": "reset intent durability",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "s %u\\n\",(unsigned long long)s->c.entry.slot,s->c.entry.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (!journal_empty(s->fd) || journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    /* 3. Immediately before acting: authority, absence receipt, create\n     *    evidence, owner and the exact stopped incarn",
+    "after_repl": "s %u\\n\",(unsigned long long)s->c.entry.slot,s->c.entry.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (!journal_empty(s->fd)) { r=LAS_R_JOURNAL; goto fail; }\n    /* 3. Immediately before acting: authority, absence receipt, create\n     *    evidence, owner and the exact stopped incarn"
+  },
+  {
+    "id": "Z28",
+    "desc": "reset record still empty",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "v1 %llu %s %s %s %s %s %u\\n\",(unsigned long long)s->c.entry.slot,s->c.entry.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (!journal_empty(s->fd) || journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    /* 3. Immediately before acting: authority, absence receipt, create\n     *    evidence, owner and the exa",
+    "after_repl": "v1 %llu %s %s %s %s %s %u\\n\",(unsigned long long)s->c.entry.slot,s->c.entry.launch,\n        s->unit,s->c.bus_id,s->c.manager,s->c.invocation,s->c.job);\n    if (journal(s,line)<0) { r=LAS_R_JOURNAL; goto fail; }\n    /* 3. Immediately before acting: authority, absence receipt, create\n     *    evidence, owner and the exa"
+  },
+  {
+    "id": "Z29",
+    "desc": "reset final deadline",
+    "file": "stop.c",
+    "build": ["make", "-s", "test-stop"],
+    "run": ["./test-stop"],
+    "after_find": "))) goto fail;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    t=now(); if (!t || t>=s->deadline) { r=LAS_R_DEADLINE; goto fail; }\n    (void)snprintf(line,sizeof line,\"RESET-DONE %s %s\\n\",s->c.invocation,s->rec",
+    "after_repl": "))) goto fail;\n    if (!held(s)) { r=LAS_R_AUTHORITY; goto fail; }\n    t=now(); (void)t;\n    (void)snprintf(line,sizeof line,\"RESET-DONE %s %s\\n\",s->c.invocation,s->rec"
+  }
+]

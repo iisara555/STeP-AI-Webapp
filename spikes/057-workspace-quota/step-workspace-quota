@@ -1,0 +1,6 @@
+#!/bin/bash
+# Retired: check/use path races and caller-selected project IDs were not a safe root boundary.
+# Deliberately refuse BEFORE root checks, filesystem inspection, or any mutation.
+# Do not install this file or grant sudo access. See docs/workspace-disk-provisioning.md.
+printf '%s\n' 'DISABLED_UNSAFE_QUOTA_HELPER: protected broker required; no quota operation performed' >&2
+exit 2

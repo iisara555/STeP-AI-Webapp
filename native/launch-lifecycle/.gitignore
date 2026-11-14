@@ -1,0 +1,7 @@
+*.o
+*.a
+test-lifecycle
+test-recovery
+test-sanitize
+test-recovery-sanitize
+core

@@ -37,7 +37,10 @@ export type RuntimeHealth = {
 export type RuntimeSpec = {
   workspaceId: string;
   ownerId: string;
-  /** /data/users/<user>/workspaces/<workspace>; holds workspace.sqlite, files/ and snapshots/. */
+  /** Runtime content directory, not necessarily the control-metadata directory.
+   * Default: /data/users/<user>/workspaces/<workspace>. Native composition: <protected-root>/p<project>.
+   * Holds workspace.sqlite, files/ and snapshots/. Paths are never authority to launch.
+   */
   dir: string;
   filesDir: string;
 };
@@ -106,21 +109,80 @@ export type RuntimeCalls = {
 export type RuntimeHandle = {
   pid?: number;
   health(timeoutMs?: number): Promise<RuntimeHealth>;
+  /** Enqueue the request synchronously before returning its result Promise. No deferred enqueue is allowed:
+   * callers fence this invocation with revocation; only the response may be asynchronous.
+   */
   call<M extends keyof RuntimeCalls>(
     method: M,
     params: RuntimeCalls[M]['params'],
   ): Promise<RuntimeCalls[M]['result']>;
   stop(): Promise<void>;
-  /** Called once when the runtime ends for any reason, including stop(). */
-  onExit(listener: (code: number | null) => void): void;
+  /**
+   * Call admit exactly once with the synchronous operation that performs the initial stop signal/enqueue.
+   * Never signal outside that callback. Admission may throw after invoking it, so the signal may have occurred.
+   * Resolve only after the runtime has stopped;
+   * drivers without this guarantee must omit the method and gateway stops will fail closed.
+   */
+  stopWithAdmission?(admit: (signal: () => void) => void): Promise<void>;
+  /** Called once after process exit is proven, including stop(). A cleanup error means
+   * non-process resources remain unconfirmed: retain the handle and retry stop(). */
+  onExit(listener: (code: number | null, cleanupError?: WorkspaceError) => void): void;
   /** Progress events of runs inside this runtime. */
   onEvent?(listener: (event: RuntimeEvent) => void): void;
 };
 
+/** Identity of one launch, enough for a later manager of the same data root to find exactly that runtime (#62). */
+export type RuntimeLaunchRecord = { kind: string; unit: string };
+
+/** Durable record of runtime launches under the data root, written inside the writer fence. */
+export type RuntimeLaunchJournal = {
+  /** Records an intended launch durably (fsync) before returning; throws if it cannot, and the launch must then not
+   * happen. Call before admission, so the synchronous admission/spawn section stays unchanged. resolve() only once
+   * the launch's processes are proven gone or were never spawned; a failed resolve leaves the entry for recovery. */
+  record(launch: RuntimeLaunchRecord & { workspaceId: string; nonceHash?: string }): { resolve(): void };
+};
+
+/** Crash recovery for drivers whose runtimes can outlive the manager process. */
+export type RuntimeRecovery = {
+  /** Journal entries of this kind are reaped by this driver; any other kind blocks starts. */
+  kind: string;
+  /** The same driver, recording every launch in `journal` before spawning it. */
+  journaled(journal: RuntimeLaunchJournal): RuntimeDriver;
+  /** Kills whatever remains of a recorded launch and proves it gone; rejects unless proven. Idempotent. */
+  reap(unit: string): Promise<void>;
+};
+
 /** Docker, Podman or a systemd sandbox can replace the process driver without changing the contract. */
 export type RuntimeDriver = {
+  /** Drivers whose runtimes survive a manager crash must provide this; the manager then journals every launch and
+   * admits no start until all launches of previous holders of the data root are proven gone. */
+  recovery?: RuntimeRecovery;
   start(spec: RuntimeSpec): Promise<RuntimeHandle>;
+  /** Invoke admit exactly once synchronously around the actual spawn, not around asynchronous preparation.
+   * The spawn callback must run before admit returns; readiness must be awaited after admission returns.
+   * A driver must clean up a spawned process if admission throws after invoking spawn.
+   * Drivers unable to provide this guarantee must omit this method.
+   */
+  startWithAdmission?(spec: RuntimeSpec, admit: (spawn: () => void) => void): Promise<RuntimeHandle>;
+  /** startWithAdmission whose workload directory is pinned by descriptor, not by pathname. Inside the spawn
+   * callback, synchronously and immediately before spawning, the driver must call pin() exactly once; it returns
+   * an owned O_DIRECTORY descriptor whose identity the caller has just verified (or throws, which must abort the
+   * spawn). The driver must mount spec.dir from that descriptor only (never by resolving spec.dir again) and must
+   * close it on every outcome. Drivers that cannot hand the descriptor to the sandbox must omit this method.
+   */
+  startPinnedWithAdmission?(
+    spec: RuntimeSpec,
+    pin: () => number,
+    admit: (spawn: () => void) => void,
+  ): Promise<RuntimeHandle>;
 };
+
+/** Startup failed with required process or non-process cleanup still unconfirmed. */
+export class RuntimeStartCleanupError extends Error {
+  constructor(readonly handle: RuntimeHandle) {
+    super('RUNTIME_START_CLEANUP_FAILED');
+  }
+}
 
 export type WorkspaceErrorCode =
   | 'INVALID_ID'
@@ -128,9 +190,16 @@ export type WorkspaceErrorCode =
   | 'WORKSPACE_NOT_FOUND'
   | 'RUNTIME_CAPACITY'
   | 'RUNTIME_START_FAILED'
+  | 'RUNTIME_STOP_FAILED'
+  /** Processes are proven absent, but required non-process cleanup is unconfirmed. */
+  | 'RUNTIME_CLEANUP_FAILED'
   | 'RUNTIME_EXITED'
   | 'RUNTIME_NOT_RUNNING'
   | 'RUNTIME_CALL_FAILED'
+  /** The result exceeds the bounded transport frame; no partial result was returned. */
+  | 'RUNTIME_RESULT_TOO_LARGE'
+  /** Runtimes launched by a previous manager of this data root are not yet proven gone; no start is admitted. */
+  | 'RUNTIME_RECOVERY_PENDING'
   | 'INVALID_INPUT';
 
 export class WorkspaceError extends Error {

@@ -71,6 +71,13 @@ export function heldDriver() {
       };
     },
   };
+  driver.startWithAdmission = async (spec, admit) => {
+    let started: Promise<Awaited<ReturnType<RuntimeDriver['start']>>> | undefined;
+    admit(() => {
+      started = driver.start(spec);
+    });
+    return started!;
+  };
   return {
     driver,
     cancels,

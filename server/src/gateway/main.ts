@@ -1,13 +1,24 @@
 // Gateway entry: npm run gateway (behind the HTTPS reverse proxy; listens on loopback by default).
 // Settings come from the environment only; the provider key never reaches a browser, a prompt or a Workspace file.
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, readFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { RuntimeManager } from '../workspace/manager.ts';
 import { processDriver } from '../workspace/process-driver.ts';
 import { fileAudit } from './audit.ts';
 import { googleIdTokenAuth } from './auth.ts';
 import { createGateway } from './http.ts';
+import { InvitationStore } from './invitation-store.ts';
+import { QuotaStore } from './quota-store.ts';
 import { DEFAULT_QUOTAS, RunService } from './runs.ts';
+import { gatewayShutdown } from './shutdown.ts';
+
+// No configuration or environment flag can make processDriver a host isolation boundary.
+// Remove this refusal only when #57's production isolation requirements are met and integrated.
+function refuseUnsafeGateway(): void {
+  console.error('Gateway startup refused: production workspace isolation is not implemented (#57).');
+  process.exit(1);
+}
+refuseUnsafeGateway();
 
 const env = (name: string, fallback?: string) => {
   const value = process.env[name] ?? fallback;
@@ -34,12 +45,21 @@ const number = (name: string, fallback: number) => {
 };
 
 const dataRoot = resolve(env('STEP_DATA_ROOT'));
+await mkdir(dataRoot, { recursive: true, mode: 0o700 });
+const quotaStore = new QuotaStore(join(dataRoot, 'gateway-quotas.sqlite'));
 const invitesFile = resolve(env('STEP_INVITES_FILE'));
 const aiKey = process.env.STEP_AI_KEY;
+const domains = [...list(env('STEP_ALLOWED_DOMAINS'))];
+const admins = list(process.env.STEP_ADMINS ?? '');
+const invitations = new InvitationStore(join(dataRoot, 'gateway-invitations.sqlite'), domains, admins);
+const baseInvitations = async () => list(await readFile(invitesFile, 'utf8'));
+// Production must explicitly configure the shared workspace policy.
+const workspacesPerUser = number('STEP_QUOTA_WORKSPACES', Number(env('STEP_QUOTA_WORKSPACES')));
 
 const manager = new RuntimeManager({
   dataRoot,
   driver: processDriver(),
+  workspacesPerUser,
   maxRunning: number('STEP_MAX_RUNNING', 8),
   idleMs: number('STEP_IDLE_MINUTES', 30) * 60_000,
   grant: () => ({
@@ -50,22 +70,24 @@ const manager = new RuntimeManager({
 });
 const audit = fileAudit(dataRoot);
 const quotas = {
-  workspacesPerUser: number('STEP_QUOTA_WORKSPACES', DEFAULT_QUOTAS.workspacesPerUser),
+  workspacesPerUser,
   activeRunsPerUser: number('STEP_QUOTA_ACTIVE_RUNS', DEFAULT_QUOTAS.activeRunsPerUser),
   runsPerUserPerDay: number('STEP_QUOTA_DAILY_RUNS', DEFAULT_QUOTAS.runsPerUserPerDay),
 };
 const server = createGateway({
   manager,
-  runs: new RunService(manager, audit, quotas),
+  runs: new RunService(manager, audit, quotas, Date.now, quotaStore),
   audit,
   quotas,
   origin: env('STEP_APP_ORIGIN'),
+  invitations,
+  baseInvitations,
   authenticate: googleIdTokenAuth({
     clientId: env('STEP_GOOGLE_CLIENT_ID'),
-    domains: [...list(env('STEP_ALLOWED_DOMAINS'))],
+    domains,
     // One email per line; read on every request so removing a line revokes access without a restart.
-    invited: async () => list(await readFile(invitesFile, 'utf8').catch(() => '')),
-    admins: list(process.env.STEP_ADMINS ?? ''),
+    invited: async () => invitations.invited(await baseInvitations()),
+    admins,
   }),
 });
 
@@ -74,10 +96,21 @@ const host = process.env.STEP_GATEWAY_HOST ?? '127.0.0.1';
 const port = number('STEP_GATEWAY_PORT', 8787);
 server.listen(port, host, () => console.log(`STeP Gateway: http://${host}:${port}`));
 
-const shutdown = () => {
-  clearInterval(sweep);
-  server.close();
-  void manager.shutdown().finally(() => process.exit(0));
-};
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+const shutdown = gatewayShutdown(
+  () => {
+    clearInterval(sweep);
+    server.close();
+  },
+  () => manager.shutdown(),
+  () => {
+    try {
+      quotaStore.close();
+    } finally {
+      invitations.close();
+    }
+  },
+  (status) => process.exit(status),
+  (error) => console.error('Gateway shutdown failed:', error),
+);
+process.on('SIGTERM', () => void shutdown().catch(() => {}));
+process.on('SIGINT', () => void shutdown().catch(() => {}));

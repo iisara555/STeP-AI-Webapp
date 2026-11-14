@@ -1,0 +1,69 @@
+[Unit]
+Description=STeP native quota broker (XFS project quotas for workspace runtimes)
+# The broker root/state live on the XFS project-quota mount.
+RequiresMountsFor=/mnt/step-work/step-ai-broker
+ConditionPathIsDirectory=/mnt/step-work/step-ai-broker/state
+After=local-fs.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/local/libexec/step-quota-broker/step-quota-broker --serve
+User=root
+Group=root
+UMask=0077
+# Fixed socket directory /run/step-quota-broker: created fresh 0700 by systemd, removed on stop.
+# The broker makes it root:<gateway gid> 0710 and the socket root:<gateway gid> 0660 itself.
+RuntimeDirectory=step-quota-broker
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=no
+Restart=on-failure
+RestartSec=5s
+# Startup refusals (exit 2) are configuration errors: do not restart-loop on them.
+RestartPreventExitStatus=2
+TimeoutStopSec=30s
+
+# Filesystem: everything read-only except the broker directory and the runtime directory.
+ProtectSystem=strict
+ReadWritePaths=/mnt/step-work/step-ai-broker
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# Privilege: quotactl Q_XSETQLIM/Q_XGETQUOTA needs CAP_SYS_ADMIN; handing p<ID> to the
+# workload needs CAP_CHOWN, then CAP_FOWNER (no longer the owner) + CAP_FSETID (setgid for
+# a group root is not in) for chmod 02750. Nothing else (no CAP_DAC_OVERRIDE).
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_FOWNER CAP_FSETID
+AmbientCapabilities=
+NoNewPrivileges=yes
+# RestrictSUIDSGID is deliberately NOT set: it forbids the setgid bit the hand-over
+# (p<ID> mode 02750, group = gateway gid) requires. The bit is set on directories only.
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RemoveIPC=yes
+PrivateIPC=yes
+KeyringMode=private
+DevicePolicy=closed
+SystemCallArchitectures=native
+SystemCallFilter=@system-service quotactl quotactl_fd
+# @privileged is not denied as a whole: it contains @chown and quotactl, which are required.
+SystemCallFilter=~@resources @mount @swap @reboot @raw-io @module @debug @cpu-emulation @obsolete @clock @setuid
+SystemCallErrorNumber=EPERM
+LimitNOFILE=256
+TasksMax=4
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+# Lets itsara (the gateway account) start ONLY the protected step-runner launcher as step-runner,
+# without a password. The launcher accepts exactly one fixed-format request and execs
+# /usr/bin/bwrap with a compiled-in argument vector (own user namespace, no further namespaces,
+# one workspace bound from fd 1); see docs/step-runner-launcher.md. sudo-rs accepts only exact
+# arguments or a trailing '*' in a command spec: the rule fixes the request version, the launcher
+# validates everything else itself.
+# Installed and removed only by /usr/local/libexec/step-runner-launch/install.
+itsara ALL=(step-runner) NOPASSWD: /usr/local/libexec/step-runner-launch/launch v1 *

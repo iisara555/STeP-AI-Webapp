@@ -10,6 +10,7 @@ import type {
 } from '../../packages/harness-core/src/contracts.ts';
 import { ApiError, type Host } from './host.ts';
 import type { Page } from './routes.ts';
+import { parseStorageStatus } from './storage.ts';
 
 export type GatewayConfig = { baseUrl: string; clientId: string };
 
@@ -357,6 +358,9 @@ export function gatewayHost(options: GatewayHostOptions): Host {
         switch (action) {
           case 'snapshot':
             return snapshot();
+          case 'storage.status':
+            // The signed-in employee's own pool; the Gateway takes the owner from the credential.
+            return parseStorageStatus(await request<unknown>('GET', '/api/storage'));
           case 'workspace.create': {
             const ws = await request<GatewayWorkspace>('POST', '/api/workspaces', {
               name: String(input.name ?? ''),

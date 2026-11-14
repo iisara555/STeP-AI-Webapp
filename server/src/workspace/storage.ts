@@ -1,7 +1,8 @@
 // Folder layout of ADR 0001 §2. Every path is built from validated ids under the data root, and a Workspace is
 // looked up only under its owner's folder, so one user's request can never name another user's Workspace.
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, writeFile, rm } from 'node:fs/promises';
+import { renameSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
   parse,
@@ -22,28 +23,42 @@ export function workspacePaths(dataRoot: string, userId: string, workspaceId: st
   return { workspaceId: id, ownerId, dir, filesDir: join(dir, 'files') };
 }
 
-export async function createWorkspaceFolders(dataRoot: string, record: WorkspaceRecord) {
+export async function createWorkspaceFolders(
+  dataRoot: string,
+  record: WorkspaceRecord,
+  admit: (publish: () => void) => void = (publish) => publish(),
+  runtimeFolders = true,
+) {
   const paths = workspacePaths(dataRoot, record.ownerId, record.id);
-  // mkdir's mode applies only to folders it creates; users/<id> and workspaces/ are private too.
-  for (const dir of [
-    join(resolve(dataRoot), 'users', record.ownerId),
-    join(resolve(dataRoot), 'users', record.ownerId, 'workspaces'),
-    paths.dir,
-    paths.filesDir,
-    join(paths.dir, 'snapshots'),
-  ])
-    await mkdir(dir, { recursive: true, mode: PRIVATE });
-  await saveRecord(dataRoot, record);
+  const parent = join(resolve(dataRoot), 'users', record.ownerId, 'workspaces');
+  await mkdir(parent, { recursive: true, mode: PRIVATE });
+  // An invalid workspace ID keeps the prepared directory invisible to listRecords.
+  const staging = await mkdtemp(join(parent, '.creating-'));
+  try {
+    if (runtimeFolders) {
+      await mkdir(join(staging, 'files'), { mode: PRIVATE });
+      await mkdir(join(staging, 'snapshots'), { mode: PRIVATE });
+    }
+    await writeFile(join(staging, 'workspace.json'), JSON.stringify(record, null, 2), { mode: 0o600 });
+    // Rename is the publication point. The admission callback must run it synchronously.
+    admit(() => renameSync(staging, paths.dir));
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
   return paths;
 }
 
-export async function saveRecord(dataRoot: string, record: WorkspaceRecord) {
+export async function saveRecord(
+  dataRoot: string,
+  record: WorkspaceRecord,
+  admit: (publish: () => void) => void = (publish) => publish(),
+) {
   const { dir } = workspacePaths(dataRoot, record.ownerId, record.id);
   const file = join(dir, 'workspace.json');
   const temp = file + '.' + randomUUID() + '.tmp';
   try {
     await writeFile(temp, JSON.stringify(record, null, 2), { mode: 0o600 });
-    await rename(temp, file);
+    admit(() => renameSync(temp, file));
   } finally {
     await rm(temp, { force: true });
   }
@@ -89,6 +104,10 @@ export const CONVERSATION_INDEX = 'conversations.json';
 
 export async function readConversationIndex(dataRoot: string, userId: string, workspaceId: string) {
   const { dir } = workspacePaths(dataRoot, userId, workspaceId);
+  return readConversationIndexAt(dir);
+}
+
+export async function readConversationIndexAt(dir: string) {
   let raw: unknown;
   try {
     raw = JSON.parse(await readFile(join(dir, CONVERSATION_INDEX), 'utf8'));
@@ -108,3 +127,19 @@ export async function readConversationIndex(dataRoot: string, userId: string, wo
       ...(typeof updatedAt === 'string' ? { updatedAt } : {}),
     }));
 }
+
+/** Explicit manager storage seam: control metadata and runtime contents may have different roots. */
+export function workspaceStorage(dataRoot: string) {
+  return {
+    create: (record: WorkspaceRecord, admit: (publish: () => void) => void) =>
+      createWorkspaceFolders(dataRoot, record, admit),
+    list: (ownerId: string) => listRecords(dataRoot, ownerId),
+    read: (ownerId: string, workspaceId: string) => readRecord(dataRoot, ownerId, workspaceId),
+    save: (record: WorkspaceRecord, admit: (publish: () => void) => void) =>
+      saveRecord(dataRoot, record, admit),
+    runtimePaths: async (record: WorkspaceRecord): Promise<RuntimeSpec> =>
+      workspacePaths(dataRoot, record.ownerId, record.id),
+    conversations: (record: WorkspaceRecord) => readConversationIndex(dataRoot, record.ownerId, record.id),
+  };
+}
+export type WorkspaceStorage = ReturnType<typeof workspaceStorage>;

@@ -1,0 +1,16 @@
+/test-core
+/test-launch
+/test-launch-request
+/test-capacity-race
+/test-xfs
+/test-transport
+/*.o
+/*.a
+/xfs-acceptance
+/xfs-acceptance-san
+/test-policy
+/test-broker
+/step-quota-broker
+/step-quota-broker-fake
+/step-quota-broker-san
+/test-acceptance-sql

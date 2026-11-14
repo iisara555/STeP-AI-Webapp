@@ -1,0 +1,14 @@
+*.o
+*.a
+test-composition
+test-sanitize
+test-systemd-observer
+test-observer-sanitize
+test-systemd-bus
+test-bus-sanitize
+test-create-reconcile
+test-reconcile-sanitize
+test-reset-composition
+test-reset-sanitize
+test-observer-deadline
+test-observer-deadline-sanitize

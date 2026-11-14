@@ -1,5 +1,1038 @@
 # Progress
 
+## Reset composition and bounded readiness — isolated synthetic candidate, not installed
+
+- Composed reviewed stop base `f1fef0d`, observer/reset `f22694f` and connection
+  deadline `25a5790` on live integration `4c799c4` in a new isolated worktree.
+  Kept both progress histories and both reset/deadline mutation lists; refreshed
+  overlapping stop patterns without weakening their guards. Integration unchanged.
+- The new six-case `test-reset-composition` actually calls `las_reset_open` /
+  `las_reset` from `lcr_reconcile` with that handle's own `lso_absent` receipt and
+  context. It links the real observer, owner, ledger and quota core to the existing
+  stateful typed reset bus, not libsystemd. An accidental production observer bus
+  open aborts. The bus asserts exact typed ResetFailed on the InvocationID path,
+  never a name. Reset success/error retain capacity until independent cleanup;
+  both unit-first and directory-first cleanup orders are tested. Populated and
+  collected-without-receipt cases never reset; a changed manager stays UNKNOWN.
+- `las_reset` now shares the original five-second deadline with connection/auth/
+  Hello readiness, sets the call budget before starting the bus and never refreshes
+  it afterward. The real-libsystemd private stalled-Unix-socket reset regression
+  requires UNCERTAIN/DEADLINE in 4.9–7 seconds, an empty reset record and no
+  ResetFailed wire bytes. The same guarded fixture address/peer hooks and production
+  pin checks apply. The original pinned populated-0 evidence is still mandatory;
+  an already removed directory cannot manufacture an absence receipt.
+- Verified unprivileged: `clean all test analyze sanitize` passed with saved exit
+  0 in launch-lifecycle, quota-broker, launch-composition and systemd-create.
+  After tightening the cross-proof assertion, launch-composition's full
+  `all test analyze sanitize` rerun also exited 0; systemd-create's final rerun
+  exited 0. The new six-case connected proof runs normally and under ASan/UBSan;
+  real-libsystemd stalled create/stop/reset tests each returned at 5.005 s in
+  both modes. Production pin-negative/phony checks passed. Engine pin remains
+  `90ee71c` (`desktop-v0.6.20`). Both install-check commands deliberately return
+  make exit 2 (refusal), not installation success.
+- Final mutation evidence: **387/387 killed**, zero SURVIVED, BAD-PATTERN,
+  BUILD-FAIL or missing IDs: create 64, pin 21, stop 147, reset 29, deadline 14,
+  create-reconcile/observer 101 and new connected proof 11. Lists and result IDs
+  were compared programmatically, with separate scratch parents and saved command
+  statuses. The first cross batch had one survivor (`X-R80`): a failed absence
+  check could be repeated and masked by the next gate. Requiring exactly one
+  populated-subtree observation killed it on the full 11/11 rerun. The base
+  parser run was split after 19 completed results; the remaining 82 completed in
+  four separate batches. No interrupted/missing result was counted as a pass.
+- Still missing: D2's explicitly authorized manager A-to-B operation-owner
+  transition with proven lifetime-fence continuity (historical equality remains
+  strict); durable retained cgroup identity/FD or absence receipt across crashes;
+  protected slot/journal census and real lifetime fence; stop/reset journal crash
+  recovery; production startup-owner/service and workload credential-transition
+  linkage; real systemd/cgroup/XFS end-to-end acceptance, independent review and
+  deliberate artifact repinning. Both install-check targets still refuse.
+- `npm run check` passed (17 existing engine diagnostics remain delegated to
+  Desktop CI). Its first run failed only Prettier on three mutation JSON files;
+  they were formatted and the complete check reran successfully. Full npm test,
+  DB, engine, browser and privileged acceptance suites were not run here.
+- No root/sudo, installation, host configuration, real systemd mutation, real-data
+  modification, push or integration. Native synthetic evidence is not installed
+  or production acceptance.
+
+## Stopped-anchor empty ControlGroup and post-absence reset — synthetic, not installed
+
+- Accept empty `ControlGroup` only for the exact inactive/failed invocation
+  without a pending job; active-empty and foreign nonempty paths stay UNKNOWN.
+  Absence still needs `populated 0` through the retained original descriptor,
+  exact snapshot bracket and continuously held lifetime fence. The interrupted
+  removed-directory-as-absence fallback was tightened to this contract:
+  pruning before the empty observation remains UNKNOWN, not a recovery receipt.
+- Post-absence cleanup now detects a removed held directory by `getdents64`
+  returning ENOENT, not `st_nlink == 0` (kernfs synthesizes link count). Tests
+  reject a live directory, O_PATH/EBADF, other errors and stale errno.
+- Optional reconciler reset seam is gated on this handle's own receipt and a
+  fresh fence/pin check, with one consumed attempt. Separate `las_reset_open` /
+  `las_reset` writes durable RESET intent before typed `Unit.ResetFailed()` on
+  the InvocationID path, verifies inactive/collected readback and never releases
+  capacity. Release still needs independent NoSuchUnit plus descriptor-removal
+  cleanup proof. Create journal bytes/format and historical manager binding are
+  unchanged. The seam and reset adapter are tested separately, not yet composed
+  through an actual startup owner.
+- Verified unprivileged: both native directories' `all test analyze sanitize`
+  passed (GCC analyzer and ASan/UBSan, including production-library link and
+  systemd-create pin-negative/phony checks); both `install-check` targets still
+  refuse with make exit 2. Read-only upstream systemd v259 source checks cover
+  invocation-path lookup, reset signature/state changes, collection and cgroup
+  path clearing; no real systemd mutation was sent.
+- Mutation evidence: launch-composition 101/101 killed in five bounded batches;
+  systemd-create create 64/64, pin 21/21, stop 147/147 (five bounded batches)
+  and new reset 29/29 killed. The reset single-attempt mutant initially survived;
+  asserting consumption and second-call refusal at the fake mutation boundary
+  killed it on the full reset rerun. Ten old stop patterns needed unique
+  context after adding reset. Interrupted/colliding runs and missing JSON files
+  were not counted as passes; completed batch IDs/counts and exit status are
+  checked programmatically. The composition harness now saves each result as
+  it completes, so interruption no longer loses the whole batch.
+- Remaining gates: D1 bus startup can exceed the 5 s attempt deadline (separate
+  worktree fix, including this new reset path, still to compose/review); D2
+  manager reexec stays fail-closed. Same boot/bus/invocation and uid 0 do not
+  establish fence continuity; outstanding jobs are serialized too. Future D2
+  work needs an explicitly authorized A-to-B operation-owner transition shared
+  by stop/observer/reconciler, unchanged create journal and proposed STOPv2 A/B.
+  Also pending: retained FD/absence durability across crashes, protected census,
+  real lifetime fence, stop/reset journal recovery, actual owner/service and
+  credential-transition linkage, end-to-end acceptance, independent review and
+  deliberate artifact pins. This change does not make real stopped/pruned
+  anchors automatically releasable when populated-0 evidence was missed.
+- Not run: repository-wide npm/DB/engine/browser suites, live host-check or
+  privileged/systemd/cgroup/XFS acceptance. No installation, root/sudo, host
+  configuration, real-data migration, push or integration was performed.
+
+## Storage pool warnings, visible end to end — synthetic only, broker not wired
+
+- `GET /api/storage` returns only the verified caller's pool: `level`
+  (ok/warning/critical/full at 80 %/95 %/100 % of the worse of bytes or files),
+  both percentages and which limit is worse. No configured source, a failing source
+  or a malformed reply gives `{ state: 'unavailable' }`, never numbers.
+- A full pool refuses new saves early with `507 STORAGE_FULL` (create Workspace,
+  new conversation, new run). Reading, starting, stopping and cancelling are not
+  refused; the filesystem quota stays the enforcing limit and an unavailable
+  source does not block saves.
+- The usage source is injected (`storageUsage`) into `createGateway` and the
+  synthetic assembly only; production `main.ts` and identity-trial are unchanged
+  and report nothing. The broker boundary's `usage()` fits the interface
+  type-checked, but no real broker is connected yet.
+- Cloud Workspace banner in Thai: hidden for ok/unknown, amber at warning, red at
+  critical and full; the full message says new saves/uploads fail while existing
+  work stays readable, downloadable and deletable. The refusal notice has no
+  documents action. Cloud mode has no upload or delete route yet, so only
+  conversation history is exercised as "existing data".
+- Tests: gateway owner scoping, unavailable, byte and inode boundaries
+  (79.9/80/94.9/95/100), refusal and unchanged data; web banner states and host
+  call; a Playwright spec with fake usage on :8797/:5176. Remaining: wire the
+  real broker `usage()` with the user mapping, and host acceptance on XFS.
+
+## Exec-status zero-length classification correction — not installed
+
+- Replaced decoder EOF claim with `ambiguous_terminal`: clean zero-length receive
+  means empty-record-or-closure UNKNOWN, preserves stage and stops decoding; later
+  records remain unread. No runtime-ready inference. Genuine closure still stops.
+- RED live empty-record + queued ENTERED regression failed on the reviewed base;
+  now covers terminal refusal and unread ENTERED. Seven hostile frames include
+  empty rights and control-truncated rights, with unchanged descriptor counts.
+- Launcher native all/test/analyze/sanitize passed (328 launcher checks each normal
+  and sanitized); broker all/test/analyze/sanitize passed unprivileged.
+- Exact targeted launcher/Unix-channel/real-runtime suite: 17 passed, zero failed
+  or skipped; broader related suite: 21 passed, zero failed or skipped.
+  `npm run check` passed (17 existing engine diagnostics; Node deprecation unchanged).
+  `install-check` still fails on the expected stale launcher hash.
+- Old install pins remain stale; installation and production launch stay blocked
+  until final lifecycle composition, review and deliberate repinning. No root,
+  sudo, install, host configuration, real-data changes or push.
+
+## Launcher exec-status prerequisite — not installed
+
+- Added a separate fixed service child entry with trusted-root-created seqpacket
+  status FD 4, staged entry/validated acknowledgments and structured validation /
+  exec failures; legacy sudo still discards all inherited FDs >= 3. No caller FD,
+  executable or environment selector and no production service registration.
+- Nonblocking parent parser rejects malformed/order/ancillary messages. Explicit
+  kill tests preserve VALIDATED+EOF as exec-or-death UNKNOWN; runtime readiness
+  still requires the separate authenticated per-incarnation nonce channel.
+- Native launcher and broker test/analyze/sanitize, npm check and 17 targeted
+  launcher/Unix-channel/real-runtime tests passed unprivileged. Existing engine
+  diagnostics and Node deprecation remain. [Contract](launcher-exec-status.md).
+- Old launcher SHA-256 pins are intentionally stale: install-check refuses;
+  installation is blocked until review, lifecycle completion and repinning.
+  No root/sudo/host/install/XFS/real-data changes or push. Production stays refused.
+
+## Bounded native revoke-through-launch core seam — not connected
+
+- Added `qb_launch_workspace`: fresh grant/peer, mount/quota and retained directory
+  identity validation plus synchronous trusted spawn callback under the existing
+  revoke/mutation mutex. No wire verb, arbitrary command API or default launcher;
+  old receipts/status cannot authorize later work. Launch never provisions.
+- Fake spawn + barrier tests cover revoke ordering on success/error, borrowed FD
+  lifetime, stale receipt/replayed requests, substitution, refusals and join-before-
+  close. Initial absent-API and pool-substitution tests failed first; deliberately
+  unlocking before callback also fails the deterministic mutex assertion.
+- Native all/test/analyze/sanitize and app check/engine pin verified unprivileged.
+  No root/sudo/real XFS/install/host changes or actual runtime launches.
+- [Contract and exact next connection](native-quota-launch-fence.md): authenticated
+  bounded transport must invoke the fixed-policy FD launcher synchronously inside
+  this authority, with incarnation/outcome reconciliation. That connection and
+  independent/host acceptance remain open; production refusal is unchanged. This
+  core-only increment does not refresh older installation/acceptance artifact pins
+  or authorize installation, UI/cutover or production composition.
+
+## Root-local per-user pool operations recovered — not installed
+
+- Salvaged the interrupted quota-pool-operations worktree without reset. Added
+  durable journal grants and raise-only limits, byte-capacity admission plus an
+  explicit reserve, retry/replay and operator CLI commands. No gateway mutation
+  protocol. Version-2 policy/manifest refuses legacy state; read-only TS parser and
+  fixtures, fresh installer and pins updated together. Nonempty grant journals
+  cannot be purged merely because no workspace exists yet.
+- Native all/test/analyze/sanitize pass (24 core tests; raise fault injection),
+  SQLite RLIMIT_FSIZE history/recovery self-test passes, stub installer/wrapper
+  lifecycles and offline unit checks pass. npm check/test/db/engine pass
+  (118/29/320 tests). Both root binaries reproduce byte-for-byte in scratch;
+  [exact hashes and remaining gates](native-quota-broker-service.md).
+- New real-XFS harness checks add/raise, overcommit, shared-pool SQLite preservation
+  and recovery are prepared but **not run**. Old owner-run PASS does not accept
+  the new binary. SQLite model observed extended I/O error 778, not SQLITE_FULL;
+  already-committed rows remain intact in that model. Exact Node runtime/UI,
+  raised-user gateway expectations, separate protected launcher, revoke/spawn,
+  rollback witness/restore and populated-v1 migration remain explicit gates.
+- No root/sudo/real quotas/install/host changes, no push, no edits to parallel
+  launcher/driver work. Production gateway refusal remains; real data is still in
+  Supabase.
+
+## Bounded native broker Unix transport on 83b0c88 — not installed
+
+- New isolated worktree `/home/itsara/projects/step-native-quota-broker-transport`,
+  branch `feat/native-broker-transport`; original core/XFS/reviewer/TS worktrees
+  untouched. Added real `transport.c/.h`, native archive and cross-process executable
+  integration fixture. [Wire contract, TS coordination and release gates](native-quota-broker-transport.md).
+- SO_PEERCRED fixed client UID checked before reading/parsing/replying; exact
+  46-byte workspace-only frame plus write EOF, no trailing/pipelined input or
+  caller FDs/authority fields. Fixed eight-client/backlog/accept-work bounds,
+  47-byte receive arrays, absolute 500 ms input deadlines, nonblocking I/O and
+  tiny status-only replies. No receipt/metadata/FD disclosure or launch authority.
+- Real core authorization/revocation remains under its mutation fence; native core
+  remains the single allocator. No second TS/SQLite allocator or invented rich
+  TS receipt bridge. UID equality explicitly does not exclude compromised same-UID
+  principals; shared gateway authentication/delegation remains a host-policy gate.
+- Hardened `make clean all test analyze` and ASan/UBSan `make sanitize` pass:
+  existing 17 core tests, fake-XFS faults at 22 configure calls, plus transport
+  malformed/oversize/fragmented/no-EOF/slow/unauthorized peers, saturation/recovery,
+  repeated disconnect/retry and SCM_RIGHTS denials under child RLIMIT_NOFILE=64,
+  exact replies with no ancillary FDs, connected-request revocation, blocked fake
+  mutation overlapping revoke/stop, accepted-socket drain and join-before-core-close.
+  A red regression first accepted valid frame + caller SCM_RIGHTS; recvmsg now
+  rejects ancillary truncation and Linux discards those FDs without installing them.
+- Default XFS archive still only exports open/close, with no ioctl/quota/test-constructor
+  symbols; ENOTSUP unchanged. Completed independent 83b0c88 adapter review reported
+  no confirmed defect in unprivileged scope; real quota acceptance remains unrun,
+  not an additional open adapter-review blocker. New transport has local self-review.
+- Zero root/sudo/install/XFS mutation/real-data or host-policy changes. App/DB/engine/
+  browser suites not rerun for isolated native code. Socket I/O deadlines do not
+  cancel a synchronous durable core operation; stop drains it, then caller joins.
+  Protected startup/host policy, independently protected anti-rollback witness,
+  protected FD-consuming launcher sharing revoke-through-spawn authority, actual
+  XFS acceptance and explicit deployment approval are still missing. Nothing enabled.
+
+## FD-based native XFS adapter on 0681439 — disabled, no privileged acceptance
+
+- Isolated `/home/itsara/projects/step-native-quota-broker-xfs`, branch
+  `feat/xfs-backend-0681439`; retained work before cherry-picking cached-revoke fix
+  `448bb00` as `4a9762a`. Original/reviewer worktrees untouched. Added `xfs.c/.h`,
+  syscall-seam/core-integration tests, native archive/build checks and
+  [ABI evidence, behavior and exact remaining gates](native-quota-broker-xfs.md).
+- Actual Linux FD ioctl/`quotactl_fd` implementation: copied fixed policy,
+  retained CLOEXEC mount FD, device/inode/mount-ID and current mountinfo membership,
+  writable XFS, filesystem UUID, project accounting AND enforcement, blank-state
+  checks, exact block/inode hard limits (512-byte ABI units) before project+inherit
+  assignment, fsync and independent readback. No caller paths/IDs/limits, path
+  fallback, quota toggle, recursion, rewrite/repair, rollback or ID reuse.
+- Default native constructor refuses `ENOTSUP` before any ioctl/quota call.
+  `QB_XFS_PRIVILEGED_ACCEPTANCE=1` source was compiled/analyzed only, never run.
+  Fake syscall constructor exists only in test builds, not the normal library.
+- Hardened build/test/analyzer and ASan/UBSan commands pass after core integration:
+  **17 core tests**, fake XFS adapter faults at **all 22 configure seam calls**,
+  ignored writes, malformed/foreign/unsupported evidence, retained FD targeting and
+  real core+adapter with fake syscalls. Tests refuse root; ZERO real XFS mutation,
+  quota/ioctl execution, root/sudo/Docker, installation or production changes.
+  App/DB/engine/browser suites were not rerun for this isolated native increment.
+- Local standards/spec self-review only; independent adapter review and privileged
+  acceptance remain required. Live journal-loss poisoning is NOT well-formed
+  rollback detection: an independent protected witness/restore procedure is still
+  missing. Protected transport/launcher, one authoritative allocator, approved
+  host policy/access, actual exhaustion/escape/mount/crash tests and explicit
+  deployment approval remain gates. Nothing is installed or enabled.
+
+## Cached revoke durability follow-up on 0681439 — unprivileged only
+
+- Isolated branch `fix/core-cached-revoke-durability` in
+  `/home/itsara/projects/step-native-quota-broker-revoke`; original core, backend and main
+  worktrees unchanged. `qb_revoke` now checks journal/mount health under the mutex before
+  acknowledging a cached deny. Detected journal loss poisons the authority, returning `EIO`
+  for repeat/new revokes and ensures, even if the expected journal size is restored.
+- TDD regression failed at the expected cached-success assertion before the fix: revoke an
+  unallocated grant, truncate its journal to zero and fsync, then retry revoke. It now passes.
+  Additional coverage verifies unchanged journal size on valid repeated revoke, restart denial,
+  and cached revoke refusal on synthetic mount UUID/enforcement mismatch.
+- `make -C native/quota-broker clean all test analyze` and
+  `make -C native/quota-broker sanitize` pass: **17/17** hardened and **17/17** ASan/UBSan
+  tests, static library build and GCC analyzer; `git diff --check` passes. No app code changed;
+  broad app/DB/engine/browser suites were not rerun for this isolated native fix.
+- The regression explicitly demonstrates that an empty well-formed rollback still permits
+  provisioning after restart: no external anti-rollback witness exists. The fix prevents a
+  false durable-revoke acknowledgment after detected live loss; it does not repair lost state.
+  Fake adapters only, ordinary UID, zero real quota/root/XFS operations; no merge or install.
+
+## Native quota broker core on c7ab8ce — not installed / no enforcement acceptance
+
+- Dedicated `/home/itsara/projects/step-native-quota-broker`, branch `work/native-quota-broker`;
+  inspected quota protocol `8f53906` and integration `c7ab8ce` read-only. Added a C11 core library
+  with strict fixed-size workspace-only protocol, copied fixed operator policy, permanent journaled
+  allocation, broker-owned fresh directory creation, real descriptor-relative openat2/statx/fsync and
+  persisted device/inode binding. No caller path/project/limit, tree adoption, recursive rewrite,
+  clear/recycle, automatic bootstrap/repair, daemon, installer or production composition.
+- A durable operator-only deny is serialized under the same mutex as actual synchronous adapter
+  mutation/read-back. Completed revocation prevents later mutations and survives restart; this does
+  **not** revoke existing FDs/workloads or fence a later launch. Receipts are not launch tokens.
+  Existing RuntimeManager creation and synthetic assembly are unchanged; no withDiskQuota wiring
+  or protected FD-consuming launcher is claimed. The native journal must not become a competing
+  allocator behind the TypeScript SQLite authority.
+- Native **15/15** unprivileged tests pass in hardened and ASan/UBSan builds; real GCC `-fanalyzer`
+  compilation and static library build pass. Coverage includes failed journal fsync with no mutation,
+  interrupted provisioning, no adoption/reuse, live/torn state loss, symlink/inode/rename substitution,
+  retained FD behavior, independent evidence mismatch, cross-process exclusion, ten concurrent unique
+  IDs and in-flight mutation/revocation ordering. Test harness refuses root; quota ioctls are a synthetic
+  adapter model only. Test-first failures reproduced absent core/API, live-truncation cached success and
+  mid-adapter directory substitution; all now pass. No kernel quota enforcement is credited.
+- Node **26.12.1**, existing local dependency copy, unchanged Harness `desktop-v0.6.20`/`90ee71c`:
+  app **118/118**, DB **29/29**, ungated engine **245/245** with `STEP_STEP_RUNNER_TESTS=0`;
+  check/build/engine-pin checks pass. Existing 17 upstream engine diagnostics and loader/localStorage/
+  build-size warnings remain. Relevant Cloud Workspace Playwright **2 desktop passed / 2 existing mobile
+  skips**, using the unchanged scripted fixture, existing user-local browser libraries and an ignored
+  focused config (only 8799/5175, no server reuse). The first focused-config attempt failed because its
+  webServer cwd resolved under `.local`; explicit checkout cwd corrected it. No host package install.
+- See [native core boundary and exact remaining privileged acceptance](native-quota-broker-core.md).
+  No real ioctl backend, protected transport/launcher/install, approved host quota/access/delegation policy,
+  anti-rollback witness, manager publication integration or actual byte/inode exhaustion/recovery yet.
+  No root/sudo/Docker/XFS mutation, real data/provider access, merge/deploy or Desktop-parity sign-off.
+  Local standards/spec review performed; independent parent security review remains required.
+
+## RuntimeManager startup lifecycle follow-up on 62af7bb (synthetic only)
+
+- Test-first deferred empty-grant regression reproduces a cleanup-failed exit being overwritten as running
+  while the handle remains identical. Startup now requires both the same handle and the `starting` state
+  before publishing running; failed lifecycle state cannot be revived. Health stays false, replacement
+  starts fail closed, and the retained capacity is released only after successful cleanup retry.
+- Test-first stop/shutdown regressions reproduce `RUNTIME_CLEANUP_FAILED` being incorrectly remapped to
+  `RUNTIME_STOP_FAILED` after a throwing startup grant. Retries preserve the metadata-only cleanup error
+  and failed reservation until successful release; unknown process cleanup retains stop-failure semantics.
+- Node 26.12.1: targeted lifecycle/connect tests **22/22**, full ungated engine **245/245**, app **118/118**,
+  database **29/29**, check/build/engine-pin passed. Existing 17 upstream engine diagnostics, loader
+  deprecation/localStorage warnings and bundle-size warning remain. Relevant Cloud Workspace Playwright
+  attempted: two desktop cases blocked before execution by missing Chromium `libatk-1.0.so.0`; two existing
+  mobile skips. No host packages installed to bypass this environment limitation.
+- New regressions use only injected synthetic RuntimeDriver/RuntimeHandle seams. Opt-in runner host tests
+  disabled (`STEP_STEP_RUNNER_TESTS=0`); no pressure tests, host configuration changes, live providers,
+  production changes, merge or deployment. Production acceptance remains separate.
+
+## Runtime/runner review fixes on 03d277db (synthetic only)
+
+- Test-first real RuntimeManager + authenticated account-switched driver fault injection reproduces stop,
+  shutdown and crash cleanup failures. Failed unit cleanup now rejects with `RUNTIME_CLEANUP_FAILED` after
+  processes are proven absent. `onExit` carries that separate cleanup error; the manager keeps the failed
+  workspace handle and capacity reservation, refuses replacement starts, and retries cleanup on stop/shutdown.
+  Successful retry releases the reservation. The saved process-absence proof survives metadata retries, which
+  neither signal nor require cgroup access again. Unknown process emptiness still uses `RUNTIME_STOP_FAILED`.
+- Unix process-driver now runs its existing RPC finalizer when synchronous send throws. A real runtime test
+  reproduces MaxListeners warnings before the fix with 16 local oversized sends; afterward listener and timer
+  counts stay at baseline, no MaxListeners warning is emitted, and small RPCs/health work on the same PID.
+- Verified: app **118/118**, database **29/29**, ungated engine **242/242**, opt-in non-pressure host **24/24**,
+  check/build/engine-pin/diff checks; relevant Playwright **2 passed / 2 existing mobile skips**. Three host
+  pressure cases deliberately excluded. Final inventory has no runner PIDs, units, cgroups or fixture/socket
+  folders; command failures were checked. Existing upstream diagnostics and loader/build warnings remain.
+- Verification uses Node 26.12.1, existing dependency copies and unchanged Harness pin. No host configuration,
+  merge/deploy, external provider calls or real data. Existing production blockers remain unchanged; see
+  [review fix semantics and verification](runtime-runner-assembly.md#review-fix-semantics).
+
+## Runtime/runner assembly on integration 3c5a2db (synthetic only)
+
+- New worktree `/home/itsara/projects/step-runtime-runner-assembly`, branch `work/runtime-runner-assembly`;
+  integration checkout remains unchanged. Integrated runner commits through `5164f81`, retained cleanup/resource
+  tests through `c3c6e68`, and Unix transport/result recovery through `a89ef14`. Preserved the integration's newer
+  quota helper proposal. Reviewed shared process-driver/runtime-entry changes before resolving protocol conflicts.
+- Added optional `createSyntheticAssembly`: real Gateway/RunService + RuntimeManager + real pinned engine,
+  max ten runtimes, explicit injected authenticator, quota policy and synthetic-only purpose. Namespace and
+  step-runner variants both force authenticated Unix transport and the in-sandbox synthetic provider.
+  Runner fixture preparation is explicit and outside synchronous spawn admission; no production provisioning
+  or permission-widening behavior is hidden in the factory. Production gateway refusal remains unchanged.
+- Shared role-separated mutual challenge/HMAC handshake, inherited-stdin capability bootstrap, bounded frames
+  and output queues; runner keeps its pre-read kernel peer-UID check, pending/refusal bounds and kill/prove
+  cleanup. Legacy nonce-only transport is retained for standalone backward-compatible fixtures, not selected
+  by assembly. Authenticated runner outbound enqueue failure cleans pending RPC state immediately.
+- Red/green: runner launch-selection regression failed with absent transport flag before implementation;
+  assembly test failed on the missing module before implementation. Corrected test expectations against existing
+  HTTP contracts (create is 200; run status omits answer, which is read through conversation messages).
+- Actual host runner assembly passed: ten distinct synthetic gateway identities, ten concurrently live real
+  account-switched runtimes, authenticated transport, concurrent asks, cross-owner HTTP denial, stop/resume and
+  retained four-message histories. Reused existing sudo/bwrap permission, disposable fixture setup and cleanup;
+  no accounts, sudoers, packages, home permissions, production data or remote systems changed.
+- Same-account namespace assembly independently passed ten HTTP RunService jobs and persistence/denial checks.
+  Full ungated engine suite **241/241**, app tests **118/118**, database tests **29/29**, build and engine-pin check
+  passed on Node 26.12.1. `npm run check` passed after formatting the merged progress document. Relevant
+  Cloud Workspace Playwright checks: **2 passed, 2 pre-existing mobile skips** (scripted UI runtime, not runner
+  browser acceptance). Host driver suite excluding the three bounded CPU/memory/task pressure cases:
+  **21/21 passed**, including authenticated early wrong-UID/wrong-capability peers, same-PID recovery after
+  local outbound oversize rejection, cleanup fault retries and the ten-user runner assembly. The separate
+  initial runner assembly run also passed. Resource pressure tests are retained, not claimed rerun here.
+- Initial local dependency symlink broke restricted sandbox module resolution; replaced by an untracked local
+  copy and initialized the existing pinned Harness submodule. No dependency or engine pin changed.
+- See [assembly architecture, reproduction and exact release gates](runtime-runner-assembly.md). This is not
+  real-data readiness or completed Desktop parity: exclusive launcher policy, least-privilege provisioning,
+  socket/procfs hardening, disk/inode enforcement, orphan reconciliation, real Google/provider/proxy acceptance,
+  final deployed ten-user load/recovery, offsite restore and feature acceptance remain release gates.
+
+## #57 · fail-closed cleanup observation (test-only increment on 2db3a503)
+
+- New worktree `/home/itsara/projects/step-runner-cleanup-observation`, branch
+  `work/runner-cleanup-observation`. No production source, host configuration, permissions or pin changes.
+- Extracted pure command-result parsers into `server/test/support/cleanup-observation.ts` and wired the
+  host suite's `runnerPids()` / `units()` through them, with two-second command deadlines. Unknown observations
+  throw rather than becoming an empty cleanup inventory, including spawn errors, signals and timeouts.
+- `pgrep` accepts exit 1 only with empty output and no diagnostics; exit >1 fails. Exit 0 requires positive,
+  safe decimal PIDs; empty/malformed output and contradictory no-match output fail. `systemctl` requires
+  exit 0 and no diagnostics; all nonempty stdout is retained so unknown rows cannot be filtered into absence.
+- Test-first: reproduced missing exceptions for command exit failures, spawn/signal/diagnostic failures and
+  malformed PID results, then implemented each slice and verified green. Five ungated pure regression tests
+  use synthetic command results; no host provisioning is needed to exercise the failure cases.
+- Node 26.12.1 verification: pure regressions **5/5**, ungated engine suite **226/226**, application tests
+  **118/118**, database tests **29/29**, `npm run check`, build, engine-pin check and `git diff --check` passed.
+  Existing 17 upstream engine diagnostics, module.register deprecation and build chunk-size warnings remain.
+- CPU pressure was not rerun: this increment changes observation only, and live one-minute load was **1.75**,
+  above CPU acceptance's below-1 precondition. No memory/task pressure or Playwright run; no UI behavior changed.
+  Independent read-only inventory returned pgrep exit 1 with empty streams, systemctl exit 0 with empty streams,
+  and no disposable host-test folders. These results were checked rather than assuming failed queries were empty.
+
+## #57 · bounded CPU enforcement acceptance (test-only increment on 92b93d80)
+
+- Dedicated branch/worktree: `work/step-runner-cpu-acceptance` at
+  `/home/itsara/projects/step-runner-cpu-acceptance`. Reviewed the existing driver and resource fixtures first;
+  only test/docs changed. No production source, host settings, permissions, real data, merge or deployment.
+- The existing `STEP_STEP_RUNNER_TESTS=1` opt-in gate is required. The CPU test refuses pressure unless host
+  memory availability is at least 2 GiB, spare kernel task slots at least 256, one-minute load below 1, and
+  sampled CPU idle at least 80% over 500 ms. Checks run before launch and again before arming.
+- Reads effective scope `cpu.max=25000 100000`, `memory.max=201326592`, `memory.swap.max=0`, `pids.max=32`.
+  One direct single-threaded Python worker busy-loops to a two-second monotonic deadline, with a separate
+  four-second parent kill timer. Host stop watchdog is ten seconds, fixture lifetime twenty seconds,
+  test deadline sixty seconds, outer command ninety seconds. No unbounded allocation/forking/host stress.
+- Acceptance requires successful worker exit and post-baseline `cpu.stat` deltas: usage at least 100,000 usec,
+  at least three periods and three throttled periods, positive throttled usec. Diagnostics identify the exact
+  random cgroup and before/after counters. Requested CPUQuota/configuration or elapsed wall time alone is not proof.
+- Red/green: missing CPU fixture behavior failed on the reply assertion. Removing the launch quota temporarily
+  failed on effective `max 100000` before pressure. An idle-worker control failed (usage 23,171 usec,
+  zero additional throttled periods/time). Both mutations were reverted; production driver has no diff.
+- Three consecutive final CPU-only runs passed, each with **21 newly throttled periods**. Corresponding usage /
+  throttled-time deltas (usec): **535,183 / 1,546,651**, **535,722 / 1,543,970**, **535,166 / 1,544,138**.
+  Each run kept IPC healthy, proved cleanup and restarted the real synthetic runtime on the same workspace,
+  completing health/connect/ask. `finally` checks scope emptiness and process/unit/socket cleanup even on failure;
+  tracked-handle suite teardown is the fallback.
+- Checks passed: `npm run check` (existing 17 upstream engine diagnostics still delegated to Desktop CI),
+  `npm test` **118/118**, ungated `npm run test:engine` **221/221**, `npm run test:db` **29/29**,
+  `npm run build` (existing large-chunk warning), `npm run check:engine-pin`, and `git diff --check`.
+  No browser/UI behavior changed; Playwright was not rerun. Memory/task pressure tests were not rerun in
+  this CPU-only increment. Initial recovery/check failed because the new worktree's Harness submodule was
+  not initialized; initializing the existing pinned revision fixed it without changing the pin.
+- Independent final inventory: **0** step-runner PIDs, **0** `step-rt-*` units, **0** matching scope cgroups,
+  **0** `/mnt/step-work/step-driver-test-*` folders and **0** test socket directories. Command failures were
+  checked rather than treating an unsuccessful inventory query as empty.
+- Remaining production blockers are unchanged: disk/inode quota acceptance, orphan-scope reconciliation,
+  socket group/ACL provisioning, Gateway integration, and real-provider/secret acceptance. Gateway stays fail-closed.
+
+## #57 · bounded host memory/task exhaustion acceptance (test-only increment on 5164f81)
+
+- Added two opt-in tests at the existing RuntimeDriver/RuntimeHandle seams, using a disposable synthetic
+  `fake-resources` entry. No production source, RuntimeManager/Gateway wiring, host configuration or permissions
+  changed. `STEP_STEP_RUNNER_TESTS=1` remains mandatory; without it the entire host suite is explicitly skipped.
+- Both tests verify effective `memory.max=201326592` (192 MiB), `memory.swap.max=0`, `pids.max=32` **before**
+  sending the pressure request. Requested CPU quota is 50%. Test-host preflight showed 58,824 MiB available
+  memory and no pre-existing step-runner processes/scopes; no host-wide OOM or uncontrolled fork test was used.
+- Memory: one finite worker touches at most 384 MiB, exits within 10 seconds, and raises only its own
+  `oom_score_adj` to prefer itself as the victim. The kernel must report `constraint=CONSTRAINT_MEMCG` and the
+  exact random `oom_memcg` scope in its durable journal. Kernel-journal read access is checked before arming;
+  no permissions are installed or granted. A SIGKILL alone cannot pass. On this host systemd ends the scope after
+  the worker OOM (even though `memory.oom.group=0`), so the test accepts either the killed-worker reply or the
+  driver's `RUNTIME_EXITED`, always requiring independent kernel evidence. Polling `memory.events.local` alone
+  was insufficient because systemd can collect the cgroup before the next read; the journal avoids that race.
+- Tasks: at most 48 sequential direct `/bin/sleep 15` attempts (no recursive process tree) must produce EAGAIN,
+  increase this scope's `pids.events:max`, and remain at/below 32 tasks. IPC health survives; explicitly killing
+  and reaping the children returns usage to baseline and a new `/bin/true` exits successfully in the same runtime.
+- Safety/cleanup: 15-second host stop watchdog, 20-second fixture lifetime, 60-second test deadlines, `finally`
+  stop, and the existing suite-wide tracked-handle cleanup. Scope emptiness plus absence of runner pids, units and
+  socket directories is checked before starting the real synthetic runtime on the same workspace again. Memory
+  recovery also completes `connect` and `ask`. The documented command adds an outer 180-second timeout.
+- Red/green: memory and task assertions each failed against a non-pressure fixture, then passed with the bounded
+  workload. Initial local worktree dependency symlinking caused bind permission failures; replaced with an
+  untracked local dependency copy (no host permissions changed). No dependency or submodule pin changed.
+- Verified with Node 26.12.1: full gated engine suite **238/238**, 0 failed/cancelled/skipped; standalone driver
+  suite **21/21**; both pressure tests **2/2 in each of three consecutive repeat runs**; ungated standalone suite
+  **4/4** with the host suite explicitly skipped. `npm run check`, `npm run build`, and `npm run check:engine-pin`
+  passed; `npm test` **118/118**, database tests **29/29**. Existing server checker still reports 17 upstream
+  engine diagnostics delegated to Desktop CI; Vite retains its large-chunk warning. No browser/UI code changed,
+  so Playwright was not rerun for this test-only increment.
+- Final independent live leak inventory: **0** step-runner pids, **0** `step-rt-*` units, **0** scope cgroups,
+  **0** `/mnt/step-work/step-driver-test-*` folders (therefore no test socket directories left).
+- Still blocked for production: workspace disk/inode quota acceptance, restart reconciliation of orphan scopes,
+  socket group/ACL provisioning, production integration and real-provider/secret acceptance. No disk/inode
+  exhaustion or host setup was attempted. Production Gateway remains fail-closed.
+
+## #57 · step-runner driver review fixes (hostile early peers, stop errors, unknown scope state)
+
+- Correction: the random socket folder name was described as secret. It is not: it appears in the command lines of
+  `systemd-run`/`sudo`/`bwrap`, readable by every local user (`/proc/<pid>/cmdline`, no `hidepid`), and the root and
+  folder are 0711 with the socket 0666, so any local user can connect. Path visibility remains. Making the socket root
+  0700 plus a group or ACL for step-runner needs a host change (no `setfacl` installed; the service account is not in
+  group `step-runner`) and is pending.
+- Before, the driver accepted only the first connection, so any local process (uid 1000, or uid 995 outside a
+  sandbox) that connected first aborted the start (`PEER_REJECTED`/`NONCE_MISMATCH`). Now the listener stays open
+  until the start timeout. Every connection is checked as hostile: SO_PEERCRED must be uid step-runner before any
+  byte is read (`pauseOnConnect`), then the first frame (max 4 KiB until trusted) must be `ready` with the launch
+  nonce. A refused peer is destroyed without a reply and the driver keeps waiting. Bounds: at most 8 connections
+  pending a check (more are dropped unread) and 32 refusals per launch, after which the start fails closed with
+  `TOO_MANY_REJECTED_PEERS`. The first valid peer is accepted, the listener closes and the other pending
+  connections are dropped. A start that fails after refusals reports the last refusal as `cause` (e.g.
+  `NONCE_MISMATCH`, `FRAME_TOO_LARGE`). Remaining exposure until the host change: a local user can still abort one
+  start by flooding (bounded cost), and an out-of-sandbox uid-995 process (only the service account can create one,
+  through its sudo rule) could hold the 8 pending slots.
+- Stop errors: a failing `cgroup.kill` write (anything but ENOENT) is `WorkspaceError('RUNTIME_STOP_FAILED')` with a
+  `cause`, never a raw error, from `stop()` and forced `stopWithAdmission`; any teardown error is mapped the same way.
+  `tmpfsBytes` is validated at construction (`INVALID_STEP_RUNNER_OPTIONS`).
+- Unknown state: a non-zero `systemctl show` is unknown and retried until the deadline, never "gone"; if it stays
+  unknown, stop fails (`RUNTIME_STOP_FAILED`) and a start becomes `RuntimeStartCleanupError`. After the processes are
+  proven gone, `systemctl stop`/`reset-failed` run and the result is judged by asking systemd afterwards (both commands
+  fail harmlessly when systemd already collected the empty scope); the outcome is on `handle.scope.unitCleanup`
+  (`'done'`/`'failed'`, with `unitCleanupFailures`). `'failed'` never means the runtime may run; a later `stop()`
+  retries only the unit removal. A crash whose emptiness proof fails keeps the handle and does not fire `onExit`;
+  a later `stop()` retries kill and proof.
+- Fault injection for tests only: optional second argument `stepRunnerDriver(options, hooks)` replaces `systemctl`,
+  the `cgroup.kill` write and the `cgroup.events` read; it is not part of the options.
+- New tests (test-first; all 7 were red on 145c36e): `tmpfsBytes` options; host: a uid-1000 process and two
+  out-of-sandbox uid-995 processes (one wrong nonce, one silent) connect before the runtime is even spawned, receive
+  0 bytes and are closed, and the genuine start succeeds; 40 uid-1000 connections → `TOO_MANY_REJECTED_PEERS`;
+  `cgroup.kill` EACCES → `RUNTIME_STOP_FAILED` then a retry stops it; failing `show` → `RuntimeStartCleanupError`
+  then `handle.stop()` cleans up; failing `stop`/`reset-failed`/`show` → `unitCleanup: 'failed'` with the runtime
+  proven stopped, then `'done'` on retry; crash with a failing proof → no `onExit`, then `stop()` succeeds. The old
+  "uid-1000 peer → PEER_REJECTED" test is replaced by the hostile-peer test.
+- Results (Node 26.12.1, this host): `npm run check` ok; `npm test` 118/118; `npm run test:db` 29/29;
+  `npm run test:engine` 221/221 (host suite skipped explicitly); `STEP_STEP_RUNNER_TESTS=1 npm run test:engine`
+  236/236; step-runner suite alone 19/19 in five consecutive runs; afterwards `pgrep -u step-runner` empty, no
+  `step-rt-*` unit, no test folder.
+
+## #57 · step-runner driver: runtime as uid `step-runner`, own scope, socket channel, cgroup.kill stop
+
+- New `server/src/workspace/step-runner-driver.ts` (`stepRunnerDriver`), not wired into the Gateway entry, which
+  stays fail-closed. Each start: random never-reused unit `step-rt-<128-bit>.scope` via
+  `systemd-run --user --scope -p MemoryMax -p MemorySwapMax=0 -p TasksMax -p CPUQuota`, then
+  `sudo -n -u step-runner /usr/bin/bwrap --clearenv --setenv …` with the same mounts as isolated `processDriver`
+  plus `--cap-drop ALL`. Synthetic provider only (`STEP_SYNTHETIC_PROVIDER=1` is forced). `appRoot` and `nodePath`
+  are explicit options; nothing is derived from the gateway's own location.
+- Channel: a fresh random socket directory (0711) per launch under a socket root checked before spawn (ours, no
+  group/other read/write), bound read-only into that one sandbox at `/run/step-runtime`. The folder name is **not**
+  secret (see the review fixes above: it is in `/proc/<pid>/cmdline`). Exactly one valid peer is accepted, then the
+  listener closes (Node unlinks the path). Node has no SO_PEERCRED
+  API, so a one-line `python3 -I -S` helper reads it from the accepted socket handed over as stdin; uid must equal
+  step-runner. The runtime must echo a 256-bit launch nonce in its first frame (`ready`), compared with
+  `timingSafeEqual`. The nonce goes over **stdin** (sudo-rs passes the pipe through, no pty), not argv/env, which
+  other local users can read via `/proc/<pid>/cmdline` and the unit description. Newline-delimited JSON frames with
+  a max size (default 8 MiB, `server/src/workspace/frames.ts`); oversize/invalid frames end the runtime.
+  `runtime-main.ts` speaks this transport when `STEP_RUNTIME_SOCKET` is set and keeps fork IPC otherwise.
+- Stop: graceful request = end the socket; after the grace period, `cgroup.kill` on the scope; resolved only after
+  proof (`populated 0` or the kernel removed this never-reused cgroup), then `systemctl --user stop` and
+  `reset-failed`. Exit of the systemd-run/sudo process is never taken as proof. No proof within the bound →
+  `RUNTIME_STOP_FAILED` (stop) / `RuntimeStartCleanupError` (start), and `onExit` is not fired. Crash/channel loss
+  fails calls in flight with `RUNTIME_EXITED`, then the same kill-and-prove runs before `onExit`.
+- Tests (`server/test/step-runner-driver.test.ts`): 4 always-run unit tests (frames, option validation, launch argv,
+  unsafe socket root) and 10 host tests gated by `STEP_STEP_RUNNER_TESTS=1` (explicit skip otherwise): runs as
+  uid 995 and answers `health`/`connect`/`ask`; limits in the scope (`memory.max`, `memory.swap.max`, `pids.max`,
+  `cpu.max`); a second sandbox cannot see the first one's workspace, socket folder, socket root or `/home`, cannot
+  connect to its socket, and neither running sandbox's mountinfo names the other; uid-1000 peer → `PEER_REJECTED`;
+  wrong nonce → `NONCE_MISMATCH`; oversized frame → `FRAME_TOO_LARGE`; a TERM-ignoring detached `setsid` descendant
+  of a runtime that ignores shutdown is killed by `cgroup.kill` with emptiness proven (and uid 1000 gets `EPERM`
+  signalling it); SIGSTOP+SIGKILL of the runtime → in-flight call `RUNTIME_EXITED`, scope emptied; skipped,
+  denied, and after-spawn-revoked start admission leave no process/unit/socket; denied stop keeps it healthy.
+  Every host test asserts afterwards: no new `pgrep -u step-runner` pid, no `step-rt-*` unit, empty socket root.
+- Host tests copy `node_modules`, `harness`, `server/src`, both `package.json` and the Node binary into
+  `mktemp -d /mnt/step-work/step-driver-test-XXXX` (step-runner cannot read `/home/itsara`); the synthetic
+  workspace folder is 0777 **for the disposable test only**. Production needs a root-run setup step: root-owned
+  world-readable app + Node (e.g. `/opt/step`), and workspace folders owned by a shared group of the service
+  account and step-runner instead of 0777. Runtime files are owned by uid 995, so the test removes them through a
+  step-runner bwrap before deleting its folder.
+- Results (Node 26.12.1, this host): `npm run check` ok; `npm test` 118/118; `npm run test:db` 29/29;
+  `npm run test:engine` 221/221 (host suite skipped explicitly); `STEP_STEP_RUNNER_TESTS=1 npm run test:engine`
+  231/231; step-runner suite alone 14/14 in three consecutive runs; afterwards no step-runner process, unit or test
+  folder remained.
+- Not done / gaps: not wired into Gateway or RuntimeManager config; real providers and secrets untested by design;
+  workspace disk quota (XFS project quota helper), memory/pids exhaustion behaviour and recovery of scopes left by
+  a crashed gateway (startup sweep of `step-rt-*`) are open; peer-credential check depends on `/usr/bin/python3`;
+  all sandboxes share uid 995, so separation between workspaces rests on bwrap mount/PID/IPC/network namespaces.
+
+## #57 · optional authenticated Unix transport (not account-switch acceptance)
+
+- Added opt-in `processDriver({ transport: 'unix', isolated: true })` at the existing
+  RuntimeDriver seam; default fork transport, manager authority fences and production
+  Gateway refusal remain unchanged. The actual runtime/SQLite/engine endpoint now speaks
+  bounded Unix socket RPC, not the standalone synthetic protocol spike.
+- Per-start inherited stdin capability with mutual, role-separated HMAC challenges;
+  shared UID and socket permissions are explicitly not authentication. Only the
+  incarnation's socket directory is mounted. Authenticated disconnect runs engine cleanup;
+  stop waits for process exit and socket-directory cleanup.
+- Red-green covered the absent Unix endpoint, missing namespace socket bind, premature
+  stop cleanup and disconnect cleanup bypass. Added real engine + RuntimeManager
+  stop/resume/streaming/ownership tests, distinct same-UID forged-ready rejection, frame
+  bounds/UTF-8 and admission cleanup checks. See `runtime-unix-transport.md` for results.
+- **Still blocked:** this is not a step-runner launcher. Account-switched cgroup lifecycle,
+  descendant emptiness proof, root-owned runner-readable deployment, disk/inode helper
+  provisioning, resource exhaustion and crash recovery are separate unfinished acceptance
+  criteria. Never prefix this PID-signalling driver with sudo and call it isolated.
+- No privileged host changes, account switch, live provider, production data, deployment
+  or production activation. Browser acceptance remains blocked by missing Chromium
+  `libatk-1.0.so.0`; no privileged dependency installation was attempted.
+
+## #57 · disk/inode provisioning protocol integration (not installed)
+
+- เพิ่ม `server/src/workspace/disk-provisioning.ts` ที่ storage/runtime seams: รับเฉพาะ
+  workspace ID, ให้ authority จอง project ID ถาวรด้วย SQLite transaction ก่อน provisioning,
+  ผูก mount/owner/limits จากนโยบายที่ broker ควบคุม และตรวจ byte/inode quota ใหม่ก่อน start/resume
+  โดยคง synchronous spawn admission เดิม ปิด helper/sudoers proposal ที่มี path race และ caller-selected ID
+- Node 26.12.1: targeted 10/10, application 118/118, database 29/29, engine 227/227 ผ่าน;
+  `npm run check`, build, engine-pin และ diff whitespace ผ่าน มี 17 upstream engine diagnostics
+  และ Vite chunk warning เดิม Cloud Workspace Playwright 2 desktop ผ่าน/2 mobile skip เดิม
+  ใช้ scripted synthetic fixture ไม่ใช่ real runner/disk quota acceptance
+- ยังไม่ติดตั้งหรือแก้ quota/สิทธิ์ host และ production Gateway ยังปฏิเสธ startup ต้องมี protected
+  native broker ที่ยึด mount/directory descriptors, ทะเบียนจอง ID ที่ป้องกันการแก้, authenticated transport
+  และ broker-owned creation/publication ก่อนให้เขียนจริง `RuntimeManager.create` เดิมยังไม่ใช่ boundary นี้
+  รายละเอียด prerequisites/blocker/actual exhaustion-and-recovery gate อยู่ใน
+  [workspace-disk-provisioning.md](workspace-disk-provisioning.md) ไม่อ้างว่าทดสอบ XFS enforcement แล้ว
+
+## #57 · opt-in bounded private tmpfs (integration port)
+
+- Port เฉพาะ `tmpfsBytes` validation, Bubblewrap `--size … --tmpfs /tmp`, opt-in
+  capability drop และ targeted tests จาก followup ที่อ่านอย่างเดียว คง lifecycle,
+  start/stop admission, stop timeout และ confirmed cleanup ของ integration เดิม
+  ไม่เปิดจาก environment หรือ production Gateway และไม่ใช่ Workspace disk quota
+- Red-green: validation/arguments ล้มเหลวก่อนแก้และผ่านหลังแก้; targeted tmpfs ผ่าน 3/4
+  อีก 1 isolation test ล้มเหลวเพราะ sandbox ไม่อนุญาต user namespace ไม่ skip หรือถือว่าผ่าน
+  ผล ENOSPC จริง/ลบแล้วเขียนใหม่บน host นอก sandbox เป็นผลที่ผู้ใช้รายงาน ไม่ใช่ผลรันซ้ำที่นี่
+  และไม่ได้พิสูจน์ Workspace quota หรือ production isolation
+- Nearby startup timeout/cleanup/stop admission ผ่าน 19 tests; `npm run check` ผ่าน frontend
+  tsc แต่ server checker ติด spawnSync EPERM (Node 22.22.1; repo ต้องการ >=24)
+  ไม่รันซ้ำหรือ bypass combined prettier+check ที่เคยถูก lifecycle scan guard ปฏิเสธ
+  ไม่รับรอง readiness; full required checks และ real-account/deployment acceptance ยังไม่ครบ
+  ไม่มี production, secrets, GitHub, การเขียน worktree อื่น, commit หรือ push
+
+## #58 · Gateway invitation management (partial)
+
+- Admin invitation expiry review: เพิ่ม synchronous credential validity check ภายใน transaction
+  `BEGIN IMMEDIATE` ของ `InvitationStore.change` หลังได้ writer lock ก่อนตรวจ admin/live invitation
+  และ mutation; body/base-file reads รอให้จบนอก transaction ไม่ซ้อน dispatch transaction และไม่ถือ lock
+  ข้าม await คง deny/allow และ authorization เดิม ตรวจ expiry จาก signed claims ด้วย floor seconds
+  และ inclusive skew 60 วินาที การเปลี่ยน operator-file ยังไม่ atomic: ใช้ snapshot ที่อ่านก่อน lock
+  การแก้ไฟล์ภายนอก SQLite อาจเกิดหลังอ่าน snapshot; ต้องใช้ cooperating writers กับ SQLite เดียวกัน
+- Red-first regression ใช้ synthetic RS256 token และ controlled clock: ก่อนแก้ 4 expired cases คืน 401
+  แต่เปลี่ยน invitation แล้ว หลังแก้ 8 cases ผ่าน ทั้ง grant/revoke, body/base read และ skew boundary
+  เพิ่ม writer-lock/committed actor revocation/authorization/rollback-release checks รวม targeted auth
+  14 tests ผ่าน Node 24.22.2; direct database isolation 29 ผ่าน และ build ผ่าน ไม่มี server type diagnostic
+  (มี 17 diagnostics เดิมใน pinned Harness) Required npm check/engine-pin ติด subprocess EPERM;
+  npm unit/db/engine ติด tsx IPC EPERM; direct combined unit/engine abort ใน Node callback assertion
+  formatting ผ่าน; workspace-runtime isolation ล้มเหลว 4 tests จาก sandbox namespace ไม่ถือว่าผ่าน
+  Playwright cloud-workspace เริ่ม configured web server ไม่สำเร็จ ยังไม่ประกาศพร้อมใช้งาน
+  เก็บ uncommitted work เดิมทั้งหมด ไม่มี production, secrets, GitHub, worktree อื่น, commit หรือ push
+
+- Startup error review: คง admission error object เดิมหลังยืนยัน cleanup สำเร็จ ทั้ง spawn และ connect;
+  token หมดอายุ/ถูกถอนสิทธิ์คืน UNAUTHENTICATED และ HTTP 401 แทน RUNTIME_START_FAILED
+  process-driver คืน cause เดิมหลังยืนยัน child exit ส่วน cleanup ที่ยังไม่ยืนยันยังใช้ error แบบ sanitized
+  และ diagnostic RUNTIME_START_CLEANUP_FAILED พร้อมเก็บ handle/capacity ตามเดิม ไม่เปิดสิทธิ์หรือ retry connect
+- Deterministic regressions ล้มเหลวก่อนแก้และผ่านหลังแก้: real SQLite deferred COMMIT ยืนยัน object เดิม
+  ผ่าน direct driver, manager → process-driver และ connect/shared waiter พร้อม rollback/confirmed exit;
+  ระหว่างรอ cleanup ยังปฏิเสธ runtime ใหม่ด้วย capacity และเมื่อ cleanup ล้มเหลวยังไม่เปิด capacity
+  expiry มี/ไม่มี invitation store คืน 401 และ revocation ไม่ส่ง credential, authorized waiter ยังตรวจสิทธิ์ตนเอง
+- Node 24.22.2: targeted startup/cleanup/stop/publication ผ่าน 46 tests, auth/dispatch ที่เกี่ยวข้องผ่าน 16,
+  direct database isolation ผ่าน 29; build และ repository formatting ผ่าน Direct server types มีเพียง
+  17 diagnostics เดิมใน pinned Harness ไม่มี server diagnostic npm check/engine-pin ติด subprocess EPERM;
+  npm unit/db/engine ติด tsx IPC EPERM, direct unit abort ใน Node async callback assertion;
+  runtime suite ผ่าน 13 แต่ isolation ล้มเหลว 4 เพราะ Bubblewrap สร้าง namespace ไม่ได้ ไม่ถือว่าผ่าน
+  Playwright cloud-workspace เริ่ม configured web server ไม่สำเร็จ ยังไม่รับรองพร้อมใช้งานหรือ deployment
+  เก็บงานเดิมทั้งหมด ไม่ใช้ production, real accounts, secrets, GitHub, worktree อื่น, commit หรือ push
+
+- Independent review follow-up: คง runtime error object เดิมเมื่อ completion metadata ล้มเหลวด้วย;
+  secondary failure ส่ง diagnostic แบบไม่ใส่ข้อมูล private ส่วน bookkeeping failure หลัง runtime สำเร็จ
+  ยังส่ง error ให้ caller ไม่แปลงเป็น success เมื่อ admission COMMIT ล้มเหลวหลัง enqueue จะส่ง error
+  ทันที แต่เก็บ busy/active-call จนทุก Promise ที่ส่งแล้ว settle; cancel acknowledgement ติดตามด้วย
+  RunService แสดง admission code ระหว่างยัง running และเก็บ session reservation จน settlement
+  จึงปฏิเสธ successor ระหว่างงานเดิม และอนุญาต successor หลังจบ โดยไม่ retry งานที่อาจมีผลแล้ว
+- Deterministic checks ใช้ real deferred SQLite COMMIT failure: dispatch 11/11 ผ่าน รวม successor
+  ผ่าน RunService → manager → runtime และ original runtime vs bookkeeping error; related manager
+  31/31 และ database isolation 29/29 ผ่านด้วย Node 24.22.2, build/format ผ่าน direct server types
+  มีเฉพาะ pinned-Harness diagnostics เดิม npm check/engine-pin ติด subprocess EPERM; npm unit/db/engine
+  ติด tsx IPC EPERM, direct unit abort ใน Node async callback assertion; Playwright เริ่ม web server ไม่สำเร็จ
+  workspace-runtime isolation ยังล้มเหลวจาก Bubblewrap namespace ไม่ถือว่าผ่านหรือพร้อมใช้งาน
+- หาก runtime ไม่ settle จะเก็บ reservation ต่อไปโดยไม่รอใน admission-error response; stop/shutdown
+  ยังเป็นทาง cleanup ที่มีอยู่ ไม่มี timeout ที่สรุปผิดว่าผลข้างเคียงถูกยกเลิก งานอาจสร้างคำตอบแล้วแม้ admission
+  ล้มเหลว ไม่มี automatic replay และไม่อ้างว่า rollback SQLite ย้อนผล IPC ได้ เก็บ uncommitted work เดิม
+  ไม่ใช้ production, remote, secrets, worktree อื่น, commit หรือ push
+
+- แก้ unhandled rejection หลัง enqueue `messages`, `newConversation`, `ask` และ `cancel` เมื่อ
+  admission COMMIT ล้มเหลว โดยติด handler ภายใน synchronous send ก่อนกลับเข้า fence และคืน Promise
+  เดิมเพื่อคง runtime error; ใช้ helper เดียวกับ connect ตรวจ process-driver start/stop แล้วไม่มี Promise
+  enqueue ที่ขาด handler แบบเดียวกัน เก็บ tests และ uncommitted work เดิมทั้งหมด
+- Regression ใหม่ 8 cases ใช้ SQLite deferred foreign key ให้ COMMIT ล้มเหลวจริงหลัง enqueue แล้วค่อย
+  reject runtime หลัง admission คลายออก ยืนยัน error object เดิม, rollback, enqueue ครั้งเดียว, runtime
+  ยังทำงานและ busy กลับเป็นศูนย์ รวม runtime rejection เมื่อ COMMIT สำเร็จ ก่อนแก้พบ unhandled rejection
+  ครบทั้งสี่ dispatch paths; หลังแก้ผ่านทั้ง 8 cases ด้วย Node 24.22.2 และ targeted เดิมอีก 48 tests ผ่าน
+  แบบแยกไฟล์ Cross-process start ติด localhost EPERM; stop reproduction และ combined run abort ภายใน
+  Node async callback assertion ไม่ถือว่าผ่าน `npm run check` ติด spawnSync EPERM; direct server types
+  มีเพียง 17 diagnostics เดิมใน pinned Harness ไม่มี server diagnostic และ repository formatting ผ่าน
+  ยังไม่รับรองพร้อมใช้งาน ไม่ทดสอบ real accounts/deployment และไม่ใช้ production, secrets, GitHub,
+  worktree อื่น, commit หรือ push
+
+- แก้ผล independent review ของ shared start: เมื่อ token ผู้เริ่มหมดอายุก่อน enqueue `connect`
+  และยืนยันว่า process ถูกเก็บกวาดแล้ว จะคืน reservation ให้ waiter ตรวจสิทธิ์ของตนเองและเริ่มใหม่
+  waiter ที่หมดอายุยังถูกปฏิเสธ; cleanup ที่ล้มเหลวยังเก็บ handle, capacity และ diagnostic เดิม
+  ไม่ retry อัตโนมัติเมื่อส่ง connect แล้ว หรือเมื่อ connect reject/timeout
+- ติด rejection handler ของ connect Promise ภายใน synchronous send ก่อน admission COMMIT กลับมา
+  เพื่อไม่ให้ rejection ภายหลังกลายเป็น unhandled เมื่อ COMMIT ล้มเหลว; Promise เดิมยังส่ง connect error
+  ตามปกติ deterministic tests ทำให้ทั้งสอง bug ล้มเหลวก่อนแก้ รวม real SQLite deferred foreign-key
+  constraint ที่ล้มเหลวตอน COMMIT หลัง enqueue และยืนยัน rollback, cleanup และไม่ retry shared waiter
+- ตรวจด้วย Node 24.22.2: targeted auth/start/connect/cleanup/publication/stop ผ่าน 48 tests (รวม regression
+  ใหม่ 7 tests), direct database isolation ผ่าน 29 tests, build และ formatting ผ่าน; direct server types
+  มีเพียง 17 diagnostics เดิมใน pinned Harness ตาม checker policy ไม่มี server diagnostic
+  `npm run check` และ engine-pin ติด subprocess EPERM; npm unit/db/engine ติด tsx IPC EPERM
+  direct unit abort ที่ Node async callback assertion; ลอง engine ครบ 23 files แยกกัน ผ่าน 12 files
+  ที่เหลือมี subprocess contention failure, localhost EPERM และ Node abort; isolation 4 tests ใน
+  workspace-runtime ล้มเหลวเพราะ Bubblewrap สร้าง namespace ไม่ได้ ไม่ข้ามหรือถือว่าผ่าน
+  Playwright cloud-workspace เริ่ม configured web server ไม่สำเร็จ จึงยังไม่รับรองพร้อมใช้งาน
+  ไม่ได้ทดสอบ real accounts/deployment; เก็บ uncommitted work เดิม ไม่มี GitHub, production, secrets,
+  การเขียน worktree อื่น, commit หรือ push
+
+- แก้ช่องว่างส่ง provider credential หลังรอ grant: deterministic regression ยืนยันว่าเดิมส่ง `connect`
+  หลังถอน invitation แล้วหนึ่งครั้ง; ขณะนี้ครอบ synchronous `RuntimeHandle.call(connect)` ด้วย admission
+  ของผู้เริ่ม runtime และใช้ cleanup เดิมเมื่อถูกปฏิเสธ รวมถึงเก็บ handle/capacity หาก cleanup ยังไม่ยืนยัน
+  การรอ grant และ connect response อยู่นอก SQLite transaction; ไม่เปลี่ยนอำนาจ invitation ข้าม process
+- Google verifier ส่งเฉพาะ expiry จาก claims ที่ตรวจ signature แล้วให้ synchronous admission ทุกจุดของ
+  Gateway ตรวจอีกครั้งภายใน fence (หรือโดยตรงเมื่อไม่มี invitation store) ใช้ `floor(now/1000)` และ
+  skew 60 วินาทีตาม verifier เดิม ทดสอบขอบเขตวินาทีและหมดอายุระหว่างรอ grant ทั้งมี/ไม่มี store
+  ข้อนี้ปรับข้อจำกัด token expiry ที่บันทึกไว้ก่อนหน้า; ไม่ทำให้ operator-file revocation เป็น atomic
+- ตรวจด้วย Node 24.22.2: targeted auth/start/connect/cleanup/publication/stop ผ่าน 41 tests; database
+  isolation ผ่าน 29 tests โดยรันตรง; build, frontend types และ formatting ผ่าน ส่วน server types มีเพียง
+  17 diagnostics ใน pinned Harness ที่ checker policy เดิมแยกไว้ ไม่มี server diagnostic ใหม่
+  `npm run check`, npm unit/database/engine wrappers และ engine-pin ยังติด subprocess/tsx IPC EPERM
+  direct unit/engine รวม abort ที่ Node async callback assertion จึงลอง engine ครบทั้ง 22 files แยกกัน:
+  11 files ผ่าน; ที่เหลือมี localhost EPERM, subprocess failure, Node abort และ 4 isolation tests ล้มเหลว
+  เพราะ Bubblewrap สร้าง namespace ไม่ได้ ไม่ข้ามหรือถือว่า isolation ผ่าน Cloud Playwright เริ่ม web server
+  ไม่สำเร็จ จึงยังไม่พร้อมรับรอง ไม่มี production/real-account acceptance และไม่ใช้ secrets, GitHub,
+  เขียน worktree อื่น, commit หรือ push; เก็บงานค้างเดิมทั้งหมดไว้
+
+- Start-fence review follow-up: deterministic regressions first reproduced a messages enqueue after revocation
+  following the awaited start, and a metadata rename after revocation during asynchronous staging. Messages now
+  fences the synchronous RuntimeHandle.call enqueue with each caller's authority; the contract requires synchronous
+  enqueue. Metadata stages outside the lock and publishes by synchronous rename inside admission, updating the
+  in-memory activity time only on publication. Tests cover both cold and already-running starts, temporary-file
+  cleanup, independent caller admission and retaining the admitted runtime. Completion metadata is also fenced;
+  a denied refresh is skipped so an already admitted run retains its result/error and is not cancelled by revocation.
+- Follow-up verification with Node 24.22.2: 32 targeted start/stop/cleanup/publication tests and 29 direct database
+  isolation tests passed, as did build, formatting and frontend types. Direct server types report only the existing
+  17 pinned-engine diagnostics excluded by the checker policy. `npm run check` cannot spawn its server checker
+  (EPERM); unit/database/engine npm wrappers cannot open tsx IPC, and engine-pin checking hits subprocess EPERM.
+  A combined direct runtime/engine test run aborted on Node's async callback assertion; cloud Playwright could
+  not start its configured web server. Full checks remain required before readiness. Existing tests and uncommitted
+  start-fence work were preserved; no production, real accounts, GitHub operations, other worktrees or commits.
+  The same shared-SQLite/cooperating-writer and operator-file/token-expiry limitations below still apply.
+
+- Workspace start now fences the process driver's synchronous fork with invitation revocation, including
+  starts reached through conversation creation, message reads and both run paths. Authentication is checked
+  again after filesystem reads and shared-start waits; each waiter checks its own authority. A denied leader
+  before spawn releases its reservation so an authorized waiter can retry. Unsupported drivers fail closed;
+  readiness, provider setup and cleanup run outside the SQLite transaction. A post-spawn admission error
+  triggers confirmed cleanup, retaining an unconfirmed handle/capacity through the existing cleanup path.
+- Node 24.22.2 verification in this restricted worktree: a scratch baseline regression reproduced a revoked
+  HTTP request returning 401 while still spawning; the changed code passes that regression. Socket-free
+  start/cleanup regressions 17/17, related stop regressions 8/8 and direct database isolation tests 29/29 passed.
+  Direct frontend/server type checks (excluding 17 pinned-engine diagnostics under the existing policy),
+  formatting and production build passed. Required npm check/engine/unit/database wrappers and engine-pin
+  checking hit sandbox EPERM on subprocess/IPC operations; the original cross-process HTTP regression cannot
+  bind localhost. Cloud Playwright could not start its web server. An attempted combined unit run without
+  subprocess isolation aborted inside Node's async callback assertion. Full engine, unit, cross-process HTTP,
+  engine-pin and browser verification remain required; this change is not declared ready or committed.
+- Admission orders cooperating gateways/administrators only when they use the same correctly locking SQLite
+  database. Operator-file edits and token expiry cannot be atomic with this fence; admission before revocation
+  can finish afterwards and revocation does not terminate an already admitted runtime. Runtime deduplication
+  and capacity remain manager-local; no cross-gateway singleton, crash/orphan recovery or real-account,
+  sandboxed-process or deployment acceptance is established by these synthetic checks. No production or
+  external services were changed.
+
+## #58 · Quota publication deadline (local, ยังไม่ ready)
+
+- รักษา uncommitted changes บน branch เดิม ไม่มี commit/push/GitHub/production/secrets หรือ worktree อื่น
+- Node 24.22.2: deterministic clock/wait regression จำลอง process กลับมาหลัง deadline 5 วินาที
+  พร้อม policy ที่เพิ่ง publish ครอบคลุมทั้ง witness และ candidate → witness → policy;
+  ก่อนแก้ล้มทั้ง 2 ข้อ (ไม่ throw) หลังแก้ผ่าน ตรวจ deadline ก่อนยอมรับ policy
+  คง fail closed ไม่ recreate policy และตรวจ inode ว่า policy/witness เดิมยังอยู่ พร้อม retry ใหม่ได้
+- Direct provisioning/policy/crash suite ผ่าน 48/48; build และ formatting ผ่าน
+  direct server types ยังมี 17 Harness diagnostics เดิม ไม่มี server diagnostic
+- เรียก npm check/test/test:db/test:engine และ Playwright identity-trial แล้ว:
+  check ติด spawnSync EPERM, test runners ติด tsx IPC EPERM และ Playwright webServer เริ่มไม่ได้
+  direct runner ใช้ --test-isolation=none เพื่อหลบ host subprocess restriction ไม่ได้ปิด workspace isolation
+  ไม่เรียก check:engine-pin เพราะติดต่อ GitHub ตามข้อห้ามผู้ใช้ ไม่มี real-account/deployment acceptance
+
+## #58 · Empty-root candidate interleaving (local, ยังไม่ ready)
+
+- รักษา uncommitted changes บน branch เดิม ไม่มี commit/push/GitHub/production/secrets หรือ worktree อื่น
+- Node 24.22.2: deterministic subprocess barrier หยุดผู้ชนะหลังสร้าง `.quota-init-*`
+  ก่อน witness; control/output อยู่ข้างนอก data root และทั้งสอง initializer ไม่ใช้ onboarding flag
+  ทดสอบกับ snapshot ก่อนแก้แล้วล้ม 2 ข้อด้วย `QUOTA_ONBOARDING_REQUIRED`; หลังแก้ limit ตรงสำเร็จ
+  ทั้งคู่ และ limit ต่างปฏิเสธด้วย `QUOTA_POLICY_MISMATCH`
+- Root ที่มีเฉพาะ candidate directories รอ publication ไม่เกิน 5 วินาทีรวมช่วง witness → policy
+  ตรวจ witness ซ้ำหลัง directory scan เพื่อรองรับ publication/cleanup ระหว่าง scan
+  ไม่อ่าน candidate และไม่ใช้ชื่อ directory เป็นอำนาจ: forged/stale directory, file, symlink,
+  root ที่มีข้อมูลอื่น และ candidate ที่หายระหว่างรอไม่สร้าง policy; lost policy ยัง fail closed
+  README บันทึก timeout/error และ retry หลังผู้ชนะจบไว้แล้ว
+- Direct provisioning 38/38, policy 5/5, crash 3/3, database isolation 10/10 และ build ผ่าน
+  บน Node 24.22.2; direct server types มีเพียง 17 Harness diagnostics เดิม ไม่มี server diagnostic
+- เรียก npm check/test/test:db/test:engine และ Playwright identity-trial แล้ว: spawnSync/tsx IPC
+  ถูก EPERM และ Playwright webServer เริ่มไม่ได้; direct cross-process/race/regressions ถูก host abort
+  ไม่ถือว่าผ่านหรือข้าม isolation; ไม่รัน check:engine-pin เพราะติดต่อ GitHub ตามข้อห้ามผู้ใช้
+  ไม่มี real-account/deployment acceptance และยังไม่พร้อม ready
+
+## #58 · Concurrent provisioning link interleaving (local, ยังไม่ ready)
+
+- รักษา uncommitted changes บน branch เดิม ไม่มี commit/push/GitHub/production/secrets หรือ worktree อื่น
+- Node 24.22.2 (default Node 22.22.1 ไม่ถึง requirement): deterministic subprocess barrier
+  หยุดผู้ชนะหลัง witness link ก่อน policy link แล้วเริ่ม initializer อีกตัว; red ได้
+  `QUOTA_POLICY_REQUIRED` ทั้ง limit ตรงและต่างกัน แม้ผู้ชนะสำเร็จ
+- รวม bounded observation wait 5 วินาทีสำหรับทั้ง witness ที่เห็นตอนเข้า init และ EEXIST
+  ตรวจ inode witness/paths ซ้ำ ไม่สร้าง policy จาก witness; ordinary startup ยัง fail closed ทันที
+  crash/established policy ที่หายยังปฏิเสธหลัง deadline ไม่มีการ repair/reset
+  README อธิบาย retry หลังผู้ชนะจบและ recovery เมื่อสูญหาย เพราะแยก slow/crash/deletion ไม่ได้
+- แยก stdout จาก warning stderr ใน concurrent provisioning และ crash subprocess tests
+- provisioning 31/31, policy 5/5 และ crash 3/3 ผ่าน; build ผ่าน บน Node 24.22.2
+  direct quota cross-process/race/regressions ถูก host abort ไม่ถือว่าผ่าน
+- เรียก npm check/test/test:db/test:engine และ Playwright identity-trial แล้ว:
+  spawnSync/tsx IPC EPERM และ webServer เริ่มไม่ได้; ไม่ skip isolation หรืออ้าง suite เต็มผ่าน
+  ไม่รัน check:engine-pin เพราะเรียก GitHub ซึ่งผู้ใช้ห้าม ไม่มี real-account/deployment acceptance
+
+## #58 · Quota onboarding review follow-up (local, ยังไม่ ready)
+
+- รักษางาน uncommitted ทั้งหมดบน branch เดิม ไม่มี commit/push/GitHub/production/secrets หรือ worktree อื่น
+- Node 24.22.2 red-first: subprocess exit ทันทีหลัง hard-link witness ของ legacy policy ที่ limit ไม่ตรง
+  ทำให้ startup ยอมรับ policy เดิม และ recursive mkdir สร้าง descendant ผ่าน symlink แม้ init ปฏิเสธ
+  ทั้งสอง regression ล้มก่อนแก้และผ่านหลังแก้
+- Legacy onboarding ตรวจ inode, table, row และ limit ภายใต้ SQLite write lock ก่อน publish witness
+  ด้วย hard link แบบไม่ทับของเดิม ไม่มี provisional witness และไม่ลบ witness ที่ reader อาจเห็นแล้ว
+  crash ก่อน link ยังไม่ให้อำนาจ; crash หลัง link ใช้ได้เฉพาะ policy ที่ผ่าน validation
+  ไม่พึ่ง rename หรือสมมติว่าไม่มี initializer พร้อมกัน
+- ตรวจ ancestor ที่มีอยู่ก่อนเขียน แล้วสร้าง directory ทีละระดับและตรวจซ้ำ ปฏิเสธ symlink โดยไม่สร้าง descendant
+  ยังไม่ fence hostile filesystem swaps ระหว่าง syscall หรือรับประกัน power-loss durability
+- Provisioning 29/29 ผ่าน รวม subprocess crash, reader ก่อน publication และ initializer พร้อมกัน
+  ของ root ใหม่/legacy ทั้ง limit ตรงและต่างกัน; build ผ่าน บน Node 24.22.2
+- npm check ติด spawnSync EPERM; npm test/test:db/test:engine ติด tsx IPC EPERM;
+  direct server types มีเฉพาะ 17 Harness diagnostics เดิม ไม่มี server diagnostic
+  Playwright identity-trial เริ่ม webServer ไม่ได้; ไม่เรียก check:engine-pin เพราะติดต่อ GitHub
+  ขัดขอบเขตผู้ใช้ ไม่มี real-account/deployment acceptance และยังไม่พร้อม ready
+- Direct database 29/29 ผ่าน; unit ที่ไม่ใช้ HTTP ผ่าน 111 ข้อ ส่วน gateway-host abort
+  เรียก engine ทุกไฟล์โดยตรงแล้ว: HTTP/child process บางไฟล์ abort หรือ listen EPERM;
+  isolation ยังล้ม 4 ข้อจาก host loopback/namespace ไม่ได้ skip/ปิด isolation
+  shutdown-cleanup ล้ม 1 ครั้งด้วย RUNTIME_MANAGER_SHUTTING_DOWN และ rerun ผ่าน 5/5 จึงบันทึกเป็น intermittent
+
+## #58 · Security follow-up: quota provisioning (local, ยังไม่ ready)
+
+- เก็บงาน uncommitted เดิมไว้บน branch เดิม ไม่มี commit/push/GitHub/production/secrets หรือ worktree อื่น
+- Node 24.22.2 red-first: regression ใหม่ล้ม 3 ข้อก่อนแก้ ได้แก่ init limit 1 → ลบ DB → init limit 9,
+  symlink policy ไปอีก root และ populated root ที่ไม่มีการยืนยัน onboarding
+- เพิ่ม `.workspace-quota-established` เป็น hard-link witness ก่อน publish policy: init และ ordinary startup
+  ปฏิเสธ policy ที่หาย รวม retry หลัง process ล้มระหว่าง witness กับ policy ไม่ใช้ witness ซ่อม DB อัตโนมัติ
+  populated/legacy root ต้องยืนยัน exact absolute root ผ่าน `--onboard-existing-root <absolute-root>`
+  และไม่สามารถ override witness เดิมได้; restore/destructive recovery เป็น operator workflow แยกใน README
+- ทุก policy boundary ตรวจ ancestor directory, policy, witness และ SQLite sidecars ปฏิเสธ symlink/unsafe types
+  ถือ O_NOFOLLOW descriptor และตรวจ inode ก่อน/หลัง SQLite open รวมก่อน publish; deterministic path-swap test ผ่าน
+  ไม่รับประกันป้องกัน privileged filesystem attacker, path race ทุก syscall หรือ power-loss durability
+- Crash-after-rename test provision ครั้งเดียวก่อน child เริ่ม แล้ว ordinary restart โดยไม่ provision
+  ยืนยัน Workspace เดิมยังนับ quota และ DB ที่ถูกลบทำให้ restart ล้ม; crash ระหว่าง initial transaction
+  ตรวจ ordinary startup ล้มโดยไม่เรียก provisioning เพื่อกลบ policy ที่หาย
+- ตรวจโดยตรง: provisioning 24/24, crash 3/3, quota policy 5/5; unit ที่ไม่ใช้ HTTP 113/113,
+  database 29/29, build และ formatting ผ่าน; server types มีเฉพาะ 17 Harness diagnostics เดิม ไม่มี server diagnostic
+- เรียก npm check/test/test:db/test:engine แล้ว: host ปฏิเสธ spawnSync/tsx IPC ด้วย EPERM
+  direct engine ทุกไฟล์ถูกรัน: บาง HTTP/child-process abort หรือ listen EPERM; isolation ยังล้ม 4 ข้อจาก
+  Bubblewrap namespace ใช้ไม่ได้ ไม่ skip/ปิด isolation; Playwright identity-trial เริ่ม webServer ไม่ได้
+  ไม่รัน check:engine-pin เพราะ wrapper เรียก GitHub ls-remote ซึ่งผู้ใช้ห้าม งานยังไม่พร้อม ready
+  ต้องยืนยัน suite เต็มบน host ที่รองรับ ไม่มี real-account/deployment acceptance
+
+## #58 · นโยบาย quota ร่วมของ Workspace (รอตรวจทาน)
+
+- Follow-up ของผล parent (122 tests, 9 failures): บน Node 24.22.2 ทำซ้ำได้ว่า fixture
+  `withGateway` และ restart test ยังไม่ได้ provision policy ก่อนสร้าง RuntimeManager
+  แก้ fixture ให้ provision ตาม quota ของแต่ละ test; restart provision ครั้งเดียวก่อน startup แรก
+  และ cleanup รองรับ startup ที่ล้มโดยไม่กลบ error เดิม ไม่เปลี่ยน production fail-closed policy
+- ตรวจ follow-up: policy/provisioning 12/12, unit ที่ไม่ใช้ HTTP 113/113, database 29/29,
+  build และ formatting ผ่าน; frontend types ผ่าน, server ไม่มี diagnostic นอก Harness (17 ข้อเดิม)
+  targeted HTTP หลังแก้ abort ใน Node callback scope; loopback probe ยืนยัน `listen EPERM`
+  รัน engine ทั้ง 23 ไฟล์แยกกันแล้ว แต่ HTTP/child-process บางไฟล์ abort หรือถูก host ขัดขวาง
+  isolation ยังล้ม 4 ข้อจาก loopback/namespace ที่ใช้ไม่ได้ ไม่ปิดหรือข้าม isolation tests
+  npm check ถูก spawnSync EPERM; npm test/test:db/test:engine ถูก tsx IPC EPERM;
+  Playwright cloud เริ่ม webServer ไม่ได้ ยังต้องยืนยัน gateway suite บน host ที่รองรับ
+  ไม่รัน engine-pin wrapper เพราะเรียก GitHub (`ls-remote`) ซึ่งอยู่นอกขอบเขตที่ผู้ใช้อนุญาต
+- แยก operator provisioning (`npm run workspace:quota:init -- <data-root> <limit>`) จาก startup
+  ของ Gateway/RuntimeManager; startup และ publication เปิด SQLite ด้วย `mode=rw` ที่ไม่สร้างไฟล์
+  การลบ policy ที่ใช้งานแล้วจึงไม่ทำให้เริ่มใหม่ด้วย limit เดิมหรือต่างกันได้ และ manager เดิมก็ publish ไม่ได้
+  policy เสีย/ไม่มี row ไม่ถูกซ่อมอัตโนมัติ คำสั่ง provisioning ไม่ทับ policy เดิมและตรวจ limit ที่ผู้ชนะกำหนดไว้
+- Provisioning ใช้ private candidate ที่ commit/close ก่อน hard link แบบไม่ทับไฟล์ เพื่อรองรับผู้ดูแลเริ่มพร้อมกัน
+  limit เดียวกันสำเร็จทั้งคู่; limit ต่างกันยอมรับเพียง policy เดียว อีกคำสั่งปฏิเสธ
+  invitation/owner fences เดิมยังอยู่ ไม่มี SQLite lock ข้าม await; fixture สังเคราะห์ provision อย่างชัดเจน
+  ดู workflow สำหรับ root ใหม่, migration ครั้งแรก, backup/recovery และการหยุด writer ใน `server/README.md`
+- Red-first บน Node 24.22.2 พบ startup สร้าง policy เองและไฟล์ที่ถูกลบยอมรับ limit ใหม่ก่อนแก้
+  หลังแก้ focused policy tests 12/12 ผ่าน รวม manager ที่มี Workspace แล้ว, corruption, missing row,
+  explicit init, mismatch และ barrier ระหว่าง OS processes ก่อน publish; CLI init/repeat/mismatch ตรวจแล้ว
+- Node 24.22.2: build ผ่าน; direct unit 113 ผ่าน (ไฟล์ gateway-host ถูก host ขัดขวาง), direct database 29/29 ผ่าน
+  direct frontend types ผ่าน และ server types ไม่มี diagnostic ของ server (มี 17 diagnostic ของ Harness
+  ที่ wrapper เดิมเว้นให้ Desktop CI); formatting ผ่าน การรัน npm check/test/test:db/test:engine ตามปกติ
+  ถูก `EPERM` ของ spawnSync/tsx IPC ขัดขวาง; direct HTTP tests พบ loopback listen `EPERM` และบาง process
+  abort ใน Node callback scope ไม่ถือว่าผ่าน Engine isolation tests ล้ม 4 ข้อเพราะ Bubblewrap เปิด namespace ไม่ได้
+  ไม่ข้าม/ปิด isolation tests; Playwright cloud เริ่ม webServer ไม่สำเร็จใน host นี้
+  engine-pin wrapper ถูก spawnSync `EPERM` ขัดขวาง ไม่ตรวจ remote GitHub ตามขอบเขตงานนี้
+- ยังไม่พร้อมเรียกว่า ready: ต้องรัน suite เต็มและ isolation/Playwright อีกครั้งบน host ที่รองรับ
+  ไม่มีการใช้บัญชีจริง, production acceptance, secrets, GitHub, push, deploy หรือ commit ในงานนี้
+  การซ่อม policy ต้องหยุด writer และกู้ backup ที่ตรวจสอบแล้ว ไม่ใส่ init ใน restart loop
+  operator file replacement ระหว่าง writer เปิด SQLite และ power-loss durability ของ filesystem ไม่ได้ถูก fence
+
+## #58 · Gateway invitation management (partial)
+
+- Workspace creation now checks the verified Google ID token's expiration synchronously inside the SQLite
+  invitation fence immediately before publication. The signed-token HTTP regression first reproduced a 401
+  with a published workspace, then verified denial and staging cleanup. This matches the existing verifier's
+  inclusive 60-second clock skew, not strict JWT expiry; time can advance between the check and rename.
+  Custom authenticators lack this synchronous expiry guarantee. Google token verification is local signature
+  and claim verification, not an external token-revocation check. Operator-file changes are not fenced.
+  Node 26.12.1: unit 117, database 29, engine 98, check, build and engine-pin passed; Playwright 86 passed,
+  two mobile cloud cases skipped. Real accounts and deployment were not tested.
+
+- Workspace creation prepares a private, non-listable staging directory and publishes it with a synchronous
+  rename inside the invitation SQLite fence. A synthetic HTTP regression reproduced a revoked request creating
+  a workspace before this change; tests also cover denial after preparation, cleanup, concurrent creations and
+  uncertain errors after publication. A creation published before revocation remains valid even if its response
+  fails. A crash can leave an invisible staging directory; no crash recovery has been added. This ordering
+  requires cooperating gateways sharing the same correctly locking SQLite database, and does not fence external
+  operator-file edits. The pre-existing workspace quota check is not atomic across concurrent creates.
+  Node 26.12.1: engine 96, unit 117, database 29, check, build and engine-pin passed; cloud Playwright desktop
+  2 passed and mobile 2 skipped. No real accounts or deployment were tested.
+
+- A runtime whose startup and cleanup both fail remains failed and reserves capacity until exit or a successful
+  stop/shutdown retry; owner diagnostics distinguish the cleanup failure without exposing provider errors. Synthetic
+  driver tests cover concurrent shutdown and retry; manager crashes and orphan cleanup across restarts remain open.
+  Node 26.12.1: engine 82, unit 117, database 29, check, build and engine-pin passed; Playwright 86 passed,
+  two skipped using scratch copies of missing Chromium libraries. No real accounts or deployment were tested.
+
+- Workspace stop now reauthenticates after pending starts and fences the process driver's synchronous
+  disconnect/signal with invitation revocation; the SQLite transaction ends before waiting for process exit.
+  Unsupported drivers fail closed for gateway stops; trusted idle/shutdown cleanup remains available. Concurrent
+  requests check authority separately. If a stop may have signalled before failing, its handle remains reserved
+  in failed state until exit or a successful cleanup retry; starts cannot reuse or replace it in the meantime. Ordering depends on all
+  administrators and gateways using the same correctly locking SQLite store. A stop admitted before revocation
+  may complete afterwards; operator-file changes cannot be made atomic with this SQLite fence.
+- Local Node 26 checks: engine 74/74, unit 117/117, database 29/29, build, check and engine-pin passed;
+  Playwright 86 passed and 2 mobile cloud cases were skipped. Chromium required local scratch copies of missing
+  system libraries. Real accounts and production deployment were not tested.
+
+- Added admin-only list, invite and revoke HTTP operations backed by durable SQLite denials under the
+  operator invite file allowlist. Domain validation, fixed operator-managed admin roles and owner-only Workspaces
+  prevent privilege escalation; revocation denies subsequent authentication. See `server/README.md`
+  for override precedence, failure behavior and operational constraints.
+- Synthetic HTTP and signed-token tests cover ordinary-user denial, domain/role validation, private
+  Workspace isolation, revocation of file-based invitations, reinvitation and reopening the store.
+- Still open: admin UI, email delivery, expiry, target-identifying audit, cancellation of existing runs
+  on revocation, real Google accounts, gateway process restart, and production acceptance.
+- Run cancellation now uses the same invitation SQLite fence at synchronous runtime IPC enqueue. A synthetic
+  HTTP test first reproduced cancellation after another process committed revocation, then passed with the fence.
+  A cancel enqueued before revocation may still take effect afterwards; revocation does not cancel running work.
+  This ordering requires cooperating processes sharing the same correctly locking invitation database.
+  Node 26.12.1 checks: engine 65/65, unit 117/117, database 29/29, check, build and engine-pin passed.
+  Cloud Playwright: two desktop tests could not launch without `libatk-1.0.so.0`; two mobile tests skipped.
+  Node reported a `module.register()` deprecation; the build reported a large-chunk warning.
+- Direct and implicit run-preparation conversation creation now use the invitation SQLite fence at the
+  synchronous runtime IPC enqueue. Two synthetic HTTP tests first reproduced a conversation created after
+  revocation during runtime startup, then passed with the fence. This ordering requires all gateway and admin
+  processes to share the same correctly locking database. An enqueue before revocation can still create a
+  conversation afterwards; runtime startup and workspace start remain unfenced (create and stop are fenced as described above).
+  Local checks: engine 64/64, unit 117/117, database 29/29, check, build and engine-pin passed using
+  Node 22.22.1 (below the project's >=24 requirement; SQLite emitted experimental warnings). Cloud Playwright
+  desktop could not launch without `libatk-1.0.so.0`; both mobile cases were skipped by the suite.
+- The operator file is authoritative even for previously managed grants; private SSE events and ordinary
+  responses reauthenticate before delivery. Idle streams are not proactively closed, and in-flight
+  side effects are not cancelled; authorization and writes cannot be atomic with external file edits.
+  HTTP handlers can mutate state before their final authentication check, including when an administrator
+  revokes during an awaited operation. Run preparation rechecks before subscription and conversation creation,
+  but revocation may still commit after a check and before other asynchronous side effects. Full prevention needs
+  a revocation-coordinated side-effect boundary for every mutation; synchronous delivery/ask fencing alone
+  does not provide that guarantee. Already-started operations and file-based changes remain separate risks.
+  Playwright cloud checks could not launch Chromium: host lacks `libatk-1.0.so.0`.
+
+## #57 · ตรวจขอบเขต process เพิ่มเติม (ยังไม่เสร็จ)
+
+### การสำรวจ systemd scope เพิ่มเติม (ยังไม่ได้เชื่อมกับ Workspace)
+
+- บนเครื่องพัฒนา `systemd-run --user --scope -p CPUQuota=50% -p MemoryMax=128M` แสดง
+  `cpu.max=50000 100000` และ `memory.max=134217728` จากภายใน scope; ค่านี้ไม่ยืนยัน host เป้าหมาย
+- ทดลอง `fork` ผ่าน systemd-run → Bubblewrap → Node ด้วย IPC fd เดิม: Node ส่งข้อความกลับได้;
+  เมื่อ kill process ที่ fork หลัง ready ไม่พบ process Node ของ probe อีกหลัง 700 ms การทดลองนี้ไม่ครอบคลุม
+  failure ระหว่างเริ่ม, ลูกหลานทุกแบบ, หรือการเก็บกวาด scope หลัง manager ล้ม
+- ตัวขัดขวางการเชื่อมจริง: `runtimeEnv` จงใจไม่ส่ง `XDG_RUNTIME_DIR` หรือ `DBUS_SESSION_BUS_ADDRESS`;
+  เมื่อใช้ environment แบบจำกัดนี้ systemd-run ล้มเหลว `Failed to connect to user scope bus` ก่อนเริ่ม Node
+  การเพิ่มสองตัวแปรอย่างเดียวไม่พิสูจน์ความปลอดภัย: ต้องจัดการการเข้าถึง bus เฉพาะ launcher ไม่เปิดให้
+  sandbox ควบคุม scope, ตรวจค่าที่บังคับใช้ก่อนให้ runtime ทำงาน, และพิสูจน์ cleanup เมื่อเริ่มไม่สำเร็จ
+  รวมถึง OOM/restart ผ่าน `processDriver.start` จริง ยังไม่ได้พิสูจน์เงื่อนไขเหล่านี้จึงไม่ได้เพิ่ม enforcement
+- IPC probe ใช้ Bubblewrap mount ทั้ง `/` แบบ read-only เพื่อสำรวจเท่านั้น ไม่ใช่ sandbox ของ Workspace
+  และไม่ใช่หลักฐานการแยกไฟล์หรือ network ของ host เป้าหมาย
+
+- ทดสอบ runtime จริง: เมื่อ mount ของ Bubblewrap ไม่มีอยู่ การเริ่มล้มเหลวและไม่มี runtime ทำงาน;
+  เมื่อแก้ mount แล้วเริ่ม sandbox เดิมได้อีกครั้ง เป็นการตรวจ isolation ไม่ใช่ quota
+- เครื่องพัฒนารัน transient user systemd scope โดยไม่ใช้สิทธิ์ root ได้: `CPUQuota=20%` ได้
+  `cpu.max=20000 100000` และ CPU throttled 22 ครั้งในงานประมาณ 2 วินาที; `MemoryMax=64M`,
+  `MemorySwapMax=0` ทำให้งานจัดสรร 128 MiB ถูกฆ่า (`oom_kill=1`, exit 137) แต่ scope ถูกยุติด้วย
+  จึงยังไม่ได้พิสูจน์การกู้คืน runtime หลัง OOM ทั้งนี้ยังไม่ได้เชื่อม scope กับ Workspace
+- Disk บนเครื่องพัฒนาเป็น ext4 โดย mount options ไม่แสดง project quota; ยังไม่ได้ตรวจ quota ของ
+  host เป้าหมาย ไม่ควรใช้การนับขนาด directory แทนการบังคับ quota เพราะมี race และ hard link/open file
+- ยังต้องออกแบบการเริ่ม process ภายใต้ cgroup ก่อนรันโค้ดที่ไม่น่าเชื่อถือ, ตรวจ limit ทุกตัวแบบ fail-closed,
+  จัดการ process ลูกและ cleanup หลัง crash, บังคับ disk quota รวมทุกข้อมูลที่เขียนได้ และทดสอบปฏิเสธ/กู้คืน
+  ด้วย backend จริงบน host เป้าหมาย; fake พิสูจน์เพียง control flow ไม่พิสูจน์ kernel enforcement
+- เพิ่ม test สังเคราะห์ว่า sandbox มองไม่เห็นและส่งสัญญาณไปยัง process บน host ไม่ได้;
+  เป็นการตรวจบนเครื่องพัฒนา ไม่ใช่การรับรอง host องค์กร
+- ยังไม่มี CPU, RAM หรือ disk quota ต่อ Workspace และยังไม่ได้ทดสอบการปฏิเสธ/กู้คืนเมื่อเกิน quota;
+  cgroup root ไม่เปิดให้ user เขียน แต่ user systemd transient scope ใช้ได้บนเครื่องนี้; ยังไม่ได้ตรวจ
+  host องค์กร ห้ามใช้ผลนี้รับรอง production
+
+## Cloud quota persistence (#58, partial)
+
+- Gateway daily run admissions now use a local SQLite counter, atomically reserved and retained across
+  gateway restarts. Reservations happen before runtime setup; failed preparation attempts to return the slot.
+  If release fails, the original preparation error is preserved and a metadata-only `quota.release` failure
+  audit is attempted; the durable counter remains authoritative, so an uncommitted release can consume a slot
+  through the UTC day. Audit writes are best-effort, not guaranteed alerts. A crash during preparation can also
+  consume a slot. Accepted runs count even if they fail; counters use UTC days.
+- Synthetic gated preparation tests cover revocation during subscription and conversation creation: a
+  conversation already being created can still be created, but later admission/dispatch is blocked when the
+  next check observes revocation. UTC-boundary cleanup and cross-process release are also tested; these do not
+  eliminate the check-to-side-effect races documented above. Release failures are injected before and after
+  a real SQLite update; this does not reproduce every SQLite I/O or locking failure.
+- Local verification: gateway/quota tests 29/29, engine tests 62/62, unit tests 117/117, database tests
+  29/29, type/format check, build and engine-pin check passed. Cloud Playwright desktop tests could not launch
+  because `libatk-1.0.so.0` is missing; the two mobile cases were skipped by the suite.
+- Synthetic tests exercise concurrent HTTP admission across a gateway object restart and independent OS
+  processes contending for the same counter. This is not yet the per-user monthly AI quota: administrator-
+  configurable limits, usage reporting, invitation UI, process-level gateway restart and production
+  acceptance remain outstanding. Existing invite-file revocation and owner-only Workspace access remain in place.
+- The active-run quota is not coordinated across gateway processes. Together with the invitation and
+  revocation limitations above and missing per-Workspace CPU, memory and disk enforcement, this remains
+  an incomplete non-production draft; the durable daily counter does not close these gaps.
+
 ## 2026-10-29 · ทดลอง runtime หลายผู้ใช้ (#48)
 
 - Gateway ตรวจและหยุด runtime ที่ว่างอัตโนมัติ และ resume จาก SQLite เดิมเมื่อมีคำขอใหม่; กันการหยุด
@@ -974,3 +2007,87 @@
   confirm generated Word files in the organization's editor; complete offsite backup/restore acceptance.
 - Automated capacity alarms/database-size admission, binary Drive export and automated Desktop
   personal-history migration remain follow-up work; native execution stays in Desktop.
+
+### Current-run result isolation: authority integration gap
+
+Synthetic snapshot tests cover mapping an early return that leaves a prior review and trace untouched. The real gateway tests cover a grounded answer, an ungrounded follow-up, provider failure, and cancellation after a partial response. They do **not** exercise an early authority denial: the workspace runtime uses `serverPolicy()` with the Desktop default authority checks disabled and offers no supported override. These tests do not establish production authority enforcement; integration coverage requires a separately supported policy path. No authority policy was changed.
+
+### Native quota broker service (per-user pools) — prepared, not installed
+
+Installable broker main + hardened system unit (`systemd-analyze security` 1.6 OK) +
+owner install/uninstall script with pinned SHA-256; per-user XFS project pools with
+broker-created workspace subdirectories and a usage report for 80/95 % warnings; TS
+socket client and `brokerQuotaBoundary`. Unprivileged tests only (fake adapter).
+Production gateway still refused. Remaining gates: `docs/native-quota-broker-service.md`.
+
+### Protected step-runner launcher (gate 5) — prepared, not installed
+
+Root-owned C launcher (`native/runner-launcher`) is the only program the new sudo rule
+(`launch v1 *`) lets the gateway run as step-runner: one fixed-format request, fd 1 verified
+as a genuine broker workspace (device, kernel path, root-owned `p<ID>` parent, XFS project +
+`PROJINHERIT`), exec of a compiled-in bwrap vector (`--unshare-user --disable-userns`, one
+`--bind-fd 1`, empty environment). Driver option `launcher: 'protected'`; owner installer with
+pinned SHA-256 and separate `--revoke-bwrap` / `--restore-bwrap`. Unprivileged tests only; host
+tests prepared and gated. Details and owner commands: `docs/step-runner-launcher.md`.
+Recovery review additionally fixed unsafe writable/symlinked installer destinations
+and validated every app bind source (not only the app root), with regressions
+observed failing first. Verified: native 263 checks + analyzer/ASan/UBSan, installer
+24 stub checks, protected driver 6 tests, check + npm 118 + DB 29 + engine 326.
+No root/sudo/install/host tests run; raw-bwrap remains the gated default. Residual
+privileged-update and revocation-through-spawn races are documented, not closed.
+
+### Incarnation-bound anchor stop — synthetic, not installed
+
+`native/systemd-create/stop.[ch]` stops exactly one anchored systemd-create
+incarnation: byte-exact create-journal binding, a separate single-use stop
+journal (`STOP` durable before any mutation), `Unit.Kill("all", SIGKILL)` then
+`Unit.Stop("fail")` on the InvocationID object path (a replacement incarnation
+cannot be addressed), exact `JobRemoved` correlation and readback; pending jobs
+are refused, never cancelled; success releases nothing. Fake-bus tests,
+analyzer, ASan/UBSan, mutation list and a read-only host probe; no real
+Kill/Stop was sent. Found: stopped units report `ControlGroup=` on systemd 259,
+so the observer cannot yet prove absence for a really stopped anchor. Details
+and remaining gates: `native/systemd-create/README-STOP.md`.
+
+### Observer bus readiness deadline — synthetic, not installed
+
+The read-only observer (`lso_bus_snapshot`) could block about 90 s in libsystemd
+authentication before its first call, despite the 2 s method timeout (found by
+independent review of the composed reset candidate). It now uses the same
+bounded readiness pattern as create/stop/reset: one 5 s deadline for the whole
+snapshot, nonblocking readiness before any call, every blocking call capped at
+the time left. Verified: launch-composition `clean all test analyze sanitize`,
+real-libsystemd stalled-socket regression (refused in 5.005 s, no method call
+sent), fixture readiness/flood/error cases, pin-check plus negative proof at
+`-g`/`-g0`, 17/17 new deletion mutations killed. Strict manager binding (D2)
+unchanged. Details: `native/launch-composition/SYSTEMD-OBSERVER.md`.
+
+### Observer deadline review gaps — synthetic, not installed
+
+Closed the five gaps left by independent review of `4550249` test-first; no
+production behaviour changed (`systemd-observer.c` untouched; D2, fixed bus
+address and uid 0 unchanged).
+
+- `test-systemd-bus` owns the monotonic clock and asserts every per-call budget
+  and readiness sleep against the true time left: jumps inside each call
+  (including the last), inside readiness, idle rounds, `sd_bus_get_timeout` /
+  `ppoll` faults, EINTR and clock failure at every read. Reviewer survivors
+  X1, X2b, X8, X4, X5, X6 and X14 are now killed (X14 is not equivalent: a
+  clock jump inside dispatch makes a stale sleep overrun the deadline).
+- Pin checks moved to `pin-scan.sh` (distinct refusal reasons) with
+  `pin-negative.sh` proving each arm alone through a fake-tool wrapper, LTO
+  (slim and fat), tool failure, the exact `#error`, the make `LSO_` tripwire
+  and `make pin-check`; `pin-check-phony` (in `make test`) proves both run with
+  same-named files present. Scratch requires `$TMPDIR`.
+- `test-reset-composition` links `--wrap=lso_bus_snapshot --wrap=lso_open` to
+  aborting wrappers (the dead `sd_bus_open_system` stub is gone); two mutants
+  that reach the production observer survived before and abort now.
+- `test-observer-deadline` plays the bus in-process: stalled auth (elapsed only;
+  no wire claim), unanswered Hello (2 s Hello budget), unanswered GetNameOwner
+  (exactly Hello + one GetNameOwner) and the production peer uid 0 (only Hello:
+  the peer check precedes every call, so the uid seam is now exercised).
+- Verified: launch-composition `clean all test analyze sanitize`,
+  `install-check` still refuses, `npm run check`, `make mutation` 167/167
+  killed (129 previous + 19 in `observer-deadline-mutations.json` OD18–OD36 +
+  19 in new `observer-pin-mutations.json` PO1–PO19), no SURVIVED, BUILD-FAIL or
+  BAD-PATTERN. Real bus not contacted; no root, install or host acceptance.

@@ -148,6 +148,13 @@ export function errorView(code: string): ErrorView {
       action: 'ปิดข้อความ',
       retry: false,
     },
+    STORAGE_FULL: {
+      title: 'พื้นที่เก็บงานเต็มแล้ว',
+      detail:
+        'ยังบันทึกงานใหม่ไม่ได้ ส่วนไฟล์และงานเดิมยังอยู่ครบ เปิดอ่าน ดาวน์โหลด และลบได้ตามปกติ ลบสิ่งที่ไม่ใช้หรือติดต่อผู้ดูแลเพื่อขอเพิ่มพื้นที่',
+      action: 'ปิดข้อความ',
+      retry: false,
+    },
     QUOTA_WORKSPACES: {
       title: 'สร้าง Workspace ครบจำนวนแล้ว',
       detail: 'ใช้ Workspace ที่มีอยู่ต่อ หรือติดต่อผู้ดูแลเพื่อเพิ่มจำนวน',

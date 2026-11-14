@@ -1,3 +1,4 @@
+import { provisionTestQuota } from './support/quota.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, writeFile, symlink } from 'node:fs/promises';
@@ -18,7 +19,12 @@ async function withManager(
   options: Partial<ConstructorParameters<typeof RuntimeManager>[0]> = {},
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-workspaces-'));
-  const manager = new RuntimeManager({ dataRoot, driver: processDriver(), ...options });
+  const manager = new RuntimeManager({
+    workspacesPerUser: 10,
+    dataRoot: provisionTestQuota(dataRoot, 10),
+    driver: processDriver(),
+    ...options,
+  });
   try {
     await fn(manager, dataRoot);
   } finally {
@@ -273,6 +279,33 @@ test('isolated runtime cannot read another workspace or connect to the host loop
   });
 });
 
+test('an isolated runtime cannot inspect or signal another host process', async () => {
+  await withManager(async (manager, root) => {
+    const w = await manager.create('alice', { name: 'A' });
+    const paths = workspacePaths(root, 'alice', w.id);
+    const victim = spawn('/bin/sleep', ['60']);
+    try {
+      assert.ok(victim.pid);
+      const script = `const fs=require('node:fs');let visible=fs.existsSync('/proc/${victim.pid}');let signaled=false;try{process.kill(${victim.pid},0);signaled=true}catch{};console.log(JSON.stringify({visible,signaled}))`;
+      const child = spawn('/usr/bin/bwrap', [...isolatedRuntimeArgs(paths), '-e', script], {
+        cwd: paths.filesDir,
+        env: runtimeEnv(paths),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let output = '',
+        error = '';
+      child.stdout.on('data', (chunk) => (output += chunk));
+      child.stderr.on('data', (chunk) => (error += chunk));
+      const status = await new Promise<number | null>((resolve) => child.on('exit', resolve));
+      assert.equal(status, 0, error);
+      assert.deepEqual(JSON.parse(output), { visible: false, signaled: false });
+      assert.equal(victim.exitCode, null);
+    } finally {
+      victim.kill();
+    }
+  });
+});
+
 test('an isolated runtime crash is reported and the next request resumes its conversation', async () => {
   let pid = 0;
   const sandbox = processDriver({ isolated: true });
@@ -301,6 +334,26 @@ test('an isolated runtime crash is reported and the next request resumes its con
     { driver, grant: () => ({ baseUrl: 'http://127.0.0.1:1/v1', model: 'synthetic' }) },
   );
 });
+
+test('an unavailable sandbox fails closed and a later isolated start can recover', async () => {
+  const sandbox = processDriver({ isolated: true });
+  let unavailable = true;
+  const driver: RuntimeDriver = {
+    start: (spec) =>
+      sandbox.start(unavailable ? { ...spec, dir: join(spec.dir, 'missing-sandbox-mount') } : spec),
+  };
+  await withManager(
+    async (manager) => {
+      const w = await manager.create('alice', { name: 'A' });
+      await assert.rejects(() => manager.start('alice', w.id), code('RUNTIME_START_FAILED'));
+      assert.equal((await manager.health('alice', w.id)).ok, false);
+      unavailable = false;
+      assert.equal((await manager.start('alice', w.id)).state, 'running');
+      assert.equal((await manager.health('alice', w.id)).ok, true);
+    },
+    { driver },
+  );
+});
 test('overlapping updates of one Workspace record do not fail each other', async () => {
   await withManager(async (manager, dataRoot) => {
     const w = await manager.create('alice', { name: 'พร้อมกัน' });
@@ -315,4 +368,170 @@ test('overlapping updates of one Workspace record do not fail each other', async
     await Promise.all(Array.from({ length: 25 }, () => saveRecord(dataRoot, { ...record })));
     assert.equal((await manager.get('alice', w.id)).name, 'พร้อมกัน');
   });
+});
+
+test('shutdown fences starts already waiting for workspace metadata', async () => {
+  const { driver, started } = fakeDriver();
+  await withManager(
+    async (manager) => {
+      const workspace = await manager.create('alice', { name: 'A' });
+      const starting = manager.start('alice', workspace.id);
+      const outcome = starting.then(
+        () => 'started',
+        () => 'rejected',
+      );
+      await manager.shutdown();
+      assert.equal(await outcome, 'rejected');
+      assert.deepEqual(started, []);
+      await assert.rejects(() => manager.start('alice', workspace.id));
+    },
+    { driver },
+  );
+});
+
+test('shutdown waits for every stop after a failure and retries retained handles', async () => {
+  let release!: () => void;
+  let began!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const entered = new Promise<void>((resolve) => (began = resolve));
+  let failures = 0;
+  let slowStopped = false;
+  const driver: RuntimeDriver = {
+    async start(spec) {
+      return {
+        health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
+        call: async () => ({}) as never,
+        onExit: () => {},
+        stop: async () => {
+          if (spec.workspaceId === failingId) {
+            if (++failures === 1) throw new Error('stop failed');
+          } else {
+            began();
+            await gate;
+            slowStopped = true;
+          }
+        },
+      };
+    },
+  };
+  let failingId = '';
+  await withManager(
+    async (manager) => {
+      const a = await manager.create('alice', { name: 'A' });
+      const b = await manager.create('alice', { name: 'B' });
+      failingId = a.id;
+      await manager.start('alice', a.id);
+      await manager.start('alice', b.id);
+      let settled = false;
+      const shutdown = manager.shutdown().then(
+        () => {
+          settled = true;
+          return undefined;
+        },
+        (error) => {
+          settled = true;
+          return error;
+        },
+      );
+      try {
+        await entered;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(settled, false);
+      } finally {
+        release();
+      }
+      const error = await shutdown;
+      assert.ok(error);
+      assert.equal(slowStopped, true);
+      assert.equal((await manager.get('alice', a.id)).state, 'failed');
+      await assert.rejects(() => manager.start('alice', a.id));
+      await manager.shutdown();
+      assert.equal(failures, 2);
+      assert.equal((await manager.get('alice', a.id)).state, 'stopped');
+    },
+    { driver },
+  );
+});
+
+test('shutdown waits for an in-flight runtime start and stops its handle', async () => {
+  let release!: () => void;
+  let began!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const entered = new Promise<void>((resolve) => (began = resolve));
+  let stopped = false;
+  const driver: RuntimeDriver = {
+    async start(spec) {
+      began();
+      await gate;
+      return {
+        health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
+        call: async () => ({}) as never,
+        onExit: () => {},
+        stop: async () => {
+          stopped = true;
+        },
+      };
+    },
+  };
+  await withManager(
+    async (manager) => {
+      const workspace = await manager.create('alice', { name: 'A' });
+      const starting = manager.start('alice', workspace.id);
+      await entered;
+      let done = false;
+      const shutdown = manager.shutdown().then(() => {
+        done = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(done, false);
+      release();
+      await starting;
+      await shutdown;
+      assert.equal(stopped, true);
+      assert.equal((await manager.get('alice', workspace.id)).state, 'stopped');
+    },
+    { driver },
+  );
+});
+
+test('concurrent shutdown callers share failure and do not implicitly retry', async () => {
+  let release!: () => void;
+  let began!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const entered = new Promise<void>((resolve) => (began = resolve));
+  let attempts = 0;
+  const driver: RuntimeDriver = {
+    async start(spec) {
+      return {
+        health: async () => ({ ok: true, workspaceId: spec.workspaceId }),
+        call: async () => ({}) as never,
+        onExit: () => {},
+        stop: async () => {
+          if (++attempts === 1) {
+            began();
+            await gate;
+            throw new Error('failed');
+          }
+        },
+      };
+    },
+  };
+  await withManager(
+    async (manager) => {
+      const w = await manager.create('alice', { name: 'A' });
+      await manager.start('alice', w.id);
+      const first = manager.shutdown();
+      const firstResult = Promise.allSettled([first]);
+      await entered;
+      const second = manager.shutdown();
+      const secondResult = Promise.allSettled([second]);
+      release();
+      assert.equal((await firstResult)[0].status, 'rejected');
+      assert.equal((await secondResult)[0].status, 'rejected');
+      assert.equal(attempts, 1);
+      await manager.shutdown();
+      assert.equal(attempts, 2);
+    },
+    { driver },
+  );
 });

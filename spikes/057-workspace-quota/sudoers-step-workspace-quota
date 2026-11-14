@@ -1,0 +1,3 @@
+# RETIRED. No privilege grant. Do not install.
+# The old shell helper has path check/use races and caller-selected project IDs.
+# A protected broker and exclusive allocation authority are required instead.

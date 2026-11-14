@@ -1,8 +1,9 @@
 // Entry of one Workspace runtime process (process driver). It opens the pinned Desktop engine headless on this
 // Workspace's own <dir>/workspace.sqlite (ADR 0001 phase 2) and answers the Manager over its private channel.
 // The provider token arrives by `connect` and stays in this process's memory only.
-import { access, constants, rename, writeFile } from 'node:fs/promises';
+import { access, chmod, constants, rename, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { CompatibleAdapter } from '../../../harness/desktop/electron/providers.ts';
@@ -17,15 +18,51 @@ import {
   type ConversationSummary,
   type RuntimeEvent,
 } from './contract.ts';
+import { currentRunResult } from './current-run-result.ts';
 import type { RuntimeReply, RuntimeRequest } from './process-driver.ts';
+import { runtimeUnixChannel } from './unix-channel.ts';
 import { CONVERSATION_INDEX } from './storage.ts';
+import { DEFAULT_MAX_FRAME_BYTES, encodeFrame, frameReader } from './frames.ts';
 
 // All new runtime files, including SQLite sidecars, are private to the service account.
 process.umask(0o077);
 const workspaceId = process.env.STEP_WORKSPACE_ID;
 const dir = process.env.STEP_WORKSPACE_DIR;
 const started = Date.now();
-const send = process.send?.bind(process);
+// Two channels: Node fork IPC (process driver), or, where an account switch closes fd 3 (step-runner driver), the
+// per-sandbox Unix socket whose first frame must echo the launch nonce.
+const unix = process.env.STEP_RUNTIME_TRANSPORT === 'unix' ? await runtimeUnixChannel() : undefined;
+const socketPath = unix ? undefined : process.env.STEP_RUNTIME_SOCKET;
+// The launch nonce arrives on stdin, never in argv or the environment.
+const launchNonce = socketPath ? await readNonce() : undefined;
+if (socketPath && !launchNonce) process.exit(2);
+async function readNonce() {
+  let text = '';
+  for await (const chunk of process.stdin) {
+    text += chunk;
+    if (text.length > 200) break;
+  }
+  process.stdin.destroy();
+  return /^([0-9a-f]{64})\n$/.exec(text)?.[1];
+}
+let closeEngine = () => {};
+const channel = socketPath ? createConnection(socketPath) : undefined;
+if (channel) {
+  await new Promise<void>((done) => {
+    channel.once('connect', done);
+    channel.once('error', () => process.exit(2));
+  });
+  // The Manager going away is the same as a stop: no runtime outlives its supervisor.
+  channel.on('close', () => {
+    closeEngine();
+    process.exit(0);
+  });
+}
+const send = unix
+  ? unix.send
+  : channel
+    ? (message: RuntimeReply) => void channel.write(encodeFrame(message))
+    : process.send?.bind(process);
 
 if (!send || !workspaceId || !dir || process.cwd() !== join(dir, 'files')) process.exit(2);
 await access(dir, constants.R_OK | constants.W_OK);
@@ -82,7 +119,10 @@ const writeIndex = () => {
   const file = join(dir, CONVERSATION_INDEX);
   indexing = indexing
     .then(async () => {
-      await writeFile(file + '.tmp', JSON.stringify(listConversations()), { mode: 0o600 });
+      // 0640: in a broker workspace the setgid directory gives it the gateway group, so the gateway can list
+      // conversations of a stopped workspace; nobody else can traverse the broker root.
+      await writeFile(file + '.tmp', JSON.stringify(listConversations()), { mode: 0o640 });
+      await chmod(file + '.tmp', 0o640); // independent of the sandbox umask
       await rename(file + '.tmp', file);
     })
     .catch(() => {});
@@ -118,20 +158,13 @@ const methods: Record<string, (params: unknown) => unknown> = {
     const { text, sessionId } = AskInput.parse(params);
     const id = sessionId ?? engine.store.create('central', 'cc').id;
     if (!engine.store.get('session', id)) throw new Error('CONVERSATION_NOT_FOUND');
+    const before = engine.store.session(id);
     try {
       await engine.work.run(id, text, '', true, undefined, 'chat');
     } finally {
       await writeIndex();
     }
-    const done = engine.store.session(id);
-    const answer = done.messages.filter((m) => m.role === 'assistant').at(-1)?.text;
-    return {
-      sessionId: id,
-      status: done.status,
-      ...(answer ? { answer } : {}),
-      ...(done.status === 'review' ? {} : { code: done.runs?.at(-1)?.code || 'RUN_FAILED' }),
-      sources: done.loadedContext ?? [],
-    };
+    return currentRunResult(id, before, engine.store.session(id));
   },
   async newConversation() {
     const sessionId = engine.store.create('central', 'cc').id;
@@ -155,7 +188,7 @@ const methods: Record<string, (params: unknown) => unknown> = {
   conversations: listConversations,
 };
 
-process.on('message', async ({ nonce, method, params }: RuntimeRequest) => {
+const answer = async ({ nonce, method, params }: RuntimeRequest) => {
   const handler = Object.hasOwn(methods, method) ? methods[method] : undefined;
   try {
     if (!handler) throw new Error('UNKNOWN_METHOD');
@@ -165,16 +198,44 @@ process.on('message', async ({ nonce, method, params }: RuntimeRequest) => {
     const code =
       error instanceof z.ZodError
         ? 'INVALID_INPUT'
-        : error instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.message)
-          ? error.message
-          : 'RUNTIME_CALL_FAILED';
-    reply({ type: 'result', nonce, ok: false, code });
+        : error instanceof Error && error.message === 'RUNTIME_FRAME_TOO_LARGE'
+          ? 'RUNTIME_RESULT_TOO_LARGE'
+          : error instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.message)
+            ? error.message
+            : 'RUNTIME_CALL_FAILED';
+    try {
+      reply({ type: 'result', nonce, ok: false, code });
+    } catch {
+      // Disconnect/queue exhaustion may race the handler. There is no channel left to report on;
+      // its existing disconnect lifecycle closes the engine. Never reject the async listener.
+    }
   }
-});
-// The Manager going away is the same as a stop: no runtime outlives its supervisor.
-process.on('disconnect', () => {
-  engine.close();
-  process.exit(0);
-});
+};
+closeEngine = () => engine.close();
+if (unix) {
+  unix.onMessage(answer);
+  process.on('disconnect', () => {
+    engine.close();
+    process.exit(0);
+  });
+} else if (channel) {
+  const push = frameReader(
+    DEFAULT_MAX_FRAME_BYTES,
+    (frame) => {
+      const request = frame as RuntimeRequest;
+      if (request?.type === 'call' && typeof request.nonce === 'number' && typeof request.method === 'string')
+        void answer(request);
+    },
+    () => channel.destroy(),
+  );
+  channel.on('data', (chunk: Buffer) => push(chunk));
+} else {
+  process.on('message', answer);
+  // The Manager going away is the same as a stop: no runtime outlives its supervisor.
+  process.on('disconnect', () => {
+    engine.close();
+    process.exit(0);
+  });
+}
 await writeIndex();
-reply({ type: 'ready' });
+reply(launchNonce ? { type: 'ready', launchNonce } : { type: 'ready' });
