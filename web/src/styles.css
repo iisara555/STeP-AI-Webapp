@@ -674,15 +674,8 @@ summary {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 .tools-group {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   margin: var(--space-3-5) var(--space-2-5) var(--space-1);
   font-size: var(--text-xs);
-  color: var(--muted);
-}
-.tools-toggle {
-  padding: var(--space-0-5) var(--space-1);
   color: var(--muted);
 }
 .tools-nav {
@@ -690,16 +683,14 @@ summary {
   flex-direction: column;
   gap: var(--space-0-5);
 }
-.tools-nav button,
-.settings-button {
+.tools-nav button {
   justify-content: flex-start;
   text-align: left;
   border: 0;
   color: var(--muted);
   padding: var(--space-1-5) var(--space-2-5);
 }
-.tools-nav button:hover:not(:disabled),
-.settings-button:hover:not(:disabled) {
+.tools-nav button:hover:not(:disabled) {
   color: var(--text);
 }
 .tools-nav .nav-label {
@@ -722,30 +713,16 @@ summary {
   color: var(--accent-ink);
   background: var(--accent-soft);
 }
-.tools-nav.icons {
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: var(--space-1);
+/* Settings: a quiet gear at the end of the profile row. */
+.profile .settings-button {
+  flex-shrink: 0;
+  border: 0;
+  padding: var(--space-1-5);
+  color: var(--muted);
 }
-.tools-nav.icons button {
-  flex: 1 1 0;
-  justify-content: center;
-  padding: var(--space-2) 0;
-  min-width: 32px;
-}
-.tools-nav.icons .nav-label,
-.tools-nav.icons .count,
-.tools-nav.icons .beta {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-.settings-button {
-  margin-top: var(--space-1-5);
-  padding: var(--space-2) var(--space-2-5);
+.profile .settings-button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
 }
 .update-card {
   display: flex;
@@ -1140,17 +1117,11 @@ summary {
   padding: var(--space-6) var(--space-2) var(--space-6);
 }
 .welcome-intro {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-5);
-  margin-bottom: var(--space-4);
-}
-.welcome-heading {
-  min-width: 0;
+  text-align: center;
+  margin-bottom: var(--space-6);
 }
 .welcome .greet {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-2);
   color: var(--muted);
 }
 .welcome h1 {
@@ -1163,10 +1134,6 @@ summary {
 .welcome h1 em {
   font-style: normal;
   background: linear-gradient(transparent 62%, var(--accent-soft) 62%);
-}
-.welcome-illustration {
-  width: clamp(84px, 10vw, 140px);
-  flex-shrink: 0;
 }
 .suggestions-label {
   display: flex;
@@ -2516,9 +2483,6 @@ summary {
   }
   .brand {
     margin-bottom: var(--space-3-5);
-  }
-  .welcome-illustration {
-    width: 84px;
   }
 }
 @media (max-width: 1150px) {
