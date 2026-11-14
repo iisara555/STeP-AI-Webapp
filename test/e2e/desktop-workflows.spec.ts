@@ -190,7 +190,7 @@ test('Desktop reference is searchable and dark theme remains accessible after re
 });
 test('command search selects a page and desktop rail can collapse', async ({ page }, info) => {
   await page.goto('/?demo=1');
-  await expect(page.getByRole('heading', { name: /ให้ AI ร่างงานหนัก/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'เริ่มจากเรื่องไหนดี' })).toBeVisible();
   await page.keyboard.press('Control+k');
   await page.getByRole('dialog').getByRole('textbox', { name: 'คำค้น', exact: true }).fill('สื่อภายใน');
   await page.getByRole('dialog').getByRole('button', { name: 'สื่อภายใน', exact: true }).click();

@@ -29,7 +29,7 @@ async function mountAudit(
     return route.continue();
   });
   await page.goto('/?demo=1');
-  await expect(page.getByRole('heading', { name: /ให้ AI ร่างงานหนัก/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'เริ่มจากเรื่องไหนดี' })).toBeVisible();
   const modules = await page.evaluate(() => {
     const resources = performance.getEntriesByType('resource').map((entry) => entry.name);
     return {

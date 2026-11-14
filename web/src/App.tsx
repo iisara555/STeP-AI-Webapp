@@ -449,7 +449,6 @@ export function App() {
       <main className="login">
         <div className="login-card">
           <BrandSymbol />
-          <span className="brand-tagline">MAKE INNOVATION SIMPLE</span>
           <h1>
             พื้นที่ทำงานของคุณ
             <br />
@@ -529,7 +528,6 @@ export function App() {
       <main className="login login-wait">
         <div className="login-card">
           <BrandSymbol />
-          <span className="brand-tagline">MAKE INNOVATION SIMPLE</span>
           <h1>บัญชีนี้ยังไม่ได้รับเชิญ</h1>
           <p>{data?.user.email || 'ขอให้ผู้ดูแลเพิ่มบัญชี Google ของคุณในรายชื่อพนักงาน'}</p>
           {Boolean(error) && <ErrorNotice error={error} onDismiss={() => setError(null)} />}
@@ -747,7 +745,12 @@ export function App() {
           <footer className="statusbar" aria-label="สถานะ">
             <span className="status-item" role="status">
               <span className={'status-dot ' + (online ? 'ok' : 'off')} aria-hidden="true" />
-              {online ? 'พร้อมทำงาน' : 'ออฟไลน์ · เชื่อมต่ออินเทอร์เน็ตเพื่อเปิดข้อมูลและเริ่มงาน'}
+              {/* Online needs no words: the dot says it. Offline is the one state worth reading. */}
+              {online ? (
+                <span className="sr-only">เชื่อมต่อแล้ว</span>
+              ) : (
+                'ออฟไลน์ · เชื่อมต่ออินเทอร์เน็ตเพื่อเปิดข้อมูลและเริ่มงาน'
+              )}
             </span>
             {demo && <span className="badge demo">ตัวอย่าง · ไม่ใช่ข้อมูลจริง</span>}
             <span className="spacer" />

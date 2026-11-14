@@ -25,7 +25,7 @@ test('login clearly separates unconfigured access from the synthetic preview', a
 test('employee can create a private conversation, review consent and receive a result', async ({ page }) => {
   await page.goto('/?demo=1');
   // As on Desktop, typing on the home screen starts a private task; consent still comes before any AI call.
-  await expect(page.getByRole('heading', { name: /ให้ AI ร่างงานหนัก/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'เริ่มจากเรื่องไหนดี' })).toBeVisible();
   await page.getByRole('textbox', { name: 'ข้อความถึง AI' }).fill('ช่วยวางโครงร่างเอกสารตัวอย่าง');
   await page.getByRole('button', { name: 'ส่งข้อความ' }).click();
   const consent = page.getByRole('dialog');

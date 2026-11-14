@@ -1,0 +1,172 @@
+/*
+  Copied unchanged from STeP-AI-Harness desktop/src/theme.css so the web and Desktop apps share one palette and one
+  set of type, spacing and radius scales. Change it there first, then copy it here with
+  `node scripts/sync-theme.mjs <path to STeP-AI-Harness>`; test/theme-sync.test.ts keeps the two in step when the
+  harness submodule is checked out at a tag that has the scales.
+*/
+/*
+  STeP CI digital palette (skills/common/step-brand/references/ci-manual-digest.md, confirmed 2026-09-20):
+  STeP Yellow #FFC709 and STeP Dark #231F20. Every other value here is a layout choice derived for legibility,
+  not an additional brand colour.
+  --accent       STeP Yellow as a fill; always paired with --on-accent (STeP Dark), about 11:1 contrast.
+  --accent-ink   accent for text and icons; yellow text on white fails contrast, so light mode uses a deep gold.
+  --accent-soft  quiet yellow tint for highlights and selection.
+*/
+:root {
+  --surface: #fafaf8;
+  --paper: #fff;
+  --sidebar: #f7f6f3;
+  --hover: rgba(35, 31, 32, 0.05);
+  --text: #231f20;
+  --muted: #645e5f;
+  --accent: #ffc709;
+  --on-accent: #231f20;
+  --accent-ink: #7a5b00;
+  --accent-soft: #fff4cc;
+  --focus: #231f20;
+  --line: #e7e4de;
+  --line-strong: #cfcac2;
+  --selected: #efece5;
+  --selection: #ffe38a;
+  --scroll: #cfcac2;
+  --danger: #b3261e;
+  /* Task notification dots in the task list (src/task-alerts.ts). Not brand colours: status tones picked to sit with
+     STeP Yellow and STeP Dark on the warm surfaces, each at least 3:1 against the task list. Running uses STeP Yellow. */
+  --alert-needs-you: #c8372d;
+  --alert-running-ring: #7a5b00;
+  --alert-done: #2f8a5b;
+  --alert-stopped: #3f6fb5;
+  --on-danger: #fff;
+  --overlay: #0007;
+  --shadow-faint: #00000006;
+  --shadow-soft: #0001;
+  --shadow-card: #0002;
+  --shadow-popover: #0003;
+  --shadow-dialog: #0004;
+  --disabled-bg: #e7e4de;
+  --disabled-text: #645e5f;
+  --disabled-line: #cfcac2;
+  --syntax-keyword: #7c258f;
+  --syntax-string: #296731;
+  --syntax-number: #8b4b00;
+  --syntax-title: #2457a6;
+  --syntax-type: #765800;
+  --syntax-attribute: #b3261e;
+  --syntax-comment: #645e5f;
+  --diff-removed: #b3261e;
+  --diff-added: #286740;
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  --surface: #1b1819;
+  --paper: #231f20;
+  --sidebar: #161314;
+  --hover: rgba(244, 241, 234, 0.06);
+  --text: #f4f1ea;
+  --muted: #ada6a0;
+  --accent: #ffc709;
+  --on-accent: #231f20;
+  --accent-ink: #ffc709;
+  --accent-soft: #3a3219;
+  --focus: #ffc709;
+  --line: #37312f;
+  --line-strong: #4e4745;
+  --selected: #2e2927;
+  --selection: #6b5610;
+  --scroll: #4e4745;
+  --danger: #f2a197;
+  --alert-needs-you: #ff7a6b;
+  --alert-running-ring: #ffc709;
+  --alert-done: #5fc48a;
+  --alert-stopped: #7ea6ec;
+  --on-danger: #231f20;
+  --disabled-bg: #37312f;
+  --disabled-text: #ada6a0;
+  --disabled-line: #5c5452;
+  --syntax-keyword: #c678dd;
+  --syntax-string: #98c379;
+  --syntax-number: #d19a66;
+  --syntax-title: #61afef;
+  --syntax-type: #e5c07b;
+  --syntax-attribute: #e06c75;
+  --syntax-comment: #ada6a0;
+  --diff-removed: #f2a197;
+  --diff-added: #98c379;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='system'] {
+    --surface: #1b1819;
+    --paper: #231f20;
+    --sidebar: #161314;
+    --hover: rgba(244, 241, 234, 0.06);
+    --text: #f4f1ea;
+    --muted: #ada6a0;
+    --accent: #ffc709;
+    --on-accent: #231f20;
+    --accent-ink: #ffc709;
+    --accent-soft: #3a3219;
+    --focus: #ffc709;
+    --line: #37312f;
+    --line-strong: #4e4745;
+    --selected: #2e2927;
+    --selection: #6b5610;
+    --scroll: #4e4745;
+    --danger: #f2a197;
+    --alert-needs-you: #ff7a6b;
+    --alert-running-ring: #ffc709;
+    --alert-done: #5fc48a;
+    --alert-stopped: #7ea6ec;
+    --on-danger: #231f20;
+    --disabled-bg: #37312f;
+    --disabled-text: #ada6a0;
+    --disabled-line: #5c5452;
+    --syntax-keyword: #c678dd;
+    --syntax-string: #98c379;
+    --syntax-number: #d19a66;
+    --syntax-title: #61afef;
+    --syntax-type: #e5c07b;
+    --syntax-attribute: #e06c75;
+    --syntax-comment: #ada6a0;
+    --diff-removed: #f2a197;
+    --diff-added: #98c379;
+    color-scheme: dark;
+  }
+}
+
+/*
+  Scales shared by every screen. Thai needs room above and below the line, so nothing staff read is smaller than
+  --text-xs. Spacing is a 4px grid with half steps (2, 6, 10, 14px) for tight controls.
+*/
+:root {
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 28px;
+  --text-3xl: 34px;
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-2-5: 10px;
+  --space-3: 12px;
+  --space-3-5: 14px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-14: 56px;
+  --space-16: 64px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+}
