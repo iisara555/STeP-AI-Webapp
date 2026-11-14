@@ -28,7 +28,7 @@ async function mountDrafts(page: Page, initialRead: 'normal' | 'delayed' | 'deni
     return route.continue();
   });
   await page.goto('/?demo=1');
-  await expect(page.getByRole('heading', { name: /ให้ AI ร่างงานหนัก/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'เริ่มจากเรื่องไหนดี' })).toBeVisible();
   await page.evaluate(async (initialRead) => {
     const resources = performance.getEntriesByType('resource').map((entry) => entry.name);
     const reactUrl = resources.find((url) => url.includes('/react.js?'));
@@ -171,7 +171,7 @@ async function editor(page: Page) {
 
 async function select(page: Page, task: 'A' | 'B') {
   await page.evaluate((task) => (window as HarnessWindow).draftAsyncRegression.select(task), task);
-  await expect(page.locator('.topbar-heading strong')).toHaveText('SYNTHETIC TASK ' + task);
+  await expect(page.locator('.topbar-heading :is(strong, h1)')).toHaveText('SYNTHETIC TASK ' + task);
 }
 
 test('late saves keep the active task and its edits across switching and Chat remounting', async ({
@@ -187,7 +187,7 @@ test('late saves keep the active task and its edits across switching and Chat re
   await (await editor(page)).fill('Unsaved draft B');
   await page.getByRole('textbox', { name: 'ข้อความถึง AI', exact: true }).fill('Unsent request B');
   await page.evaluate(() => (window as HarnessWindow).draftAsyncRegression.resolveSave(0));
-  await expect(page.locator('.topbar-heading strong')).toHaveText('SYNTHETIC TASK B');
+  await expect(page.locator('.topbar-heading :is(strong, h1)')).toHaveText('SYNTHETIC TASK B');
   await expect(await editor(page)).toHaveValue('Unsaved draft B');
   await expect(page.getByRole('textbox', { name: 'ข้อความถึง AI', exact: true })).toHaveValue(
     'Unsent request B',
@@ -206,13 +206,13 @@ test('late saves keep the active task and its edits across switching and Chat re
     state.select('B');
     state.show(true);
   });
-  await expect(page.locator('.topbar-heading strong')).toHaveText('SYNTHETIC TASK B');
+  await expect(page.locator('.topbar-heading :is(strong, h1)')).toHaveText('SYNTHETIC TASK B');
   await expect(await editor(page)).toHaveValue('Unsaved draft B');
   await page
     .getByRole('textbox', { name: 'ข้อความถึง AI', exact: true })
     .fill('Unsent request after remount');
   await page.evaluate(() => (window as HarnessWindow).draftAsyncRegression.resolveSave(1));
-  await expect(page.locator('.topbar-heading strong')).toHaveText('SYNTHETIC TASK B');
+  await expect(page.locator('.topbar-heading :is(strong, h1)')).toHaveText('SYNTHETIC TASK B');
   await expect(await editor(page)).toHaveValue('Unsaved draft B');
   await expect(page.getByRole('textbox', { name: 'ข้อความถึง AI', exact: true })).toHaveValue(
     'Unsent request after remount',

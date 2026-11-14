@@ -2,10 +2,8 @@ import { lazy, Suspense, useEffect, useRef, useState, type Dispatch, type SetSta
 import { createPortal } from 'react-dom';
 import {
   ArrowUp,
-  Blocks,
   BookOpen,
   Brain,
-  Check,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -15,7 +13,6 @@ import {
   List,
   Plus,
   Save,
-  ShieldCheck,
   Sparkles,
   Square,
   Table,
@@ -424,7 +421,14 @@ export function Chat({
         <header className="topbar">
           <div className="topbar-title">
             <span className="topbar-heading">
-              <strong>{session?.title || (skill ? skill.title : 'เริ่มต้นงานที่อยากทำ')}</strong>
+              {/* With a conversation open the task title is the page's heading; the welcome screen has its own. */}
+              {messages.length ? (
+                <h1 className="topbar-name">
+                  {session?.title || (skill ? skill.title : 'เริ่มต้นงานที่อยากทำ')}
+                </h1>
+              ) : (
+                <strong>{session?.title || (skill ? skill.title : 'เริ่มต้นงานที่อยากทำ')}</strong>
+              )}
               {session && (
                 <button
                   className="icon-button"
@@ -490,13 +494,7 @@ export function Chat({
                 </div>
               </>
             )}
-            <small>
-              {session ? (
-                <Visibility shared={session.visibility === 'workspace'} />
-              ) : (
-                'จากคำขอ สู่ผลงานที่ใช้ต่อได้'
-              )}
-            </small>
+            <small>{session && <Visibility shared={session.visibility === 'workspace'} />}</small>
           </div>
           {session && !cloud && (
             <div className="topbar-actions">
@@ -513,11 +511,7 @@ export function Chat({
               <div className="welcome-intro">
                 <div className="welcome-heading">
                   <p className="greet">{greeting}</p>
-                  <h1>
-                    ให้ AI ร่างงานหนัก
-                    <br />
-                    <em>ส่วนคุณตัดสินเรื่องสำคัญ</em>
-                  </h1>
+                  <h1>เริ่มจากเรื่องไหนดี</h1>
                 </div>
                 <Art scene="chat" className="welcome-illustration" />
               </div>
@@ -558,24 +552,6 @@ export function Chat({
                   </button>
                 ))}
               </div>
-              <p className="welcome-lede">
-                ผู้ช่วยที่รู้จักงานของ STeP สรุปเอกสารยาว ร่างหนังสือ วางแผนโครงการ และตรวจความพร้อมก่อนส่ง
-                ทุกร่างผ่านตาคุณก่อนใช้จริง
-              </p>
-              <ul className="welcome-trust">
-                <li>
-                  <ShieldCheck size={14} />
-                  เห็นข้อมูลที่ AI จะอ่านก่อนยืนยันทุกครั้ง
-                </li>
-                <li>
-                  <Check size={14} />
-                  AI ร่าง คนตรวจและอนุมัติ
-                </li>
-                <li>
-                  <Blocks size={14} />
-                  รู้จักทีมและ Skill ของ STeP
-                </li>
-              </ul>
             </div>
           )}
           {messages.map((m) => (

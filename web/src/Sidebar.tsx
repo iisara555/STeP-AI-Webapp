@@ -140,7 +140,6 @@ export function Sidebar({
       <div className="brand">
         <div>
           <BrandSymbol />
-          <span className="brand-tagline">MAKE INNOVATION SIMPLE</span>
         </div>
         <button className="icon-button mobile-only" aria-label="ปิดเมนู" onClick={onCloseMobile}>
           <X size={18} />
