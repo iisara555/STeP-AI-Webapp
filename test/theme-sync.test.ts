@@ -24,9 +24,10 @@ test('the web theme carries the STeP palette and the shared type, spacing and ra
 test('the web theme matches the harness Desktop theme when the submodule has the scales', () => {
   const desktop = 'harness/desktop/src/theme.css';
   const pinned = existsSync(desktop) ? readFileSync(desktop, 'utf8') : '';
-  // An older pinned tag predates the scales; the copy is then ahead of the pin, never different in its colours.
+  // An older pinned tag predates the scales and may predate later colour tweaks, so the copy is then only required to
+  // define every token the pin defines. Once the pin has the scales, the copy must match it exactly.
   if (pinned.includes('--text-xs')) assert.equal(body, pinned);
   else
-    for (const line of pinned.split('\n').filter((l) => /^\s*--[\w-]+:/.test(l)))
-      assert.ok(body.includes(line.trim()), line);
+    for (const name of new Set(pinned.match(/--[\w-]+(?=:)/g) ?? []))
+      assert.ok(body.includes(name + ':'), name);
 });
