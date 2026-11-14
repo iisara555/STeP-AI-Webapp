@@ -28,7 +28,7 @@ import type {
 } from '../../packages/harness-core/src/contracts.ts';
 import { errorView } from '../../packages/harness-core/src/index.ts';
 import { ApiError, saveBlob } from './host.ts';
-import { Art, Busy, FreeTierNote, MEMORY_KINDS, Modal, Segmented, Visibility } from './components.tsx';
+import { Busy, FreeTierNote, MEMORY_KINDS, Modal, Segmented, Visibility } from './components.tsx';
 import type { ViewProps } from './App.tsx';
 import type { ExportChoice } from './DraftExport.tsx';
 import { startersFor, starterTeams } from '../../packages/harness-core/vendor/desktop/starters.ts';
@@ -508,12 +508,10 @@ export function Chat({
         <div className="conversation" aria-live="polite">
           {!messages.length && (
             <div className="welcome">
+              {/* Same opening as STeP Desktop: a centred greeting and one question, no side art. */}
               <div className="welcome-intro">
-                <div className="welcome-heading">
-                  <p className="greet">{greeting}</p>
-                  <h1>เริ่มจากเรื่องไหนดี</h1>
-                </div>
-                <Art scene="chat" className="welcome-illustration" />
+                <p className="greet">{greeting}</p>
+                <h1>เริ่มจากเรื่องไหนดี</h1>
               </div>
               <div className="suggestions-label">
                 <span>

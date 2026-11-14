@@ -3,8 +3,6 @@ import { MotionConfig } from 'motion/react';
 import {
   Blocks,
   Brain,
-  ChevronDown,
-  ChevronUp,
   FileText,
   FolderOpen,
   History as HistoryStill,
@@ -122,8 +120,7 @@ export function Sidebar({
   onUpdate: () => void;
 }) {
   const [search, setSearch] = useState(''),
-    [filter, setFilter] = useState<'all' | 'artifacts'>('all'),
-    [toolsOpen, setToolsOpen] = useState(readChoice('step.tools') !== 'icons');
+    [filter, setFilter] = useState<'all' | 'artifacts'>('all');
   const panel = useRef<HTMLElement>(null);
   // The drawer always opens at the brand and เริ่มงานใหม่, not where it was last scrolled.
   useEffect(() => {
@@ -234,28 +231,13 @@ export function Sidebar({
           </p>
         )}
       </div>
-      <div className="tools-group">
-        <span>เครื่องมือ</span>
-        <button
-          className="tools-toggle"
-          aria-expanded={toolsOpen}
-          aria-label={toolsOpen ? 'ย่อเครื่องมือเป็นไอคอน' : 'แสดงชื่อเครื่องมือ'}
-          title={toolsOpen ? 'ย่อเครื่องมือเป็นไอคอน' : 'แสดงชื่อเครื่องมือ'}
-          onClick={() => {
-            saveChoice('step.tools', toolsOpen ? 'icons' : 'open');
-            setToolsOpen(!toolsOpen);
-          }}
-        >
-          {toolsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
-      </div>
-      <nav className={toolsOpen ? 'tools-nav' : 'tools-nav icons'} aria-label="เครื่องมือ">
+      <div className="tools-group">เครื่องมือ</div>
+      <nav className="tools-nav" aria-label="เครื่องมือ">
         {tools.map((t) => (
           <button
             key={t.id}
             className={page === t.id ? 'nav-active' : ''}
             aria-current={page === t.id ? 'page' : undefined}
-            title={toolsOpen ? undefined : t.label}
             onClick={() => onPage(t.id)}
           >
             <t.icon size={17} />
@@ -265,16 +247,6 @@ export function Sidebar({
           </button>
         ))}
       </nav>
-      {pageAvailable('settings') && (
-        <button
-          className={'settings-button ' + (page === 'settings' ? 'nav-active' : '')}
-          aria-current={page === 'settings' ? 'page' : undefined}
-          onClick={() => onPage('settings')}
-        >
-          <SlidersHorizontal size={18} />
-          การตั้งค่า
-        </button>
-      )}
       {update && (
         <div className="update-card" role="status">
           <strong>มีแอปรุ่นใหม่</strong>
@@ -285,12 +257,24 @@ export function Sidebar({
           </button>
         </div>
       )}
+      {/* Settings is a quiet gear beside the profile, as in STeP Desktop. */}
       <div className="profile">
         <Avatar id={profile.avatar} fallback={profile.initial} />
         <div>
           <strong>{profile.name}</strong>
           <small>{profile.detail}</small>
         </div>
+        {pageAvailable('settings') && (
+          <button
+            className={'settings-button ' + (page === 'settings' ? 'nav-active' : '')}
+            aria-current={page === 'settings' ? 'page' : undefined}
+            aria-label="การตั้งค่า"
+            title="การตั้งค่า"
+            onClick={() => onPage('settings')}
+          >
+            <SlidersHorizontal size={18} />
+          </button>
+        )}
       </div>
     </aside>
   );
