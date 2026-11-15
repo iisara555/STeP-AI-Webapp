@@ -131,7 +131,7 @@ export function Sidebar({
           <X size={18} />
         </button>
       </div>
-      <button className="primary new-work" onClick={onNew}>
+      <button className="new-work" onClick={onNew}>
         <Plus size={18} />
         เริ่มงานใหม่
       </button>
