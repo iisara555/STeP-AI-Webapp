@@ -8,7 +8,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { Command, ShieldCheck, Brain, FolderOpen, Check } from './icons.tsx';
+import { ShieldCheck, Brain, FolderOpen, Check } from './icons.tsx';
 import type { Snapshot, Workspace, Conversation, Skill } from '../../packages/harness-core/src/contracts.ts';
 import { ApiError, configured, loadSnapshot, supabase, webHost, type Host } from './host.ts';
 import { demoHost } from './demo.ts';
@@ -54,20 +54,17 @@ export interface ViewProps {
   refresh: () => Promise<void>;
   fail: (error: unknown) => void;
 }
-/** Title and one-line purpose for the page header, as on Desktop. */
-const headers: Record<Exclude<Page, 'chat'>, [string, string]> = {
-  'document-tools': [
-    'เครื่องมือร่างเอกสาร',
-    'ใส่ข้อมูลหรือแนบต้นเรื่อง ให้ AI ช่วยร่าง แล้วตรวจแก้ก่อนส่งออก',
-  ],
-  media: ['สื่อภายใน', 'เตรียมเนื้อหาและ Prompt ภาพสำหรับสื่อสารภายใน ตามสีองค์กรและห้ามสร้างโลโก้'],
-  skills: ['ศูนย์รวม Skill', 'ค้นหา Skill และดูว่ารายการใดพร้อมใช้บนเว็บ'],
-  documents: ['เอกสาร', 'เก็บไฟล์ส่วนตัว หรือเลือกแชร์เฉพาะใน workspace'],
-  memory: ['ความจำ', 'สิ่งที่ผู้ช่วยจำไว้ใช้ในงานถัดไป แก้ไขหรือลบได้เสมอ'],
-  history: ['ค้นงานเก่า', 'ค้นชื่อ บทสนทนา และร่างที่คุณมีสิทธิ์อ่าน'],
-  receipt: ['ตรวจใบเสร็จ AFP', 'ทดลอง · ให้ AI อ่านใบเสร็จ แล้วคุณตรวจเทียบต้นฉบับก่อนใช้'],
-  settings: ['การตั้งค่า', 'บัญชี การเชื่อมต่อ AI, Google Workspace และข้อมูลของคุณ'],
-  help: ['คู่มือและความสามารถ', 'ตรวจได้ว่าเว็บรองรับความสามารถใดของ Desktop แล้ว'],
+/** The page name shown in the title bar; each page states its own purpose under its heading. */
+const titles: Record<Exclude<Page, 'chat'>, string> = {
+  'document-tools': 'เครื่องมือร่างเอกสาร',
+  media: 'สื่อภายใน',
+  skills: 'ศูนย์รวม Skill',
+  documents: 'เอกสาร',
+  memory: 'ความจำ',
+  history: 'ค้นงานเก่า',
+  receipt: 'ตรวจใบเสร็จ AFP',
+  settings: 'การตั้งค่า',
+  help: 'คู่มือและความสามารถ',
 };
 /** Cloud Workspace mode (ADR 0001 phase 3b) is chosen at build time; otherwise the app runs on Supabase. */
 const gateway = gatewayConfig();
@@ -605,14 +602,13 @@ export function App() {
       ],
     },
   ];
-  const header = page === 'chat' ? null : headers[page];
   return (
     <div className="shell">
       <TitleBar
         groups={menu}
         theme={theme}
         onTheme={setTheme}
-        title={page === 'chat' ? session?.title || '' : headers[page][0]}
+        title={page === 'chat' ? session?.title || '' : titles[page]}
         sidebarOpen={fullSidebar}
         onSidebar={toggleSidebar}
         onMobileMenu={() => setMobile(true)}
@@ -661,25 +657,10 @@ export function App() {
               changePage('chat');
             }}
             onNew={newTask}
-            onPalette={() => setPalette(true)}
-            onSearchAll={(query) => {
-              setHistoryQuery(query);
-              changePage('history');
-            }}
             onUpdate={() => setDialog('update')}
           />
         )}
         <main className="main-pane">
-          {header && (
-            <header className="topbar">
-              <div className="topbar-title">
-                <span className="topbar-heading">
-                  <strong>{header[0]}</strong>
-                </span>
-                <small>{header[1]}</small>
-              </div>
-            </header>
-          )}
           <div className={'page ' + (page === 'chat' ? 'chat-page' : '')}>
             <Suspense fallback={<Busy />}>
               {page === 'chat' && (
@@ -753,11 +734,6 @@ export function App() {
               )}
             </span>
             {demo && <span className="badge demo">ตัวอย่าง · ไม่ใช่ข้อมูลจริง</span>}
-            <span className="spacer" />
-            <button className="status-item status-button" onClick={() => setPalette(true)}>
-              <Command size={12} />
-              คำสั่ง {mod}K
-            </button>
           </footer>
         </main>
         <div ref={setArtifactSlot} className="artifact-slot" />
@@ -827,6 +803,11 @@ export function App() {
           tenant={tenant}
           sessions={sessions}
           onClose={() => setPalette(false)}
+          onSearchAll={(query) => {
+            setHistoryQuery(query);
+            changePage('history');
+            setPalette(false);
+          }}
           onPage={(p) => {
             changePage(p as Page);
             setPalette(false);

@@ -415,104 +415,284 @@ export function Chat({
   const draftSources = [
     ...new Map(messages.flatMap((m) => m.sources || []).map((s) => [s.kind + s.id, s])).values(),
   ];
+  const home = !messages.length;
   return (
     <div className="chat-layout">
       <div className="conversation-col">
-        <header className="topbar">
-          <div className="topbar-title">
-            <span className="topbar-heading">
-              {/* With a conversation open the task title is the page's heading; the welcome screen has its own. */}
-              {messages.length ? (
-                <h1 className="topbar-name">
-                  {session?.title || (skill ? skill.title : 'เริ่มต้นงานที่อยากทำ')}
-                </h1>
-              ) : (
-                <strong>{session?.title || (skill ? skill.title : 'เริ่มต้นงานที่อยากทำ')}</strong>
-              )}
-              {session && (
-                <button
-                  className="icon-button"
-                  aria-label="ตัวเลือกงานนี้"
-                  title="ตัวเลือกงานนี้"
-                  aria-haspopup="menu"
-                  aria-expanded={menu}
-                  onClick={() => setMenu(!menu)}
-                >
-                  <ChevronDown size={16} />
-                </button>
-              )}
-            </span>
-            {menu && session && (
-              <>
-                <button
-                  className="menu-backdrop"
-                  tabIndex={-1}
-                  aria-hidden="true"
-                  onClick={() => setMenu(false)}
-                />
-                <div
-                  className="title-menu"
-                  role="menu"
-                  aria-label="ตัวเลือกงานนี้"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') setMenu(false);
-                  }}
-                >
+        {/* The home screen has its own greeting; the bar appears with the task it names. */}
+        {session && (
+          <header className="topbar">
+            <div className="topbar-title">
+              <span className="topbar-heading">
+                {/* With a conversation open the task title is the page's heading; the welcome screen has its own. */}
+                {messages.length ? (
+                  <h1 className="topbar-name">
+                    {session?.title || (skill ? skill.title : 'เริ่มต้นงานที่อยากทำ')}
+                  </h1>
+                ) : (
+                  <strong>{session?.title || (skill ? skill.title : 'เริ่มต้นงานที่อยากทำ')}</strong>
+                )}
+                {session && (
                   <button
-                    role="menuitem"
-                    autoFocus
-                    onClick={() => {
-                      setMenu(false);
-                      saveBlob(
-                        new Blob(
-                          [
-                            messages
-                              .map((m) => `## ${m.role === 'user' ? 'คุณ' : assistant}\n\n${m.body}`)
-                              .join('\n\n'),
-                          ],
-                          { type: 'text/markdown;charset=utf-8' },
-                        ),
-                        'บทสนทนา.md',
-                      );
+                    className="icon-button"
+                    aria-label="ตัวเลือกงานนี้"
+                    title="ตัวเลือกงานนี้"
+                    aria-haspopup="menu"
+                    aria-expanded={menu}
+                    onClick={() => setMenu(!menu)}
+                  >
+                    <ChevronDown size={16} />
+                  </button>
+                )}
+              </span>
+              {menu && session && (
+                <>
+                  <button
+                    className="menu-backdrop"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    onClick={() => setMenu(false)}
+                  />
+                  <div
+                    className="title-menu"
+                    role="menu"
+                    aria-label="ตัวเลือกงานนี้"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setMenu(false);
                     }}
                   >
-                    <Download size={15} />
-                    ส่งออก Markdown
-                  </button>
-                  <hr />
-                  <button
-                    role="menuitem"
-                    className="titlebar-danger"
-                    onClick={() => {
-                      setMenu(false);
-                      setSource({ title: 'ลบงานนี้', body: 'delete-confirm' });
-                    }}
-                  >
-                    <Trash2 size={15} />
-                    ลบงานนี้
-                  </button>
-                </div>
-              </>
-            )}
-            <small>{session && <Visibility shared={session.visibility === 'workspace'} />}</small>
-          </div>
-          {session && !cloud && (
-            <div className="topbar-actions">
-              <button onClick={() => setDraftOpen((v) => !v)} aria-pressed={draftOpen}>
-                <FileText size={16} />
-                {draftOpen ? 'ซ่อนร่าง' : 'เปิดร่าง'}
-              </button>
+                    <button
+                      role="menuitem"
+                      autoFocus
+                      onClick={() => {
+                        setMenu(false);
+                        saveBlob(
+                          new Blob(
+                            [
+                              messages
+                                .map((m) => `## ${m.role === 'user' ? 'คุณ' : assistant}\n\n${m.body}`)
+                                .join('\n\n'),
+                            ],
+                            { type: 'text/markdown;charset=utf-8' },
+                          ),
+                          'บทสนทนา.md',
+                        );
+                      }}
+                    >
+                      <Download size={15} />
+                      ส่งออก Markdown
+                    </button>
+                    <hr />
+                    <button
+                      role="menuitem"
+                      className="titlebar-danger"
+                      onClick={() => {
+                        setMenu(false);
+                        setSource({ title: 'ลบงานนี้', body: 'delete-confirm' });
+                      }}
+                    >
+                      <Trash2 size={15} />
+                      ลบงานนี้
+                    </button>
+                  </div>
+                </>
+              )}
+              <small>{session && <Visibility shared={session.visibility === 'workspace'} />}</small>
             </div>
-          )}
-        </header>
-        <div className="conversation" aria-live="polite">
-          {!messages.length && (
-            <div className="welcome">
-              {/* Same opening as STeP Desktop: a centred greeting and one question, no side art. */}
-              <div className="welcome-intro">
-                <p className="greet">{greeting}</p>
-                <h1>เริ่มจากเรื่องไหนดี</h1>
+            {session && !cloud && (
+              <div className="topbar-actions">
+                <button onClick={() => setDraftOpen((v) => !v)} aria-pressed={draftOpen}>
+                  <FileText size={16} />
+                  {draftOpen ? 'ซ่อนร่าง' : 'เปิดร่าง'}
+                </button>
               </div>
+            )}
+          </header>
+        )}
+        {/* Home: greeting, composer, then first tasks, centred as in STeP Desktop. A task: its turns above the composer. */}
+        <div className={'chat-stage' + (home ? ' home' : '')}>
+          <div className="conversation" aria-live="polite">
+            {home && (
+              <div className="welcome">
+                {/* Same opening as STeP Desktop: a centred greeting and one question, no side art. */}
+                <div className="welcome-intro">
+                  <p className="greet">{greeting}</p>
+                  <h1>เริ่มจากเรื่องไหนดี</h1>
+                </div>
+              </div>
+            )}
+            {messages.map((m) => (
+              <article
+                key={m.id}
+                className={'message ' + (m.role === 'user' ? 'user' : 'assistant')}
+                aria-label={m.role === 'user' ? 'คุณ' : assistant}
+              >
+                {m.role === 'assistant' && documentParts(m.body, documentTool) ? (
+                  <>
+                    <p className="draft-staged">
+                      <FileText size={14} />
+                      ร่างเอกสารอยู่ในแผงผลงาน · ด้านล่างคือผลตรวจและสิ่งที่ต้องยืนยัน ไม่อยู่ในตัวเอกสาร
+                    </p>
+                    <div className="message-body">
+                      {documentParts(m.body, documentTool)!.review || 'ไม่มีรายการที่ต้องตรวจเพิ่ม'}
+                    </div>
+                  </>
+                ) : (
+                  <div className="message-body">{m.body}</div>
+                )}
+                {m.sources?.length > 0 && (
+                  <div className="sources">
+                    {m.sources.map((s) => (
+                      <button key={s.id} onClick={() => void openSource(s)}>
+                        <BookOpen size={13} />
+                        {s.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {m.role === 'assistant' && (
+                  <div className="message-actions">
+                    <button
+                      onClick={() => void navigator.clipboard.writeText(m.body).catch(fail)}
+                      aria-label="คัดลอกคำตอบ"
+                    >
+                      <Copy size={14} />
+                    </button>
+                    {!cloud && (
+                      <>
+                        <button onClick={() => setRemember(m)}>
+                          <Brain size={14} />
+                          บันทึกความจำ
+                        </button>
+                        <button
+                          onClick={() => {
+                            setDraft(documentParts(m.body, documentTool)?.draft ?? m.body);
+                            setDraftOpen(true);
+                          }}
+                        >
+                          <FileText size={14} />
+                          ใช้เป็นร่าง
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </article>
+            ))}
+            {active && (
+              <div className="activity">
+                <Busy
+                  label={
+                    run?.status === 'queued' ? 'กำลังรอคิว AI' : assistant + ' กำลังอ่านข้อมูลที่คุณเลือก'
+                  }
+                />
+                <p>คุณกลับมาดูงานนี้ภายหลังได้</p>
+              </div>
+            )}
+            {run && ['failed', 'interrupted', 'cancelled'].includes(run.status) && (
+              <div className={'run-status ' + (run.status === 'cancelled' ? 'neutral' : '')} role="status">
+                <strong>
+                  {run.status === 'cancelled'
+                    ? 'หยุดงานแล้ว'
+                    : errorView(run.error_code || 'RUN_INTERRUPTED').title}
+                </strong>
+                <p>
+                  {run.status === 'cancelled'
+                    ? 'คำตอบที่บันทึกแล้วจะยังอยู่'
+                    : errorView(run.error_code || 'RUN_INTERRUPTED').detail}
+                </p>
+                <small>รหัสปัญหา: {run.error_code || run.status}</small>
+              </div>
+            )}
+            <div ref={bottom} />
+          </div>
+          <div className="composer-area">
+            <form
+              className="composer"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void send();
+              }}
+            >
+              {skill && (
+                <span className="skill-chip">
+                  Skill · {skill.title}
+                  <button type="button" aria-label="นำ Skill ออก" onClick={clearSkill}>
+                    <X size={13} />
+                  </button>
+                </span>
+              )}
+              <textarea
+                ref={composer}
+                aria-label="ข้อความถึง AI"
+                placeholder="พิมพ์สิ่งที่อยากให้ช่วย…"
+                value={text}
+                maxLength={20000}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    void send();
+                  }
+                }}
+                rows={1}
+              />
+              <div className="composer-tools">
+                {!cloud && (
+                  <button
+                    type="button"
+                    className="composer-add"
+                    aria-label={
+                      documents.length ? `เอกสารที่เลือก ${documents.length} รายการ` : 'เลือกเอกสาร'
+                    }
+                    title="เลือกเอกสารให้ AI อ่าน"
+                    onClick={() => setShowFiles((v) => !v)}
+                  >
+                    <Plus size={15} />
+                    {documents.length ? `${documents.length} เอกสาร` : 'เอกสาร'}
+                  </button>
+                )}
+                {!cloud && session?.visibility !== 'workspace' && (
+                  <label className="pill">
+                    <input
+                      type="checkbox"
+                      checked={useMemory}
+                      onChange={(e) => setUseMemory(e.target.checked)}
+                    />
+                    ใช้ความจำของฉัน
+                  </label>
+                )}
+                <span className="spacer" />
+                {active ? (
+                  <button
+                    type="button"
+                    className="stop"
+                    aria-label="หยุดงาน"
+                    disabled={run?.actor_id !== data.user.id}
+                    onClick={() =>
+                      void host
+                        .call('run.cancel', { tenant, id: run?.id })
+                        .then(() => setRun((r) => (r ? { ...r, status: 'cancelled' } : null)))
+                        .catch(fail)
+                    }
+                  >
+                    <Square size={14} />
+                  </button>
+                ) : (
+                  <button className="send" aria-label="ส่งข้อความ" disabled={!text.trim() || busy}>
+                    {busy ? <Busy label="" /> : <ArrowUp size={17} />}
+                  </button>
+                )}
+              </div>
+            </form>
+            <p className="composer-note">
+              {!session && workspace
+                ? `ข้อความจากหน้านี้เริ่มงานส่วนตัว · กด “เริ่มงานใหม่” เพื่อแชร์ใน ${workspace.name}`
+                : 'ตรวจข้อมูลและร่างก่อนนำไปใช้ · ประวัติเก็บในบัญชี STeP ของคุณ'}
+            </p>
+          </div>
+          {home && (
+            <div className="home-starters">
               <div className="suggestions-label">
                 <span>
                   {starterTeam
@@ -552,171 +732,6 @@ export function Chat({
               </div>
             </div>
           )}
-          {messages.map((m) => (
-            <article
-              key={m.id}
-              className={'message ' + (m.role === 'user' ? 'user' : 'assistant')}
-              aria-label={m.role === 'user' ? 'คุณ' : assistant}
-            >
-              {m.role === 'assistant' && documentParts(m.body, documentTool) ? (
-                <>
-                  <p className="draft-staged">
-                    <FileText size={14} />
-                    ร่างเอกสารอยู่ในแผงผลงาน · ด้านล่างคือผลตรวจและสิ่งที่ต้องยืนยัน ไม่อยู่ในตัวเอกสาร
-                  </p>
-                  <div className="message-body">
-                    {documentParts(m.body, documentTool)!.review || 'ไม่มีรายการที่ต้องตรวจเพิ่ม'}
-                  </div>
-                </>
-              ) : (
-                <div className="message-body">{m.body}</div>
-              )}
-              {m.sources?.length > 0 && (
-                <div className="sources">
-                  {m.sources.map((s) => (
-                    <button key={s.id} onClick={() => void openSource(s)}>
-                      <BookOpen size={13} />
-                      {s.title}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {m.role === 'assistant' && (
-                <div className="message-actions">
-                  <button
-                    onClick={() => void navigator.clipboard.writeText(m.body).catch(fail)}
-                    aria-label="คัดลอกคำตอบ"
-                  >
-                    <Copy size={14} />
-                  </button>
-                  {!cloud && (
-                    <>
-                      <button onClick={() => setRemember(m)}>
-                        <Brain size={14} />
-                        บันทึกความจำ
-                      </button>
-                      <button
-                        onClick={() => {
-                          setDraft(documentParts(m.body, documentTool)?.draft ?? m.body);
-                          setDraftOpen(true);
-                        }}
-                      >
-                        <FileText size={14} />
-                        ใช้เป็นร่าง
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </article>
-          ))}
-          {active && (
-            <div className="activity">
-              <Busy
-                label={run?.status === 'queued' ? 'กำลังรอคิว AI' : assistant + ' กำลังอ่านข้อมูลที่คุณเลือก'}
-              />
-              <p>คุณกลับมาดูงานนี้ภายหลังได้</p>
-            </div>
-          )}
-          {run && ['failed', 'interrupted', 'cancelled'].includes(run.status) && (
-            <div className={'run-status ' + (run.status === 'cancelled' ? 'neutral' : '')} role="status">
-              <strong>
-                {run.status === 'cancelled'
-                  ? 'หยุดงานแล้ว'
-                  : errorView(run.error_code || 'RUN_INTERRUPTED').title}
-              </strong>
-              <p>
-                {run.status === 'cancelled'
-                  ? 'คำตอบที่บันทึกแล้วจะยังอยู่'
-                  : errorView(run.error_code || 'RUN_INTERRUPTED').detail}
-              </p>
-              <small>รหัสปัญหา: {run.error_code || run.status}</small>
-            </div>
-          )}
-          <div ref={bottom} />
-        </div>
-        <div className="composer-area">
-          <form
-            className="composer"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void send();
-            }}
-          >
-            {skill && (
-              <span className="skill-chip">
-                Skill · {skill.title}
-                <button type="button" aria-label="นำ Skill ออก" onClick={clearSkill}>
-                  <X size={13} />
-                </button>
-              </span>
-            )}
-            <textarea
-              ref={composer}
-              aria-label="ข้อความถึง AI"
-              placeholder="พิมพ์สิ่งที่อยากให้ช่วย…"
-              value={text}
-              maxLength={20000}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
-              rows={1}
-            />
-            <div className="composer-tools">
-              {!cloud && (
-                <button
-                  type="button"
-                  className="composer-add"
-                  aria-label={documents.length ? `เอกสารที่เลือก ${documents.length} รายการ` : 'เลือกเอกสาร'}
-                  title="เลือกเอกสารให้ AI อ่าน"
-                  onClick={() => setShowFiles((v) => !v)}
-                >
-                  <Plus size={15} />
-                  {documents.length ? `${documents.length} เอกสาร` : 'เอกสาร'}
-                </button>
-              )}
-              {!cloud && session?.visibility !== 'workspace' && (
-                <label className="pill">
-                  <input
-                    type="checkbox"
-                    checked={useMemory}
-                    onChange={(e) => setUseMemory(e.target.checked)}
-                  />
-                  ใช้ความจำของฉัน
-                </label>
-              )}
-              <span className="spacer" />
-              {active ? (
-                <button
-                  type="button"
-                  className="stop"
-                  aria-label="หยุดงาน"
-                  disabled={run?.actor_id !== data.user.id}
-                  onClick={() =>
-                    void host
-                      .call('run.cancel', { tenant, id: run?.id })
-                      .then(() => setRun((r) => (r ? { ...r, status: 'cancelled' } : null)))
-                      .catch(fail)
-                  }
-                >
-                  <Square size={14} />
-                </button>
-              ) : (
-                <button className="send" aria-label="ส่งข้อความ" disabled={!text.trim() || busy}>
-                  {busy ? <Busy label="" /> : <ArrowUp size={17} />}
-                </button>
-              )}
-            </div>
-          </form>
-          <p className="composer-note">
-            {!session && workspace
-              ? `ข้อความจากหน้านี้เริ่มงานส่วนตัว · กด “เริ่มงานใหม่” เพื่อแชร์ใน ${workspace.name}`
-              : 'ตรวจข้อมูลและร่างก่อนนำไปใช้ · ประวัติเก็บในบัญชี STeP ของคุณ'}
-          </p>
         </div>
       </div>
       {draftOpen &&
