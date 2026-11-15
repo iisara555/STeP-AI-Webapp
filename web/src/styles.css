@@ -599,12 +599,6 @@ summary {
 .search input:focus-visible {
   outline-offset: 4px;
 }
-.palette-hint {
-  font-size: var(--text-xs);
-  padding: var(--space-0-5) var(--space-1-5);
-  color: var(--muted);
-  white-space: nowrap;
-}
 .session-filter {
   display: flex;
   gap: var(--space-1);
@@ -957,12 +951,6 @@ summary {
   background: var(--danger);
   opacity: 1;
 }
-.status-button {
-  border: 0;
-  color: var(--muted);
-  padding: var(--space-0-5) var(--space-1-5);
-  font-size: var(--text-xs);
-}
 
 /* Notices */
 .global-notice {
@@ -1106,10 +1094,39 @@ summary {
   display: flex;
   flex-direction: column;
 }
+/* A task's turns scroll above the composer. */
+.chat-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .conversation {
   flex: 1;
   overflow: auto;
   padding: 28px max(24px, calc((100% - 720px) / 2));
+}
+/* Home: the greeting, the composer and the first tasks sit together in the middle, as in STeP Desktop. */
+.chat-stage.home {
+  overflow: auto;
+  padding: var(--space-6) 0 var(--space-8);
+}
+.chat-stage.home > .conversation {
+  flex: none;
+  overflow: visible;
+  margin-top: auto;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.chat-stage.home .welcome {
+  padding: 0 var(--space-2);
+}
+.chat-stage.home .composer-area::before {
+  display: none;
+}
+.home-starters {
+  margin-bottom: auto;
+  padding: var(--space-2) max(26px, calc((100% - 760px) / 2)) 0;
 }
 .welcome {
   max-width: 560px;
@@ -2368,6 +2385,9 @@ summary {
 .command-results small {
   color: var(--muted);
 }
+.command-results + p {
+  margin: var(--space-3) 0 0;
+}
 
 /* Login and account gates */
 .login {
@@ -2380,8 +2400,10 @@ summary {
   padding: 7vw;
   background: var(--surface);
 }
+/* The mark stands clear of the headline: Thai tone marks rise above the first line. */
 .login-card .brand-symbol {
   height: 32px;
+  margin-bottom: var(--space-5);
 }
 .login-card h1 {
   font-size: var(--text-3xl);
@@ -2583,6 +2605,9 @@ summary {
   .composer-area {
     padding: 0 var(--space-3) var(--space-2-5);
   }
+  .home-starters {
+    padding: var(--space-2) var(--space-3) 0;
+  }
   .login {
     gap: 5vw;
   }
@@ -2777,13 +2802,6 @@ summary {
 }
 .receipt-note {
   margin-top: var(--space-3);
-}
-/* Shortcut hints mean nothing without a keyboard. */
-@media (pointer: coarse), (hover: none) {
-  .palette-hint,
-  .status-button {
-    display: none;
-  }
 }
 .draft-sources {
   padding: var(--space-1-5) var(--space-5);

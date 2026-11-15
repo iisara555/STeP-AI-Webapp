@@ -10,6 +10,7 @@ export function CommandPalette({
   tenant,
   sessions,
   onClose,
+  onSearchAll,
   onPage,
   onSkill,
   onSession,
@@ -18,6 +19,7 @@ export function CommandPalette({
   tenant: string;
   sessions: Conversation[];
   onClose: () => void;
+  onSearchAll: (query: string) => void;
   onPage: (page: string) => void;
   onSkill: (skill: Skill) => void;
   onSession: (session: Conversation) => void;
@@ -30,7 +32,12 @@ export function CommandPalette({
     ['help', 'คู่มือและความสามารถ'],
   ];
   const q = query.trim().toLowerCase();
-  const tasks = q ? sessions.filter((s) => s.title.toLowerCase().includes(q)).slice(0, 8) : [];
+  // A task is found by its title or by what its draft says, as the sidebar search did.
+  const tasks = q
+    ? sessions
+        .filter((s) => s.title.toLowerCase().includes(q) || s.draft.toLowerCase().includes(q))
+        .slice(0, 8)
+    : [];
   const skills = data.skills.filter(
     (s) =>
       (!s.tenant_id || s.tenant_id === tenant) &&
@@ -60,6 +67,12 @@ export function CommandPalette({
             <small>{s.visibility === 'workspace' ? 'แชร์ใน workspace' : 'ส่วนตัว'}</small>
           </button>
         ))}
+        {q && pageAvailable('history') && (
+          <button onClick={() => onSearchAll(query.trim())}>
+            <span>ค้น “{query.trim()}” ในบทสนทนาและร่างทั้งหมด</span>
+            <small>ค้นงานเก่า</small>
+          </button>
+        )}
         {shownPages.length > 0 && <div className="command-group">หน้าและเครื่องมือ</div>}
         {shownPages.map(([key, label]) => (
           <button key={key} onClick={() => onPage(key)}>

@@ -18,7 +18,6 @@ import {
 } from './icons.tsx';
 import type { Conversation } from '../../packages/harness-core/src/contracts.ts';
 import { Avatar, BrandSymbol, Segmented } from './components.tsx';
-import { mod } from './TitleBar.tsx';
 import type { Page } from './App.tsx';
 import { useReducedMotion } from './reduced-motion.ts';
 import { pageAvailable } from './gateway.ts';
@@ -100,8 +99,6 @@ export function Sidebar({
   onPage,
   onSession,
   onNew,
-  onPalette,
-  onSearchAll,
   onUpdate,
 }: {
   page: Page;
@@ -115,23 +112,15 @@ export function Sidebar({
   onPage: (page: Page) => void;
   onSession: (session: Conversation) => void;
   onNew: () => void;
-  onPalette: () => void;
-  onSearchAll: (query: string) => void;
   onUpdate: () => void;
 }) {
-  const [search, setSearch] = useState(''),
-    [filter, setFilter] = useState<'all' | 'artifacts'>('all');
+  const [filter, setFilter] = useState<'all' | 'artifacts'>('all');
   const panel = useRef<HTMLElement>(null);
   // The drawer always opens at the brand and เริ่มงานใหม่, not where it was last scrolled.
   useEffect(() => {
     if (mobileOpen && panel.current) panel.current.scrollTop = 0;
   }, [mobileOpen]);
-  const q = search.trim().toLowerCase();
-  const shown = sessions.filter(
-    (s) =>
-      (filter === 'all' || s.draft.trim()) &&
-      (!q || s.title.toLowerCase().includes(q) || s.draft.toLowerCase().includes(q)),
-  );
+  const shown = sessions.filter((s) => filter === 'all' || s.draft.trim());
   return (
     <aside ref={panel} className={'sidebar ' + (mobileOpen ? 'mobile-open' : '')} aria-label="แถบงาน">
       <div className="brand">
@@ -146,31 +135,6 @@ export function Sidebar({
         <Plus size={18} />
         เริ่มงานใหม่
       </button>
-      <form
-        className="search"
-        role="search"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (q) onSearchAll(search.trim());
-        }}
-      >
-        <Search size={16} aria-hidden="true" />
-        <input
-          aria-label="ค้นหางานของฉัน"
-          placeholder="ค้นหางานหรือเนื้อหา"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <button
-          type="button"
-          className="palette-hint"
-          aria-label={`เปิดคำสั่ง ${mod}K`}
-          title="เปิดคำสั่ง"
-          onClick={onPalette}
-        >
-          {mod}K
-        </button>
-      </form>
       <Segmented
         className="session-filter"
         label="กรองงาน"
@@ -223,11 +187,9 @@ export function Sidebar({
         ))}
         {!shown.length && (
           <p className="session-empty">
-            {q
-              ? 'ไม่พบงานที่ตรงกับคำค้น · กด Enter เพื่อค้นในบทสนทนาและร่างทั้งหมด'
-              : filter === 'artifacts'
-                ? 'ยังไม่มีร่างที่บันทึก งานที่มีร่างจะอยู่ที่นี่'
-                : 'เมื่อเริ่มงาน บทสนทนาจะอยู่ที่นี่'}
+            {filter === 'artifacts'
+              ? 'ยังไม่มีร่างที่บันทึก งานที่มีร่างจะอยู่ที่นี่'
+              : 'เมื่อเริ่มงาน บทสนทนาจะอยู่ที่นี่'}
           </p>
         )}
       </div>

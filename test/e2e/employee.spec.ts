@@ -22,6 +22,32 @@ test('login clearly separates unconfigured access from the synthetic preview', a
   await page.getByRole('button', { name: 'ดูตัวอย่างหน้าจอ' }).click();
   await expect(page.getByText('ตัวอย่าง · ไม่ใช่ข้อมูลจริง')).toBeVisible();
 });
+test('home puts the composer between the greeting and the first tasks, and the app has one search', async ({
+  page,
+}) => {
+  await page.goto('/?demo=1');
+  const top = async (locator: ReturnType<Page['locator']>) => (await locator.boundingBox())!.y;
+  const greeting = await top(page.getByRole('heading', { name: 'เริ่มจากเรื่องไหนดี' }));
+  const composer = await top(page.getByRole('textbox', { name: 'ข้อความถึง AI' }));
+  const starters = await top(page.getByText('ลองงานแรกที่คนส่วนใหญ่ใช้บ่อย'));
+  expect(greeting).toBeLessThan(composer);
+  expect(composer).toBeLessThan(starters);
+  // Keyboard order follows what is seen: the composer comes before the first tasks.
+  await page.getByRole('textbox', { name: 'ข้อความถึง AI' }).focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('combobox', { name: 'ตัวอย่างงานตามทีม' })).toBeFocused();
+  // The title bar is the one place to search; the sidebar and status bar no longer repeat it.
+  await expect(page.getByRole('search')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /ค้นหางานและคำสั่ง/ })).toHaveCount(1);
+  await page.getByRole('button', { name: /ค้นหางานและคำสั่ง/ }).click();
+  await page.getByRole('dialog').getByRole('textbox', { name: 'คำค้น' }).fill('คำที่อยู่ในร่าง');
+  // Searching inside conversations and drafts stays one step away.
+  await page.getByRole('button', { name: /ค้น “คำที่อยู่ในร่าง” ในบทสนทนาและร่างทั้งหมด/ }).click();
+  await expect(page.getByRole('heading', { name: 'ค้นงานเก่า' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'คำค้นงานเก่า' })).toHaveValue('คำที่อยู่ในร่าง');
+});
 test('employee can create a private conversation, review consent and receive a result', async ({ page }) => {
   await page.goto('/?demo=1');
   // As on Desktop, typing on the home screen starts a private task; consent still comes before any AI call.
