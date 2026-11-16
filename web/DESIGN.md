@@ -154,7 +154,7 @@ Two brand colours (STeP CI) and a set of warm neutrals chosen for legibility, no
 
 ### Primary
 
-- **STeP Yellow** (step-yellow): fill only: primary buttons, send, rail "new" button, active markers, checked controls (`accent-color`), status "ok" dot. Always carries STeP Dark text (`--on-accent`). Identical in both themes.
+- **STeP Yellow** (step-yellow): fill only: primary buttons, send, active markers, checked controls (`accent-color`), status "ok" dot. Always carries STeP Dark text (`--on-accent`). Identical in both themes.
 - **Deep Gold Ink** (accent-ink): the accent for text and icons on light surfaces (links, starter icons, draft-pane icon). Dark theme swaps it to STeP Yellow.
 - **Yellow Wash** (accent-soft): quiet tint for shared/demo badges, consent check box, selected radio rows, theme chip, Skill chip, and the highlighted second line of the welcome promise. Dark: `#3a3219`.
 - **Highlighter** (selection): text selection only.
@@ -207,7 +207,7 @@ Two brand colours (STeP CI) and a set of warm neutrals chosen for legibility, no
 A fixed application frame (`100dvh`, no page scroll) with three panes:
 
 - **Title bar** (40px; 52px on coarse pointers): STeP app menu, rail toggle, workspace switcher, centred command bar (max 460px, Ctrl/⌘+K), account items at the end.
-- **Sidebar** (246px; folds to a 60px icon rail): STeP symbol + MAKE INNOVATION SIMPLE, yellow เริ่มงานใหม่, task search, task filter, dated task groups, folding เครื่องมือ, การตั้งค่า, profile.
+- **Sidebar** (246px; folds to a 60px icon rail): STeP symbol + MAKE INNOVATION SIMPLE, a plain bordered เริ่มงานใหม่ (yellow is kept for the one main action of the page in view), task search, task filter, dated task groups, folding เครื่องมือ, การตั้งค่า, profile.
 - **Main pane**: 78px title header, page content centred to 1100px (chat column 760px) with 26px gutters, docked composer, 28px status bar.
 - **Draft pane** (`clamp(320px, 34%, 460px)`, 320px under 1150px) beside the conversation, with its own 78px header aligned to the main header.
 
@@ -261,7 +261,7 @@ Softly rounded and consistent: inputs 6px, buttons and rows 7px, inner chips/com
 ### Navigation
 
 - **Sidebar rows** (tasks, tools, settings): borderless, muted, 7px, hover wash; the current one carries the active marker. Group labels are 12px muted with 0.02em tracking.
-- **Rail:** 40px icon buttons in a 60px column; the new-work button is a yellow fill.
+- **Rail:** 40px icon buttons in a 60px column; the new-work button is a plain bordered button, as in the full sidebar.
 - **Command palette** (Ctrl/⌘+K): grouped rows; keyboard focus shows the active marker.
 
 ### Signature: the Active Marker

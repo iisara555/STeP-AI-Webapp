@@ -574,10 +574,15 @@ summary {
   margin-bottom: var(--space-6);
   padding-left: var(--space-0-5);
 }
+/* As on Desktop: yellow is for the one main action of the page in view. Starting a task is always at hand, so it
+   stays a plain bordered button. */
 .new-work {
   justify-content: flex-start;
   padding: var(--space-2-5) var(--space-3);
   margin-bottom: var(--space-3-5);
+  background: var(--paper);
+  border-color: var(--line-strong);
+  font-weight: 600;
 }
 .search {
   position: relative;
@@ -807,8 +812,9 @@ summary {
   color: var(--text);
 }
 .rail-button.rail-new {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
   margin-bottom: var(--space-1);
 }
 .rail-divider {
