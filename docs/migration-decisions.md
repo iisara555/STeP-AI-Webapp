@@ -25,3 +25,18 @@ Decisions given by the project owner for #56/#63. They bind future implementatio
 - **OCR model:** `typhoon 1.5 3b`.
 - Names above are preserved exactly as supplied by the owner. Exact model repository IDs, variants/quantization, serving runtime, hardware capacity and integration remain to be confirmed before installation.
 - This records the intended local models only; it does not claim either model has been downloaded, installed, tested or enabled. No installation or change to the migration's safety gates is authorized by this note alone.
+
+## Organisation, retained data and import naming (owner decisions, 2026-11-16)
+
+- **One organisation only.** Cloud does not need Supabase's multi-organisation model, but it must
+  separate **admins** from **members** (admins manage invitations, quotas and operations; members
+  use their own Workspaces only).
+- **Retained data sets beyond chats and documents:** the owner chose **assistant memory per
+  user** as still required, so it needs a Cloud feature and an importer. Not selected (may be
+  dropped at cutover unless the owner revisits): per-user assistant profile/style, search inside
+  chat content (title search only), historical run/cost records.
+- **Unsafe file names during document import** (path separators, `..`, control characters and
+  similar): **rename automatically to a safe name and list every rename in the import report**,
+  instead of skipping the file.
+- These decisions authorise design and synthetic-data work only. Copying real Supabase data to
+  this host still requires its own explicit approval after the security/restore gates.
