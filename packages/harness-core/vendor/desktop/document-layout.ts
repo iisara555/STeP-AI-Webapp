@@ -57,6 +57,10 @@ export function documentLayoutRoles(document: DraftNode, id?: DocumentToolId): L
   }
   return roles;
 }
+/** Space above the printed signer name, in points (about four blank lines). */
+export const SIGNING_ROOM = 72;
+/** Space above a "(ลงชื่อ) ....." line, where the signature sits on the dots and rises above them. */
+export const DOTTED_SIGNING_ROOM = 48;
 /** Paragraph spacing of the saraban print explanation for memo and letter, in points before the paragraph. */
 export function sarabanSpacing(document: DraftNode, id?: DocumentToolId): number[] {
   const blocks = document.content || [];
@@ -70,9 +74,10 @@ export function sarabanSpacing(document: DraftNode, id?: DocumentToolId): number
     if (role === 'signature') {
       if (index === firstSignature && CLOSING.test(text)) return 12;
       const previous = index > 0 ? documentText(blocks[index - 1]).trim() : '';
-      // Room to sign: three blank lines above the printed name, or a line above a dotted signing line.
+      // Room to sign above the printed name, or above a dotted signing line.
+      // 54 pt was too little for a real signature on the owner's Word check (2026-11-17).
       if (index === firstSignature || (roles[index - 1] === 'signature' && CLOSING.test(previous)))
-        return /^\(?ลงชื่อ\)?/.test(text) ? 24 : 54;
+        return /^\(?ลงชื่อ\)?/.test(text) ? DOTTED_SIGNING_ROOM : SIGNING_ROOM;
       return 0;
     }
     if (id === 'letter' && role === 'field' && lastSignature >= 0 && index === lastSignature + 1) return 54;
