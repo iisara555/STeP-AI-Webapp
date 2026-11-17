@@ -128,7 +128,7 @@ export function Chat({
     [exportChoice, setExportChoice] = useState<ExportChoice>({ font: 'auto', garuda: 'auto' }),
     [draftView, setDraftView] = useState<'edit' | 'page'>('edit');
   useEffect(() => {
-    setPresentation(resolvePresentation({}, Boolean(documentTool)));
+    setPresentation(resolvePresentation({}, documentTool || false));
     setExportChoice({ font: 'auto', garuda: 'auto' });
   }, [session?.id, documentTool]);
   const composer = useRef<HTMLTextAreaElement>(null),

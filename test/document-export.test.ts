@@ -89,8 +89,11 @@ test('TOR, proposals and minutes have no automatic Garuda; general drafts keep t
   for (const id of ['tor', 'project', 'minutes']) {
     const output = await exportDocx('# ขอบเขตของงาน\n\n## ๑. ความเป็นมา\n\nข้อความ', { documentTool: id });
     assert.equal(output.layout.garudaHeightCm, undefined);
-    const { document, media } = await parts(output.bytes);
-    assert.deepEqual(media, []);
+    const { document, headers, media } = await parts(output.bytes);
+    // A TOR carries the STeP wordmark in its page header (Harness tor-furniture), never a Garuda in the body.
+    assert.equal(media.length, id === 'tor' ? 1 : 0, id);
+    assert.doesNotMatch(document, /<w:drawing>/, id);
+    if (id === 'tor') assert.match(headers, /<w:drawing>/);
     assert.match(document, /w:left="1701"/);
   }
   const general = await exportDocx('ข้อความทั่วไป');
@@ -108,7 +111,8 @@ test('Thai Word settings and document roles keep TOR front matter left-aligned',
   assert.match(output.styles, /w:eastAsia="th-TH"/);
   assert.equal(paragraphAlignment(output.document, 'ร่าง TOR'), 'center');
   assert.equal(paragraphAlignment(output.document, 'หน่วยงานสังเคราะห์'), 'left');
-  assert.equal(paragraphAlignment(output.document, 'สาระจากต้นทาง'), 'left');
+  // TOR body text is justified, as the Desktop export lays it out.
+  assert.equal(paragraphAlignment(output.document, 'สาระจากต้นทาง'), 'both');
 
   const minutes = await exportDocx(
     '# รายงานการประชุม\n\nชื่อการประชุม สังเคราะห์\n\nครั้งที่ [รอยืนยัน: ครั้งที่]\n\nผู้มาประชุม [รอยืนยัน: รายชื่อ]',
@@ -140,5 +144,20 @@ test('the PDF page keeps TOR agency blocks left-aligned', () => {
   });
   assert.match(html, /class="block title" style="text-align:center;"/);
   assert.match(html, /class="block front" style="text-align:left;"/);
-  assert.match(html, /class="block body" style="text-align:left;text-indent:2\.5cm;text-align:justify;"/);
+  assert.match(html, /class="block body" style="text-align:left;text-indent:1\.25cm;text-align:justify;"/);
+});
+
+test('the browser copy carries the Desktop saraban layout: letter head row and continuation page numbers', async () => {
+  const letter = 'ที่ อว ๐๐๐๐/๐๐๐\n\nหน่วยงานสังเคราะห์\n\nเรื่อง ทดสอบ\n\nเรียน ผู้รับสังเคราะห์\n\nข้อความ';
+  const html = exportPdfHtml(letter, { documentTool: 'letter' });
+  assert.match(
+    html,
+    /<div class="block letter-head"[^>]*><div><p>ที่ อว ๐๐๐๐\/๐๐๐<\/p><\/div><div><p>หน่วยงานสังเคราะห์<\/p>/,
+  );
+  assert.match(html, /@top-center\{content:"- " counter\(page, thai\) " -"/);
+  assert.match(html, /@page:first\{@top-center\{content:none\}\}/);
+  const word = await parts((await exportDocx(letter, { documentTool: 'letter' })).bytes);
+  // ที่ and the sender share one paragraph, the sender after a tab at the centre of the text column.
+  assert.match(word.document, /ที่ อว ๐๐๐๐\/๐๐๐<\/w:t><\/w:r><w:r>(?:<w:rPr>.*?<\/w:rPr>)?<w:tab\/>/);
+  assert.match(word.headers, /<w:fldChar w:fldCharType="begin"\/>/);
 });
