@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { Store } from '../../harness/desktop/electron/store.ts';
@@ -14,6 +14,7 @@ import { newWorkspaceId, WorkspaceError } from '../src/workspace/contract.ts';
 import {
   HISTORY_IMPORT_KIND,
   importHistory,
+  privateEngineFiles,
   sourceDigest,
   verifyHistoryImport,
   type ImportReport,
@@ -301,6 +302,68 @@ test('refuses while a crashed holder left runtime launches that are not yet prov
     await assert.rejects(run(root, ws, spikeBatch()), /RUNTIME_RECOVERY_PENDING/);
     // Nothing was imported.
     assert.equal(sessions(root, ALICE, ws).sessions.length, 0);
+  });
+});
+
+test('refuses an engine file a runtime replaced with a symlink, and writes nothing outside the workspace', async () => {
+  // The workspace folder is mounted read-write into the runtime, so a runtime can plant workspace.sqlite (or a
+  // SQLite side file) as a symlink to a database elsewhere. The importer must refuse, never follow it.
+  for (const name of ['workspace.sqlite', 'workspace.sqlite-wal', 'workspace.sqlite-shm']) {
+    await withRoot(async (root, workspace) => {
+      const ws = await workspace();
+      const outside = join(root, `outside-${name}`);
+      const victim = new Store(outside); // a real SQLite database outside the owner's workspace
+      victim.close?.();
+      const before = await readFile(outside);
+      await symlink(outside, join(workspacePaths(root, ALICE.userId, ws).dir, name));
+      await assert.rejects(run(root, ws, spikeBatch()), /WORKSPACE_PATH_UNSAFE/, name);
+      assert.deepEqual(await readFile(outside), before, `${name}: outside database unchanged`);
+      assert.equal(
+        (await stat(outside)).mode & 0o777,
+        0o644 & ~process.umask() & 0o777,
+        `${name}: no chmod through the link`,
+      );
+    });
+  }
+});
+
+test('refuses when another workspace of the same owner has a symlinked engine file (ledger scan)', async () => {
+  await withRoot(async (root, workspace) => {
+    const ws = await workspace();
+    const other = await workspace();
+    const outside = join(root, 'outside.sqlite');
+    new Store(outside).close?.();
+    await symlink(outside, join(workspacePaths(root, ALICE.userId, other).dir, 'workspace.sqlite'));
+    await assert.rejects(run(root, ws, spikeBatch()), /WORKSPACE_PATH_UNSAFE/);
+    assert.equal(sessions(root, ALICE, ws).sessions.length, 0);
+  });
+});
+
+test('making engine files private never chmods through a link that appeared after the check', async () => {
+  await withRoot(async (root, workspace) => {
+    const ws = await workspace();
+    const dir = workspacePaths(root, ALICE.userId, ws).dir;
+    const outside = join(root, 'outside-target');
+    await writeFile(outside, 'x', { mode: 0o644 });
+    await chmod(outside, 0o644);
+    await symlink(outside, join(dir, 'workspace.sqlite-shm'));
+    assert.throws(() => privateEngineFiles(dir), /WORKSPACE_PATH_UNSAFE/);
+    assert.equal((await stat(outside)).mode & 0o777, 0o644);
+  });
+});
+
+test('verification refuses a symlinked engine file instead of reading through it', async () => {
+  await withRoot(async (root, workspace) => {
+    const ws = await workspace();
+    const report = await run(root, ws, spikeBatch());
+    const dir = workspacePaths(root, ALICE.userId, ws).dir;
+    const outside = join(root, 'moved.sqlite');
+    await rename(join(dir, 'workspace.sqlite'), outside);
+    await symlink(outside, join(dir, 'workspace.sqlite'));
+    await assert.rejects(
+      verifyHistoryImport({ dataRoot: root, owner: ALICE, workspaceId: ws, digestKey: KEY, report }),
+      /WORKSPACE_PATH_UNSAFE/,
+    );
   });
 });
 

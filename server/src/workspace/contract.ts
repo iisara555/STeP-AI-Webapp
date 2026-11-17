@@ -200,6 +200,8 @@ export type WorkspaceErrorCode =
   | 'RUNTIME_RESULT_TOO_LARGE'
   /** Runtimes launched by a previous manager of this data root are not yet proven gone; no start is admitted. */
   | 'RUNTIME_RECOVERY_PENDING'
+  /** A workspace file is a symlink, hard link or non-regular file; it is never followed or opened. */
+  | 'WORKSPACE_PATH_UNSAFE'
   | 'INVALID_INPUT';
 
 export class WorkspaceError extends Error {
