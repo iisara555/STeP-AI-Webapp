@@ -53,6 +53,9 @@ const TABLE_RULE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
 const isTableRule = (line: string) => /^[\s|:-]+$/.test(line) && line.includes('|') && line.includes('-');
 const hardBreak = (line: string) => / {2}$/.test(line) || (line.match(/\\+$/)?.[0].length || 0) % 2 === 1;
 const withoutBreak = (line: string) => (hardBreak(line) ? line.replace(/ {2}$|\\$/, '') : line);
+// A line opening with a clause label (๑.๑ / ๑.๑.๑ / ๒. / (๓), Thai or Arabic digits) starts its own paragraph, never
+// a continuation of the line above: one paragraph per point (thai-layout.md).
+const CLAUSE_LINE = /^\s*(?:[0-9๐-๙]+(?:\.[0-9๐-๙]+)+\.?|[๐-๙]+[.)]|\([0-9๐-๙]+\))\s/;
 export const MAX_TABLE_ROWS = 500;
 export const MAX_TABLE_COLUMNS = 30;
 
@@ -167,7 +170,7 @@ export function markdownDocument(markdown: string): DraftNode {
           .join(' · ')
       : raw.replace(/^\s*>\s?/, '');
     const fieldLine =
-      /^(?:ส่วนงาน|ส่วนราชการ|ที่\s|วันที่\s|เรื่อง\s|เรียน\s|อ้างถึง|สิ่งที่ส่งมาด้วย|หน่วยงาน\s|ผู้รับผิดชอบ|ชื่อการประชุม|ครั้งที่|วัน เวลา|เริ่มประชุม|เลิกประชุม|ขอแสดงความนับถือ|ตำแหน่ง|\(|\[รอยืนยัน:)/;
+      /^(?:ส่วนงาน|ส่วนราชการ|ที่\s|วันที่\s|เรื่อง\s|เรียน\s|อ้างถึง|สิ่งที่ส่งมาด้วย|หน่วยงาน\s|ผู้รับผิดชอบ|ชื่อการประชุม|ครั้งที่|วัน เวลา|เมื่อ\s|ณ\s|เริ่มประชุม|เลิกประชุม|ผู้มาประชุม|ผู้ไม่มาประชุม|ผู้เข้าร่วมประชุม|สาระสำคัญ|ข้อเสนอที่ยังไม่ตกลง|มติ(?:\s|ที่ประชุม)|ผู้จดรายงาน|ผู้ตรวจรายงาน|การรับรองรายงาน|ขอแสดงความนับถือ|ตำแหน่ง|โทร(?:\.|\s|ศัพท์)|โทรสาร|ไปรษณีย์อิเล็กทรอนิกส์|E-?mail|อีเมล|สำเนาส่ง|ผู้ประสานงาน|\(|\[รอยืนยัน:)/i;
     const prose = [text];
     while (
       at + 1 < lines.length &&
@@ -175,6 +178,7 @@ export function markdownDocument(markdown: string): DraftNode {
       !fieldLine.test(lines[at + 1]) &&
       lines[at + 1].trim() &&
       !/^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|[>|]|```|~~~)/.test(lines[at + 1]) &&
+      !CLAUSE_LINE.test(lines[at + 1]) &&
       !/^!\[.*\]\(step-asset:/.test(lines[at + 1]) &&
       !hardBreak(prose.at(-1)!)
     ) {
@@ -184,7 +188,12 @@ export function markdownDocument(markdown: string): DraftNode {
     const joined = prose.join(' ');
     const content = inline(withoutBreak(joined));
     if (hardBreak(prose.at(-1)!) && at + 1 < lines.length && lines[at + 1].trim()) {
-      while (at + 1 < lines.length && lines[at + 1].trim() && !/^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|[>|])/.test(lines[at + 1])) {
+      while (
+        at + 1 < lines.length &&
+        lines[at + 1].trim() &&
+        !/^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|[>|])/.test(lines[at + 1]) &&
+        !CLAUSE_LINE.test(lines[at + 1])
+      ) {
         const next = lines[++at];
         content.push({ type: 'hardBreak' }, ...inline(withoutBreak(next)));
         if (!hardBreak(next)) break;

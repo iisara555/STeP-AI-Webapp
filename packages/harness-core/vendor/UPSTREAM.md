@@ -44,6 +44,18 @@ Copied from `iisara555/STeP-AI-Harness` at
   breaking, and tables set explicit text alignment. The public STeP organization reference is included
   in the browser document request and trusted drafting contract; a different user-supplied agency remains
   authoritative for that task.
+- 2026-11-17 resync: `desktop/draft.ts`, `desktop/document-layout.ts`, `desktop/document-presentation.ts`,
+  `desktop/thai-typography.ts` and `desktop/document-export.ts` were brought to Harness `5d422af` (branch
+  `claude/saraban-nine`, the saraban output work) by a three-way merge from `90ee71c`, keeping the browser changes above.
+  This brings the saraban print layout (memo title 29 pt and 20 pt labels, 2.5 cm indent, the ที่ and sender row of an
+  external letter, "- ๒ -" page numbers from page 2, minutes order and spacing) and the TOR layout. Added with it,
+  unchanged apart from `.ts` import extensions: `desktop/tor-layout.ts`, `desktop/tor-furniture.ts`,
+  `desktop/invitation.ts` (needed by `document-presentation.ts`; the web passes no invitation) and
+  `desktop/step-tor-logo.ts` (decoded with `atob`; provenance in `docs/third-party-notices/step-tor-letterhead.md`).
+  `pdfHtml` takes the upstream `presentation` and `qrs` arguments before the web's `fontFaces`; `InvitationQr` is
+  declared locally because QR codes are not drawn in the browser. Not carried over: the TOR PDF header and footer
+  templates (Desktop prints them with `printToPDF`; the browser print has no such hook), the invitation print fonts,
+  and the export checks panel (`saraban-checks.ts`).
 - `desktop/document-fonts.ts` is upstream `desktop/electron/document-fonts.ts` with a font loader in place
   of the file system, Web Crypto hashes and the platform `DOMParser`; the manifest pin, per-file hashes
   and the package edits are unchanged. The font files themselves are the unchanged upstream

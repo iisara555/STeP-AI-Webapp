@@ -33,16 +33,24 @@ test('document form creates an editable private draft and waits for AI consent',
   await draft.fill(
     '# บันทึกข้อความ\n\nเรื่อง ทดสอบ\n\n## หัวเรื่อง\n\n- ข้อแรก\n\n| รายการ | จำนวน |\n| --- | --- |\n| ทดสอบ | 2 |',
   );
-  // A memo starts on the สารบรรณ page with Thai page numbers and the 1.5 cm Garuda, as on Desktop.
+  // A memo starts on the สารบรรณ page with "- ๒ -" page numbers from page 2 and the 1.5 cm Garuda, as on Desktop.
   await page.getByRole('button', { name: 'ตั้งค่าส่งออก', exact: true }).click();
   await expect(page.getByLabel('การจัดหน้า', { exact: true })).toHaveValue('saraban');
-  await expect(page.getByLabel('รูปแบบเลขหน้า', { exact: true })).toHaveValue('thai');
+  await expect(page.getByLabel('รูปแบบเลขหน้า', { exact: true })).toHaveValue('saraban');
+  await expect(page.getByLabel('ตำแหน่งเลขหน้า', { exact: true })).toBeDisabled();
   await expect(page.getByLabel('ตราครุฑ', { exact: true })).toHaveValue('auto');
   const downloaded = page.waitForEvent('download');
   await page.getByRole('button', { name: 'ส่งออก', exact: true }).click();
   const zip = await JSZip.loadAsync(await readFile((await (await downloaded).path())!));
   const xml = (await zip.file('word/document.xml')!.async('string')).replace(/​/g, '');
-  const header = (await zip.file('word/header1.xml')!.async('string')).replace(/​/g, '');
+  // Page 1 has its own header with the Garuda; later pages carry the page number.
+  const headers = await Promise.all(
+    Object.keys(zip.files)
+      .filter((n) => /^word\/header\d+\.xml$/.test(n))
+      .map(async (n) => (await zip.file(n)!.async('string')).replace(/​/g, '')),
+  );
+  const header = headers.find((h) => h.includes('<w:drawing>')) || '';
+  expect(headers.some((h) => h.includes('PAGE'))).toBe(true);
   expect(header).toContain('บันทึกข้อความ');
   expect(header).toContain('cx="540000"');
   expect(xml).toContain('หัวเรื่อง');

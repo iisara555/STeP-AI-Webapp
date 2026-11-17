@@ -320,6 +320,7 @@ export function DraftExport({
                   }
                 >
                   <option value="none">ไม่ใส่เลขหน้า</option>
+                  <option value="saraban">- ๒ - หัวกระดาษ ตั้งแต่หน้า ๒</option>
                   <option value="thai">หน้า ๑</option>
                   <option value="arabic-total">1 / 10</option>
                 </select>
@@ -328,7 +329,7 @@ export function DraftExport({
                 ตำแหน่งเลขหน้า
                 <select
                   aria-label="ตำแหน่งเลขหน้า"
-                  disabled={presentation.pageNumber === 'none'}
+                  disabled={presentation.pageNumber === 'none' || presentation.pageNumber === 'saraban'}
                   value={presentation.pageNumberPosition}
                   onChange={(e) =>
                     update({
