@@ -379,6 +379,24 @@ export async function verifyHistoryImport(options: {
 }): Promise<VerifyResult> {
   const { dataRoot, owner, workspaceId, digestKey, report } = options;
   checkKey(digestKey);
+  // Held like import: with no live or unreaped runtime, nothing can swap the engine file between the link check in
+  // ledgerRows() and the open below.
+  const fence = WriterFence.acquire(dataRoot);
+  try {
+    if (LaunchJournal.open(dataRoot).pending().length) throw new WorkspaceError('RUNTIME_RECOVERY_PENDING');
+    return await verifyFenced(dataRoot, owner, workspaceId, digestKey, report);
+  } finally {
+    fence.release();
+  }
+}
+
+async function verifyFenced(
+  dataRoot: string,
+  owner: Identity,
+  workspaceId: string,
+  digestKey: Uint8Array,
+  report: ImportReport,
+): Promise<VerifyResult> {
   const record = await readRecord(dataRoot, authenticatedOwner(owner), workspaceId);
   const file = join(workspacePaths(dataRoot, record.ownerId, record.id).dir, ENGINE_FILE);
   const byRef = new Map<string, DigestEntry>();

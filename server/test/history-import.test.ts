@@ -4,7 +4,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { Store } from '../../harness/desktop/electron/store.ts';
@@ -23,7 +35,7 @@ import { processDriver } from '../src/workspace/process-driver.ts';
 import { createWorkspaceFolders, readConversationIndex, workspacePaths } from '../src/workspace/storage.ts';
 import { WriterFence } from '../src/workspace/writer-fence.ts';
 import { LaunchJournal } from '../src/workspace/launch-journal.ts';
-import { privateEngineFiles } from '../src/workspace/engine-files.ts';
+import { privateEngineFiles, requireRealEngineFiles } from '../src/workspace/engine-files.ts';
 import { provisionTestQuota } from './support/quota.ts';
 
 const SPIKE = resolve(import.meta.dirname, '../../spikes/063-migration-preview');
@@ -349,6 +361,59 @@ test('making engine files private never chmods through a link that appeared afte
     await symlink(outside, join(dir, 'workspace.sqlite-shm'));
     assert.throws(() => privateEngineFiles(dir), /WORKSPACE_PATH_UNSAFE/);
     assert.equal((await stat(outside)).mode & 0o777, 0o644);
+  });
+});
+
+test('verification holds the writer fence, so no live runtime can swap the engine file mid-verify', async () => {
+  await withRoot(async (root, workspace) => {
+    const ws = await workspace();
+    const report = await run(root, ws, spikeBatch());
+    const verify = () =>
+      verifyHistoryImport({ dataRoot: root, owner: ALICE, workspaceId: ws, digestKey: KEY, report });
+    const fence = WriterFence.acquire(root);
+    try {
+      await assert.rejects(verify(), /WORKSPACE_WRITER_FENCE_HELD/);
+      LaunchJournal.open(root).record({
+        kind: 'step-runner',
+        unit: `step-rt-${'b'.repeat(32)}.scope`,
+        workspaceId: ws,
+      });
+    } finally {
+      fence.release();
+    }
+    await assert.rejects(verify(), /RUNTIME_RECOVERY_PENDING/);
+  });
+});
+
+test('engine-file guard refuses a linked folder, an unreadable entry, and a FIFO or hard link at chmod time', async () => {
+  await withRoot(async (root, workspace) => {
+    const ws = await workspace();
+    const dir = workspacePaths(root, ALICE.userId, ws).dir;
+    // The workspace folder itself replaced by a symlink to a real directory.
+    const elsewhere = join(root, 'elsewhere');
+    await mkdir(elsewhere);
+    const linked = join(root, 'linked-ws');
+    await symlink(elsewhere, linked);
+    assert.throws(() => requireRealEngineFiles(linked), /WORKSPACE_PATH_UNSAFE/);
+    // An entry that cannot be inspected (EACCES, not ENOENT) is refused, not skipped.
+    const locked = join(root, 'locked');
+    await mkdir(locked);
+    await chmod(locked, 0o600); // no search permission: lstat of entries fails with EACCES
+    try {
+      assert.throws(() => requireRealEngineFiles(locked), /WORKSPACE_PATH_UNSAFE/);
+    } finally {
+      await chmod(locked, 0o700);
+    }
+    // At chmod time (after the lstat check) a FIFO or a hard link is refused and never chmod-ed.
+    execFileSync('mkfifo', [join(dir, 'workspace.sqlite-wal')]);
+    assert.throws(() => privateEngineFiles(dir), /WORKSPACE_PATH_UNSAFE/);
+    await rm(join(dir, 'workspace.sqlite-wal'));
+    const target = join(root, 'shared-target');
+    await writeFile(target, 'x', { mode: 0o644 });
+    await chmod(target, 0o644);
+    await link(target, join(dir, 'workspace.sqlite-shm'));
+    assert.throws(() => privateEngineFiles(dir), /WORKSPACE_PATH_UNSAFE/);
+    assert.equal((await stat(target)).mode & 0o777, 0o644);
   });
 });
 
