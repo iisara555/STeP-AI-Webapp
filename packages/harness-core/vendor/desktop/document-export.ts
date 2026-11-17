@@ -1,4 +1,4 @@
-// Adapted from upstream desktop/electron/export.ts (STeP-AI-Harness 7e02f09) for the browser: Word and the PDF page
+// Adapted from upstream desktop/electron/export.ts (STeP-AI-Harness 00c61e4) for the browser: Word and the PDF page
 // HTML are unchanged; files are returned instead of written, the font faces travel with the page, and the
 // spreadsheet, slide and agency-template exports are not carried over. Changes are listed in ../UPSTREAM.md.
 import {
