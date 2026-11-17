@@ -14,7 +14,6 @@ import { newWorkspaceId, WorkspaceError } from '../src/workspace/contract.ts';
 import {
   HISTORY_IMPORT_KIND,
   importHistory,
-  privateEngineFiles,
   sourceDigest,
   verifyHistoryImport,
   type ImportReport,
@@ -24,6 +23,7 @@ import { processDriver } from '../src/workspace/process-driver.ts';
 import { createWorkspaceFolders, readConversationIndex, workspacePaths } from '../src/workspace/storage.ts';
 import { WriterFence } from '../src/workspace/writer-fence.ts';
 import { LaunchJournal } from '../src/workspace/launch-journal.ts';
+import { privateEngineFiles } from '../src/workspace/engine-files.ts';
 import { provisionTestQuota } from './support/quota.ts';
 
 const SPIKE = resolve(import.meta.dirname, '../../spikes/063-migration-preview');

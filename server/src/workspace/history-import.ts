@@ -23,7 +23,7 @@
 // - Verifiable: the report has counts and keyed digests only (HMAC-SHA256 under the operator's migration key), never
 //   text, titles or source ids; sourceDigest() computes the same entry from the source side for #65's checks.
 import { createHash, createHmac, randomUUID } from 'node:crypto';
-import { closeSync, constants, existsSync, fchmodSync, fstatSync, lstatSync, openSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -34,11 +34,11 @@ import { credentialStillValid, type Identity } from '../gateway/auth.ts';
 import { UserId, WorkspaceError, type ConversationSummary } from './contract.ts';
 import { CONVERSATION_INDEX, listRecords, readRecord, workspacePaths } from './storage.ts';
 import { WriterFence } from './writer-fence.ts';
+import { ENGINE_FILE, privateEngineFiles, requireRealEngineFiles } from './engine-files.ts';
 import { LaunchJournal } from './launch-journal.ts';
 
 /** Engine record kind of the per-conversation import ledger, beside the `session` rows in workspace.sqlite. */
 export const HISTORY_IMPORT_KIND = 'history-import';
-const ENGINE_FILE = 'workspace.sqlite';
 
 const Timestamp = z
   .string()
@@ -222,35 +222,6 @@ function approvedOwners(mappings: unknown) {
 }
 
 /** Ledger rows of a workspace.sqlite, read without opening the engine (whose Store constructor writes). */
-const ENGINE_FILES = [ENGINE_FILE, `${ENGINE_FILE}-wal`, `${ENGINE_FILE}-shm`];
-
-/**
- * The workspace folder is mounted read-write into its runtime, so a runtime can replace workspace.sqlite or a SQLite
- * side file with a symlink (or a hard link) to a database elsewhere. Opening, writing or chmod-ing such a path would
- * act on that other file. Every engine file that exists must be a single-link regular file inside a real directory.
- * No runtime can swap it after this check during an import: the writer fence is held and no launch is pending.
- */
-function requireRealEngineFiles(dir: string) {
-  const unsafe = () => new WorkspaceError('WORKSPACE_PATH_UNSAFE');
-  let folder;
-  try {
-    folder = lstatSync(dir);
-  } catch {
-    throw unsafe();
-  }
-  if (!folder.isDirectory()) throw unsafe();
-  for (const name of ENGINE_FILES) {
-    let file;
-    try {
-      file = lstatSync(join(dir, name));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-      throw unsafe();
-    }
-    if (!file.isFile() || file.nlink !== 1) throw unsafe();
-  }
-}
-
 function ledgerRows(file: string): { id: string; value: string }[] {
   requireRealEngineFiles(dirname(file));
   if (!existsSync(file)) return [];
@@ -264,27 +235,6 @@ function ledgerRows(file: string): { id: string; value: string }[] {
     return []; // no records table yet
   } finally {
     db.close();
-  }
-}
-
-/** Engine files are private to the service account, as runtime-main.ts's umask makes them. Exported for tests. */
-export function privateEngineFiles(dir: string) {
-  for (const name of ENGINE_FILES) {
-    let fd: number;
-    try {
-      // O_NOFOLLOW: never chmod through a symlink, even if one appeared after requireRealEngineFiles.
-      fd = openSync(join(dir, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-      throw new WorkspaceError('WORKSPACE_PATH_UNSAFE');
-    }
-    try {
-      const file = fstatSync(fd);
-      if (!file.isFile() || file.nlink !== 1) throw new WorkspaceError('WORKSPACE_PATH_UNSAFE');
-      fchmodSync(fd, 0o600);
-    } finally {
-      closeSync(fd);
-    }
   }
 }
 
