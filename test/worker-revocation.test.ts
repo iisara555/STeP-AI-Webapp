@@ -486,3 +486,36 @@ test('revocation while choosing references stops the run before the answer', asy
   assert.equal(f.state.finishes[0].answer, null);
   assert.equal(f.state.finishes[0].error, 'ACCESS_DENIED');
 });
+
+test('a reference choice that runs past its own time limit is skipped and the question is still answered', async () => {
+  // The choice has a shorter limit than the run. Its timeout used to be reported as RUN_INTERRUPTED and stopped the
+  // whole run before the answer (seen on 2026-11-18 when Gemini took longer than 25 seconds to choose).
+  const original = AbortSignal.timeout;
+  const choiceLimit = new AbortController();
+  AbortSignal.timeout = (ms: number) => (ms === 25000 ? choiceLimit.signal : original.call(AbortSignal, ms));
+  try {
+    const f = await fixture('chat', {
+      message: 'ปีหน้าลางานได้กี่วัน',
+      documents: false,
+      sources: [leaveIndex],
+      skills: [policySkill],
+    });
+    let generations = 0;
+    f.state.onRequest = (step) => {
+      if (step !== 'generateContent' || generations++ > 0) return;
+      choiceLimit.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+      throw choiceLimit.signal.reason;
+    };
+    const result = await f.run();
+    assert.ok(!('code' in result), 'the run is not stopped');
+    const finish = f.state.finishes.at(-1)!;
+    assert.equal(finish.error ?? null, null);
+    assert.ok(finish.answer, 'the question is answered');
+    assert.ok(
+      !f.state.sent.at(-1)!.includes('SYNTHETIC_LEAVE_MARKER'),
+      'nothing chosen, so no chapter is added',
+    );
+  } finally {
+    AbortSignal.timeout = original;
+  }
+});

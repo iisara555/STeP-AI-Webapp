@@ -83,7 +83,8 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
   const jobFetch: typeof fetch = async (input, init) => {
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error('RUN_INTERRUPTED');
-    const signal = AbortSignal.any([AbortSignal.timeout(remaining), ...(init?.signal ? [init.signal] : [])]);
+    const runDeadline = AbortSignal.timeout(remaining);
+    const signal = AbortSignal.any([runDeadline, ...(init?.signal ? [init.signal] : [])]);
     try {
       // Check at the actual request boundary, including token counting, embeddings, Google
       // reads and every provider retry. Do not reuse the access decision from prompt assembly.
@@ -95,7 +96,9 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
       signal.throwIfAborted();
       return await fetcher(input, { ...init, signal });
     } catch (error) {
-      if (Date.now() >= deadline || signal.aborted) throw new Error('RUN_INTERRUPTED');
+      // Only the run's own deadline interrupts the run. A step's shorter timeout (such as the reference choice)
+      // fails that step alone, so the caller can carry on without it.
+      if (Date.now() >= deadline || runDeadline.aborted) throw new Error('RUN_INTERRUPTED');
       throw error;
     }
   };
