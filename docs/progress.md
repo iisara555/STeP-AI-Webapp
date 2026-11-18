@@ -10,7 +10,8 @@
 - Gateway ของเว็บให้ runtime ใช้ token ในชื่อเจ้าของเมื่อตั้ง `STEP_AI_INTERNAL_SECRET` (ไม่ตั้งก็ทำงานแบบเดิมด้วย `STEP_AI_KEY`)
 - เจ้าของเลือกเปิดให้เครื่องพนักงานเข้าถึงด้วย Tailscale Funnel เฉพาะ `/ai`
 - แยกงานตามประเภทตามแบบที่เจ้าของเสนอ: ผู้ให้บริการและ FP8 แยกต่อโมเดล, รูป/PDF ไปโมเดลอ่านภาพเอง, โมเดลสำรองเมื่อตัวหลักล่ม
-  ยังไม่ทำ: เลือก Sonnet ให้เองตาม Skill เอกสารทางการ (ต้องแก้ Desktop) และการสร้างภาพ (Desktop ยังไม่มีฟีเจอร์นี้)
+  เจ้าของเห็นชอบให้นำร่องด้วย Haiku 5.5 (งานทั่วไป + ใบเสร็จ) และ Sonnet 5.5 (เอกสารทางการ, Desktop เลือกให้เองตาม Skill)
+  DeepSeek/Gemini เป็นตัวทดลองใน `ai-gateway.trial-routing.example.json` หลังตรวจ ZDR และคุณภาพ การสร้างภาพเลื่อนไปหลังนำร่อง
 - รอเจ้าของ: ซื้อเครดิตและตั้ง OpenRouter (ZDR, guardrail, key มีวงเงิน), ใส่ key บน ik-node-01, อนุมัติ deploy
   และวัดคุณภาพโมเดลผ่าน gateway ก่อนเปิดให้พนักงาน ยังไม่ได้ทดสอบกับ OpenRouter จริง (ทดสอบกับ OpenRouter ปลอมเท่านั้น)
 - ตรวจแล้ว: `npm run check`, `npm test` 121, `server/test/ai-proxy.test.ts` 16 + `gateway-auth.test.ts` 4
