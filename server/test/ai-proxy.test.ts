@@ -473,3 +473,130 @@ test('settings reject a person in two departments and duplicate model names', ()
     false,
   );
 });
+
+const ROUTED = AiGatewayConfig.parse({
+  models: [
+    {
+      id: 'step-chat',
+      label: 'งานทั่วไป',
+      upstream: 'deepseek/deepseek-v4.1-flash',
+      price: { input: 0.051, output: 0.203 },
+      default: true,
+      providers: ['deepinfra', 'novita'],
+      quantizations: ['fp8'],
+      fallback: 'step-backup',
+    },
+    {
+      id: 'step-vision',
+      label: 'อ่านภาพและใบเสร็จ',
+      upstream: 'google/gemini-3.8-flash',
+      price: { input: 0.825, output: 4.125 },
+    },
+    {
+      id: 'step-backup',
+      label: 'สำรอง',
+      upstream: 'anthropic/claude-haiku-5.5',
+      price: { input: 0.1, output: 0.5 },
+    },
+    {
+      id: 'step-long',
+      label: 'เอกสารทางการ',
+      upstream: 'anthropic/claude-sonnet-5.5',
+      price: { input: 2, output: 10 },
+    },
+  ],
+  providers: ['google-vertex', 'amazon-bedrock'],
+  routes: { images: 'step-vision' },
+  budget: { orgMonthlyUsd: 100, userMonthlyUsd: 3 },
+});
+
+const picture = (model = 'step-chat') =>
+  ask(model, {
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'อ่านใบเสร็จนี้' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+        ],
+      },
+    ],
+  });
+
+test('task routing: text goes to the default model on its own FP8 providers, a picture to the image model', async () => {
+  const t = await setup(streamReply(), { settings: ROUTED });
+  try {
+    for (const body of [ask(), picture(), picture('step-long')])
+      assert.equal(
+        (await (await t.call('/v1/chat/completions', 'staff', body)).text()).includes('[DONE]'),
+        true,
+      );
+    const [text, image, chosen] = t.upstream.seen.map((s) => s.body);
+    assert.equal(text.model, 'deepseek/deepseek-v4.1-flash');
+    assert.deepEqual(text.provider, {
+      zdr: true,
+      data_collection: 'deny',
+      only: ['deepinfra', 'novita'],
+      quantizations: ['fp8'],
+    });
+    assert.equal(image.model, 'google/gemini-3.8-flash');
+    assert.deepEqual(image.provider.only, ['google-vertex', 'amazon-bedrock']);
+    assert.equal(image.provider.quantizations, undefined);
+    assert.equal(chosen.model, 'anthropic/claude-sonnet-5.5', 'a model picked on purpose is kept');
+    const totals = await until(
+      () => t.ledger.totals(monthOf(NOW)),
+      (v) => v.org.requests === 3,
+    );
+    assert.equal(totals.org.requests, 3);
+    const lines = (await readFile(join(t.dir, 'ai-usage', `${monthOf(NOW)}.jsonl`), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l).model);
+    assert.deepEqual(lines.sort(), ['step-chat', 'step-long', 'step-vision']);
+  } finally {
+    await t.close();
+  }
+});
+
+test('when the default model has no provider up, the stand-in answers once; a credit error is never retried', async () => {
+  let credit = false;
+  const t = await setup(
+    (seen, res) => {
+      if (credit) {
+        res.writeHead(402, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: { code: 402, message: 'Insufficient credits' } }));
+      }
+      if (seen.body?.model === 'deepseek/deepseek-v4.1-flash') {
+        res.writeHead(503, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: { code: 503, message: 'No instances available' } }));
+      }
+      streamReply()(seen, res);
+    },
+    { settings: ROUTED },
+  );
+  try {
+    const response = await t.call('/v1/chat/completions', 'staff', ask());
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /สวัส/);
+    assert.deepEqual(
+      t.upstream.seen.map((s) => s.body.model),
+      ['deepseek/deepseek-v4.1-flash', 'anthropic/claude-haiku-5.5'],
+    );
+    assert.deepEqual(t.upstream.seen[1].body.provider.only, ['google-vertex', 'amazon-bedrock']);
+
+    credit = true;
+    const refused = await t.call('/v1/chat/completions', 'staff', ask());
+    assert.equal(refused.status, 429);
+    assert.equal((await refused.json()).error.code, 'credit_balance_exhausted');
+    assert.equal(t.upstream.seen.length, 3, 'no second call after a credit error');
+  } finally {
+    await t.close();
+  }
+});
+
+test('settings reject a route or fallback that names no model', () => {
+  const base = JSON.parse(JSON.stringify(ROUTED));
+  assert.throws(() => AiGatewayConfig.parse({ ...base, routes: { images: 'step-missing' } }));
+  base.models[0].fallback = 'step-chat';
+  assert.throws(() => AiGatewayConfig.parse(base));
+});

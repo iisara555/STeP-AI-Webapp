@@ -9,9 +9,11 @@
   แทนชื่อจริง, บังคับ ZDR และรายชื่อผู้ให้บริการ, เพดานรายเดือนต่อคน/หน่วยงาน/องค์กร, รายงานการใช้ไม่มีข้อความคำถามหรือคำตอบ
 - Gateway ของเว็บให้ runtime ใช้ token ในชื่อเจ้าของเมื่อตั้ง `STEP_AI_INTERNAL_SECRET` (ไม่ตั้งก็ทำงานแบบเดิมด้วย `STEP_AI_KEY`)
 - เจ้าของเลือกเปิดให้เครื่องพนักงานเข้าถึงด้วย Tailscale Funnel เฉพาะ `/ai`
+- แยกงานตามประเภทตามแบบที่เจ้าของเสนอ: ผู้ให้บริการและ FP8 แยกต่อโมเดล, รูป/PDF ไปโมเดลอ่านภาพเอง, โมเดลสำรองเมื่อตัวหลักล่ม
+  ยังไม่ทำ: เลือก Sonnet ให้เองตาม Skill เอกสารทางการ (ต้องแก้ Desktop) และการสร้างภาพ (Desktop ยังไม่มีฟีเจอร์นี้)
 - รอเจ้าของ: ซื้อเครดิตและตั้ง OpenRouter (ZDR, guardrail, key มีวงเงิน), ใส่ key บน ik-node-01, อนุมัติ deploy
   และวัดคุณภาพโมเดลผ่าน gateway ก่อนเปิดให้พนักงาน ยังไม่ได้ทดสอบกับ OpenRouter จริง (ทดสอบกับ OpenRouter ปลอมเท่านั้น)
-- ตรวจแล้ว: `npm run check`, `npm test` 121, `server/test/ai-proxy.test.ts` 13 + `gateway-auth.test.ts` 4
+- ตรวจแล้ว: `npm run check`, `npm test` 121, `server/test/ai-proxy.test.ts` 16 + `gateway-auth.test.ts` 4
   (`npm run test:engine` ทั้งชุดรันในคลาวด์ไม่จบเพราะ engine ยังไม่ได้ติดตั้ง dependencies ให้ CI ตรวจ)
 
 ## 2026-11-18 · ขั้นเลือกเอกสารที่ช้าไม่ทำให้ทั้งงานหยุด (RUN_INTERRUPTED)

@@ -67,6 +67,20 @@ class ProxyError extends Error {
 
 const usd = (n: number) => Math.round(n * 1_000_000) / 1_000_000;
 
+/** OpenRouter answers 404 when no provider meets the request's data rules, 429/5xx when providers are busy or down. */
+const retryable = (status: number) => status === 404 || status === 408 || status === 429 || status >= 500;
+
+/** True when any message holds a picture or a file part (OpenAI image_url, input_image, or OpenRouter file/PDF). */
+function carriesAttachment(messages: unknown[]) {
+  return messages.some(
+    (m) =>
+      Array.isArray((m as { content?: unknown })?.content) &&
+      (m as { content: unknown[] }).content.some((part) =>
+        ['image_url', 'input_image', 'file'].includes((part as { type?: unknown })?.type as string),
+      ),
+  );
+}
+
 export function createAiProxy(options: AiProxyOptions) {
   const upstream = (options.upstream ?? OPENROUTER_API).replace(/\/$/, '');
   const request = options.fetch ?? fetch;
@@ -125,10 +139,12 @@ export function createAiProxy(options: AiProxyOptions) {
     if (body.stream === true) body.stream_options = { include_usage: true };
     body.usage = { include: true };
     // Zero Data Retention and no training on our prompts, on every request, whatever the account settings are.
+    const providers = model.providers ?? config.providers;
     body.provider = {
       zdr: true,
       data_collection: 'deny',
-      ...(config.providers?.length ? { only: config.providers } : {}),
+      ...(providers?.length ? { only: providers } : {}),
+      ...(model.quantizations ? { quantizations: model.quantizations } : {}),
     };
     // A stable pseudonym lets OpenRouter tell people apart for abuse limits without learning who they are.
     body.user = createHash('sha256').update(`step:${who.userId}`).digest('hex').slice(0, 32);
@@ -173,17 +189,66 @@ export function createAiProxy(options: AiProxyOptions) {
   async function chat(req: IncomingMessage, res: ServerResponse, who: Who) {
     const config = await settings();
     const input = await readJson(req);
-    const model = config.models.find((m) => m.id === input.model);
-    if (!model) throw new ProxyError(400, 'model_not_allowed', 'องค์กรไม่ได้เปิดโมเดลนี้');
+    const asked = config.models.find((m) => m.id === input.model);
+    if (!asked) throw new ProxyError(400, 'model_not_allowed', 'องค์กรไม่ได้เปิดโมเดลนี้');
     if (!Array.isArray(input.messages) || !input.messages.length || input.messages.length > 1_000)
       throw new ProxyError(400, 'invalid_request', 'คำขอไม่ถูกต้อง');
     const department = await admit(config, who);
+    // Task-based routing: a picture or PDF sent to the default model goes to the model set for reading them.
+    const imageModel = config.models.find((m) => m.id === config.routes.images);
+    const first =
+      imageModel && asked === defaultModel(config) && carriesAttachment(input.messages) ? imageModel : asked;
     active.set(who.userId, (active.get(who.userId) ?? 0) + 1);
     const abort = new AbortController();
     const onClose = () => {
       if (!res.writableEnded) abort.abort();
     };
     res.on('close', onClose);
+    try {
+      let model = first;
+      for (let attempt = 0; ; attempt++) {
+        const response = await callUpstream(input, model, config, who, abort.signal);
+        if (!response) return;
+        const record = recorder(who, department, model);
+        if (!response.ok) {
+          const reason = await upstreamError(response);
+          console.error('ai upstream', response.status, reason.code, model.id);
+          await record('error', costOf(model, {}));
+          const fallback = config.models.find((m) => m.id === model.fallback);
+          // Providers down, overloaded or none left under our data rules: try the stand-in once.
+          if (fallback && attempt === 0 && retryable(response.status) && !abort.signal.aborted) {
+            model = fallback;
+            continue;
+          }
+          throw mapUpstream(response, reason.contextTooLong);
+        }
+        const body = upstreamBody(input, model, config, who);
+        // Rough size of the prompt in tokens, only for estimating a request OpenRouter never reported on.
+        const estimateTokens = Math.ceil(JSON.stringify(body).length / 3);
+        if (input.stream === true)
+          await stream(response, res, abort.signal, model, record, estimateTokens, settle);
+        else {
+          const text = await readLimited(response, RESPONSE_LIMIT);
+          let data: any;
+          try {
+            data = JSON.parse(text);
+          } catch {
+            throw new ProxyError(502, 'upstream_invalid', 'ผู้ให้บริการ AI ตอบกลับผิดรูปแบบ');
+          }
+          await record('ok', costOf(model, data?.usage));
+          send(res, 200, data);
+        }
+        return;
+      }
+    } finally {
+      res.off('close', onClose);
+      const left = (active.get(who.userId) ?? 1) - 1;
+      if (left > 0) active.set(who.userId, left);
+      else active.delete(who.userId);
+    }
+  }
+
+  function recorder(who: Who, department: string, model: AiModel) {
     const base = {
       userId: who.userId,
       email: who.email,
@@ -191,53 +256,33 @@ export function createAiProxy(options: AiProxyOptions) {
       model: model.id,
       upstream: model.upstream,
     };
-    const record = (outcome: UsageEntry['outcome'], cost: Cost) =>
+    return (outcome: UsageEntry['outcome'], cost: Cost) =>
       options.ledger.record({ at: new Date(now()).toISOString(), ...base, ...cost, outcome }).catch(() => {});
-    const body = JSON.stringify(upstreamBody(input, model, config, who));
-    // Rough size of the prompt in tokens, only for estimating a request OpenRouter never reported on.
-    const estimateTokens = Math.ceil(body.length / 3);
+  }
+
+  /** Undefined when the employee went away before OpenRouter answered. */
+  async function callUpstream(
+    input: Record<string, unknown>,
+    model: AiModel,
+    config: AiGatewayConfig,
+    who: Who,
+    signal: AbortSignal,
+  ): Promise<Response | undefined> {
     try {
-      let response: Response;
-      try {
-        response = await request(`${upstream}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            authorization: `Bearer ${options.key}`,
-            'content-type': 'application/json',
-            'x-title': 'STeP AI',
-          },
-          body,
-          redirect: 'error',
-          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(900_000)]),
-        });
-      } catch {
-        if (abort.signal.aborted) return;
-        throw new ProxyError(502, 'upstream_unreachable', 'ติดต่อผู้ให้บริการ AI ไม่ได้ ลองใหม่อีกครั้ง');
-      }
-      if (!response.ok) {
-        const reason = await upstreamError(response);
-        console.error('ai upstream', response.status, reason.code);
-        await record('error', costOf(model, {}));
-        throw mapUpstream(response, reason.contextTooLong);
-      }
-      if (input.stream === true)
-        await stream(response, res, abort.signal, model, record, estimateTokens, settle);
-      else {
-        const text = await readLimited(response, RESPONSE_LIMIT);
-        let data: any;
-        try {
-          data = JSON.parse(text);
-        } catch {
-          throw new ProxyError(502, 'upstream_invalid', 'ผู้ให้บริการ AI ตอบกลับผิดรูปแบบ');
-        }
-        await record('ok', costOf(model, data?.usage));
-        send(res, 200, data);
-      }
-    } finally {
-      res.off('close', onClose);
-      const left = (active.get(who.userId) ?? 1) - 1;
-      if (left > 0) active.set(who.userId, left);
-      else active.delete(who.userId);
+      return await request(`${upstream}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${options.key}`,
+          'content-type': 'application/json',
+          'x-title': 'STeP AI',
+        },
+        body: JSON.stringify(upstreamBody(input, model, config, who)),
+        redirect: 'error',
+        signal: AbortSignal.any([signal, AbortSignal.timeout(900_000)]),
+      });
+    } catch {
+      if (signal.aborted) return undefined;
+      throw new ProxyError(502, 'upstream_unreachable', 'ติดต่อผู้ให้บริการ AI ไม่ได้ ลองใหม่อีกครั้ง');
     }
   }
 

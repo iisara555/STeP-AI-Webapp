@@ -12,6 +12,8 @@ const Email = z
 /** US dollars; OpenRouter bills in USD. */
 const Usd = z.number().nonnegative().max(100_000);
 
+const ProviderSlugs = z.array(z.string().regex(/^[a-z0-9-]{1,60}$/)).max(30);
+
 const Model = z
   .object({
     /** The name staff and Desktop see (e.g. step-chat). The upstream model can change without touching Desktop. */
@@ -26,6 +28,16 @@ const Model = z
     price: z.object({ input: Usd, output: Usd }).strict(),
     maxOutputTokens: z.number().int().min(256).max(128_000).default(8192),
     default: z.boolean().optional(),
+    /** Providers allowed for this model only (replaces the top-level list), e.g. FP8 hosts for an open model. */
+    providers: ProviderSlugs.optional(),
+    /** Only endpoints serving these precisions (OpenRouter `provider.quantizations`), e.g. ["fp8"] to skip FP4. */
+    quantizations: z
+      .array(z.enum(['int4', 'int8', 'fp4', 'fp6', 'fp8', 'fp16', 'bf16', 'fp32']))
+      .min(1)
+      .max(8)
+      .optional(),
+    /** Another model id tried once when this one's providers are down or overloaded (never for quota errors). */
+    fallback: z.string().optional(),
   })
   .strict();
 
@@ -44,10 +56,12 @@ export const AiGatewayConfig = z
   .object({
     models: z.array(Model).min(1).max(20),
     /** OpenRouter provider slugs allowed to serve requests (e.g. google-vertex, amazon-bedrock); empty = any ZDR one. */
-    providers: z
-      .array(z.string().regex(/^[a-z0-9-]{1,60}$/))
-      .max(30)
-      .optional(),
+    providers: ProviderSlugs.optional(),
+    /**
+     * Picks the model by what the request holds, only when the client asked for the default model (a model chosen on
+     * purpose is kept): `images` serves requests carrying a picture or a PDF, e.g. receipts.
+     */
+    routes: z.object({ images: z.string().optional() }).strict().default({}),
     budget: z
       .object({
         /** The whole organization's monthly cap; keep it a little under the OpenRouter key's own limit. */
@@ -67,6 +81,12 @@ export const AiGatewayConfig = z
     if (new Set(config.models.map((m) => m.id)).size !== config.models.length)
       issue('model ids must be unique');
     if (config.models.filter((m) => m.default).length > 1) issue('at most one default model');
+    const ids = new Set(config.models.map((m) => m.id));
+    for (const m of config.models)
+      if (m.fallback !== undefined && (m.fallback === m.id || !ids.has(m.fallback)))
+        issue(`model ${m.id}: fallback must be another model id`);
+    if (config.routes.images !== undefined && !ids.has(config.routes.images))
+      issue('routes.images must be a model id');
     if (new Set(config.departments.map((d) => d.id)).size !== config.departments.length)
       issue('department ids must be unique');
     const members = config.departments.flatMap((d) => d.members);
