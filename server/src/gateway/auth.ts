@@ -15,8 +15,11 @@ export type Authenticator = (authorization: string | undefined) => Promise<Ident
 type Jwk = webcrypto.JsonWebKey & { kid?: string };
 
 export type GoogleAuthOptions = {
-  /** The OAuth client id the web app signs in with; the token's audience must be exactly this. */
-  clientId: string;
+  /**
+   * The OAuth client id(s) allowed as the token's audience: the web app's, and for the organization AI gateway also
+   * STeP Desktop's installed-app client. The audience must equal one of them exactly.
+   */
+  clientId: string | string[];
   /** Organization domains, checked against the token's `hd` claim and the email's domain. */
   domains: string[];
   /** Invited emails (lowercase), read on every request so a removal takes effect at once. */
@@ -35,6 +38,7 @@ export function googleIdTokenAuth(options: GoogleAuthOptions): Authenticator {
   const now = options.now ?? Date.now;
   const domains = new Set(options.domains.map((d) => d.toLowerCase()));
   const admins = options.admins ?? new Set<string>();
+  const audiences = new Set(Array.isArray(options.clientId) ? options.clientId : [options.clientId]);
   return async (authorization) => {
     const token = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(authorization ?? '')?.[1];
     if (!token) return null;
@@ -60,7 +64,8 @@ export function googleIdTokenAuth(options: GoogleAuthOptions): Authenticator {
     const email = typeof claims.email === 'string' ? claims.email.toLowerCase() : '';
     if (
       !ISSUERS.has(String(claims.iss)) ||
-      claims.aud !== options.clientId ||
+      typeof claims.aud !== 'string' ||
+      !audiences.has(claims.aud) ||
       typeof claims.exp !== 'number' ||
       claims.exp + SKEW_SECONDS < seconds ||
       (typeof claims.iat === 'number' && claims.iat - SKEW_SECONDS > seconds) ||
