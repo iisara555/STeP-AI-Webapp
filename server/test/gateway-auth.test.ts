@@ -88,3 +88,18 @@ test('removing someone from the invite list takes effect on their next request',
   invited.delete('staff@step.example');
   assert.equal(await check(token(valid)), null);
 });
+
+test('the organization AI gateway accepts the web client and STeP Desktop client, and no other audience', async () => {
+  const desktop = 'synthetic-desktop.apps.googleusercontent.com';
+  const both = googleIdTokenAuth({
+    clientId: [CLIENT, desktop],
+    domains: ['step.example'],
+    invited: () => new Set(['staff@step.example']),
+    keys: async () => [{ ...publicKey.export({ format: 'jwk' }), kid: KID }],
+    now: () => NOW,
+  });
+  assert.equal((await both(token(valid)))?.email, 'staff@step.example');
+  assert.equal((await both(token({ ...valid, aud: desktop })))?.email, 'staff@step.example');
+  assert.equal(await both(token({ ...valid, aud: 'other.apps.googleusercontent.com' })), null);
+  assert.equal(await both(token({ ...valid, aud: [CLIENT, desktop] })), null);
+});
