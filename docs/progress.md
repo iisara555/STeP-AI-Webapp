@@ -12,9 +12,10 @@
 - แยกงานตามประเภทตามแบบที่เจ้าของเสนอ: ผู้ให้บริการและ FP8 แยกต่อโมเดล, รูป/PDF ไปโมเดลอ่านภาพเอง, โมเดลสำรองเมื่อตัวหลักล่ม
   เจ้าของเห็นชอบให้นำร่องด้วย Haiku 5.5 (งานทั่วไป + ใบเสร็จ) และ Sonnet 5.5 (เอกสารทางการ, Desktop เลือกให้เองตาม Skill)
   DeepSeek/Gemini เป็นตัวทดลองใน `ai-gateway.trial-routing.example.json` หลังตรวจ ZDR และคุณภาพ การสร้างภาพเลื่อนไปหลังนำร่อง
+- 2026-11-19 เจ้าของให้ติดตั้งระบบรอไว้ก่อนได้ key: gateway เปิดได้โดยไม่มี key (ตอบ 503 `ai_not_ready`) และรับ key เองเมื่อวางไฟล์
 - รอเจ้าของ: ซื้อเครดิตและตั้ง OpenRouter (ZDR, guardrail, key มีวงเงิน), ใส่ key บน ik-node-01, อนุมัติ deploy
   และวัดคุณภาพโมเดลผ่าน gateway ก่อนเปิดให้พนักงาน ยังไม่ได้ทดสอบกับ OpenRouter จริง (ทดสอบกับ OpenRouter ปลอมเท่านั้น)
-- ตรวจแล้ว: `npm run check`, `npm test` 121, `server/test/ai-proxy.test.ts` 16 + `gateway-auth.test.ts` 4
+- ตรวจแล้ว: `npm run check`, `npm test` 121, `server/test/ai-proxy.test.ts` 17 + `gateway-auth.test.ts` 4
   (`npm run test:engine` ทั้งชุดรันในคลาวด์ไม่จบเพราะ engine ยังไม่ได้ติดตั้ง dependencies ให้ CI ตรวจ)
 
 ## 2026-11-18 · ขั้นเลือกเอกสารที่ช้าไม่ทำให้ทั้งงานหยุด (RUN_INTERRUPTED)

@@ -59,6 +59,10 @@ install -m 600 /dev/null ~/step-ai-gateway/openrouter-key && nano ~/step-ai-gate
 set -a && . ~/step-ai-gateway/ai-gateway.env && set +a && npm run ai-gateway   # ฟังที่ 127.0.0.1:8788
 ```
 
+**ติดตั้งก่อนมี key ได้**: ถ้ายังไม่มีไฟล์ key (หรือไฟล์ว่าง/ผิดรูปแบบ/สิทธิ์ไม่ใช่ 600) gateway ยังเปิดอยู่ ตรวจ login ตามปกติ
+แต่คำขอ AI ได้ 503 `ai_not_ready` และ `/healthz` ตอบ `"ready": false` พอวางไฟล์ key แล้วใช้ได้ทันทีไม่ต้องรีสตาร์ต
+(gateway อ่านไฟล์ใหม่เมื่อไฟล์เปลี่ยน)
+
 ถ้ารันใน container ให้ `STEP_AI_GATEWAY_HOST=0.0.0.0` และ publish port เป็น `127.0.0.1:8788:8788` เท่านั้น
 
 **ให้เครื่องพนักงานเข้าถึง (เจ้าของเลือก Tailscale Funnel, 2026-11-18)**: เปิดสู่อินเทอร์เน็ตเฉพาะเส้นทาง `/ai`

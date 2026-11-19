@@ -43,8 +43,11 @@ export type AiProxyOptions = {
   invited: () => Set<string> | Promise<Set<string>>;
   config: () => Promise<AiGatewayConfig>;
   ledger: UsageLedger;
-  /** The organization's OpenRouter key. Never sent anywhere but OpenRouter. */
-  key: string;
+  /**
+   * The organization's OpenRouter key, never sent anywhere but OpenRouter. A function is asked on every request, so the
+   * gateway can be installed before the key exists and starts answering once the key file is in place.
+   */
+  key: string | (() => Promise<string | undefined>);
   upstream?: string;
   fetch?: typeof fetch;
   now?: () => number;
@@ -87,6 +90,12 @@ export function createAiProxy(options: AiProxyOptions) {
   const now = options.now ?? Date.now;
   const settleDelays = options.settleDelaysMs ?? [3_000, 10_000, 30_000];
   const active = new Map<string, number>();
+  const keyOf = typeof options.key === 'string' ? async () => options.key as string : options.key;
+  async function openRouterKey() {
+    const key = await keyOf().catch(() => undefined);
+    if (!key) throw new ProxyError(503, 'ai_not_ready', 'ระบบ AI ขององค์กรยังไม่เปิดใช้ แจ้งผู้ดูแล');
+    return key;
+  }
 
   async function identify(req: IncomingMessage): Promise<Who> {
     const header = req.headers.authorization;
@@ -162,7 +171,7 @@ export function createAiProxy(options: AiProxyOptions) {
         await new Promise((resolve) => setTimeout(resolve, delay));
         try {
           const response = await request(`${upstream}/generation?id=${encodeURIComponent(generationId)}`, {
-            headers: { authorization: `Bearer ${options.key}` },
+            headers: { authorization: `Bearer ${await openRouterKey()}` },
             signal: AbortSignal.timeout(10_000),
           });
           if (!response.ok) {
@@ -193,6 +202,7 @@ export function createAiProxy(options: AiProxyOptions) {
     if (!asked) throw new ProxyError(400, 'model_not_allowed', 'องค์กรไม่ได้เปิดโมเดลนี้');
     if (!Array.isArray(input.messages) || !input.messages.length || input.messages.length > 1_000)
       throw new ProxyError(400, 'invalid_request', 'คำขอไม่ถูกต้อง');
+    await openRouterKey();
     const department = await admit(config, who);
     // Task-based routing: a picture or PDF sent to the default model goes to the model set for reading them.
     const imageModel = config.models.find((m) => m.id === config.routes.images);
@@ -268,11 +278,12 @@ export function createAiProxy(options: AiProxyOptions) {
     who: Who,
     signal: AbortSignal,
   ): Promise<Response | undefined> {
+    const key = await openRouterKey();
     try {
       return await request(`${upstream}/chat/completions`, {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${options.key}`,
+          authorization: `Bearer ${key}`,
           'content-type': 'application/json',
           'x-title': 'STeP AI',
         },
@@ -349,7 +360,8 @@ export function createAiProxy(options: AiProxyOptions) {
       const url = new URL(req.url ?? '/', 'http://localhost');
       // Served either at the root or under /ai when it shares a host name with the web app.
       const path = url.pathname.replace(/^\/ai(?=\/)/, '');
-      if (req.method === 'GET' && path === '/healthz') return send(res, 200, { ok: true });
+      if (req.method === 'GET' && path === '/healthz')
+        return send(res, 200, { ok: true, ready: Boolean(await keyOf().catch(() => undefined)) });
       const who = await identify(req);
       if (req.method === 'GET' && path === '/v1/models') {
         const config = await settings();

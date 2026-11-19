@@ -25,25 +25,38 @@ const list = (value: string) =>
       .filter(Boolean),
   );
 
-async function openRouterKey() {
-  const file = process.env.OPENROUTER_API_KEY_FILE;
-  if (file) {
-    const info = await stat(file);
-    if (info.mode & 0o077) {
-      console.error('ไฟล์ key ต้องอ่านได้เฉพาะเจ้าของ (chmod 600)');
-      process.exit(2);
-    }
-    return (await readFile(file, 'utf8')).trim();
-  }
-  return env('OPENROUTER_API_KEY').trim();
-}
-
-const key = await openRouterKey();
+// The key may arrive after installation: it is read again (from the 0600 file) whenever the file changes, and until a
+// valid key is there every AI request gets 503 ai_not_ready instead of the gateway refusing to start.
+const KEY_PATTERN = /^sk-or-[\w-]{10,200}$/;
+const fixedKey = process.env.OPENROUTER_API_KEY?.trim();
 delete process.env.OPENROUTER_API_KEY;
-if (!/^sk-or-[\w-]{10,200}$/.test(key)) {
-  console.error('OpenRouter key ไม่ถูกรูปแบบ');
+const keyFile = process.env.OPENROUTER_API_KEY_FILE;
+if (!keyFile && !fixedKey) {
+  console.error('ต้องตั้ง OPENROUTER_API_KEY_FILE (หรือ OPENROUTER_API_KEY)');
   process.exit(2);
 }
+let cachedKey: { at: string; key?: string } | undefined;
+async function openRouterKey(): Promise<string | undefined> {
+  if (!keyFile) return fixedKey && KEY_PATTERN.test(fixedKey) ? fixedKey : undefined;
+  let info;
+  try {
+    info = await stat(keyFile);
+  } catch {
+    return undefined;
+  }
+  const at = `${info.mtimeMs}:${info.size}:${info.mode}`;
+  if (cachedKey?.at === at) return cachedKey.key;
+  let key: string | undefined;
+  if (info.mode & 0o077) console.error('ไฟล์ key ต้องอ่านได้เฉพาะเจ้าของ (chmod 600) จึงยังไม่ใช้');
+  else {
+    const text = (await readFile(keyFile, 'utf8').catch(() => '')).trim();
+    if (KEY_PATTERN.test(text)) key = text;
+    else if (text) console.error('OpenRouter key ในไฟล์ไม่ถูกรูปแบบ จึงยังไม่ใช้');
+  }
+  cachedKey = { at, key };
+  return key;
+}
+
 const dataRoot = resolve(env('STEP_DATA_ROOT'));
 const invitesFile = resolve(env('STEP_INVITES_FILE'));
 const config = configFile(resolve(env('STEP_AI_GATEWAY_CONFIG')));
@@ -58,7 +71,7 @@ const invited = async () => list(await readFile(invitesFile, 'utf8').catch(() =>
 const secret = process.env.STEP_AI_INTERNAL_SECRET;
 
 const server = createAiProxy({
-  key,
+  key: openRouterKey,
   config,
   invited,
   ledger: new UsageLedger(dataRoot),
@@ -74,7 +87,11 @@ const server = createAiProxy({
 const host = process.env.STEP_AI_GATEWAY_HOST ?? '127.0.0.1';
 const port = Number(process.env.STEP_AI_GATEWAY_PORT ?? 8788);
 server.requestTimeout = 0; // long answers stream for minutes; each upstream call has its own 15-minute limit
-server.listen(port, host, () => console.log(`STeP AI gateway: http://${host}:${port}/v1`));
+server.listen(port, host, async () =>
+  console.log(
+    `STeP AI gateway: http://${host}:${port}/v1${(await openRouterKey()) ? '' : ' (ยังไม่มี OpenRouter key: รอไฟล์ key)'}`,
+  ),
+);
 const shutdown = () => server.close(() => process.exit(0));
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);

@@ -98,7 +98,10 @@ const streamReply =
     res.end('data: [DONE]\n\n');
   };
 
-async function setup(reply = streamReply(), options: { settings?: unknown; internalSecret?: string } = {}) {
+async function setup(
+  reply = streamReply(),
+  options: { settings?: unknown; internalSecret?: string; key?: () => Promise<string | undefined> } = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), 'ai-proxy-'));
   const settingsPath = join(dir, 'ai-gateway.json');
   await writeFile(settingsPath, JSON.stringify(options.settings ?? SETTINGS));
@@ -107,7 +110,7 @@ async function setup(reply = streamReply(), options: { settings?: unknown; inter
   const ledger = new UsageLedger(dir);
   const internal = options.internalSecret ? internalTokens(options.internalSecret, () => NOW) : undefined;
   const proxy = createAiProxy({
-    key: KEY,
+    key: options.key ?? KEY,
     authenticate,
     invited: () => invited,
     config: configFile(settingsPath),
@@ -599,4 +602,30 @@ test('settings reject a route or fallback that names no model', () => {
   assert.throws(() => AiGatewayConfig.parse({ ...base, routes: { images: 'step-missing' } }));
   base.models[0].fallback = 'step-chat';
   assert.throws(() => AiGatewayConfig.parse(base));
+});
+
+test('installed before the key exists: AI requests wait with ai_not_ready, then work once the key is in place', async () => {
+  let key: string | undefined;
+  const t = await setup(streamReply(), { key: async () => key });
+  try {
+    assert.deepEqual(await (await t.call('/healthz', undefined)).json(), { ok: true, ready: false });
+    const waiting = await t.call('/v1/chat/completions', 'staff', ask());
+    assert.equal(waiting.status, 503);
+    assert.equal((await waiting.json()).error.code, 'ai_not_ready');
+    assert.equal(
+      (await t.call('/v1/chat/completions', 'stranger', ask())).status,
+      401,
+      'sign-in is still checked first',
+    );
+    assert.equal(t.upstream.seen.length, 0);
+
+    key = KEY;
+    assert.deepEqual(await (await t.call('/healthz', undefined)).json(), { ok: true, ready: true });
+    const response = await t.call('/v1/chat/completions', 'staff', ask());
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(t.upstream.seen[0].authorization, `Bearer ${KEY}`);
+  } finally {
+    await t.close();
+  }
 });
