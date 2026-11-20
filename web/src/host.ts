@@ -16,7 +16,15 @@ export interface Host {
   download(path: string): Promise<Blob>;
   signIn(): Promise<void>;
   signOut(): Promise<void>;
+  /** The organization's Thai OCR on the web's own server; null when it is not deployed or does not answer. */
+  readReceiptText?(file: File, signal?: AbortSignal): Promise<unknown | null>;
 }
+const OCR_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'application/pdf': 'pdf',
+};
 let client: SupabaseClient | undefined;
 export function configured() {
   return Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
@@ -82,6 +90,37 @@ export function webHost(): Host {
       }
       if (!response.ok) throw new ApiError(result.code || 'SERVER_ERROR', result.requestId);
       return result.data as T;
+    },
+    async readReceiptText(file, signal) {
+      const extension = OCR_EXTENSIONS[file.type];
+      if (!extension) return null;
+      const {
+        data: { session },
+      } = await supabase().auth.getSession();
+      if (!session) return null;
+      const headers = { Authorization: 'Bearer ' + session.access_token };
+      try {
+        // The OCR service is optional: a server without it answers the health check with an error, not a wait.
+        const health = await fetch('/ocr/api/health', {
+          headers,
+          cache: 'no-store',
+          signal: AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])]),
+        });
+        const status = await health.json().catch(() => null);
+        if (!health.ok || status?.service !== 'STeP Local Thai OCR') return null;
+        // Typhoon reads about a minute a page on the server's CPU; the service gives up at 15 minutes.
+        const response = await fetch(`/ocr/api/ocr?filename=receipt.${extension}`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/octet-stream' },
+          body: file,
+          cache: 'no-store',
+          signal: AbortSignal.any([AbortSignal.timeout(900_000), ...(signal ? [signal] : [])]),
+        });
+        const body = await response.json().catch(() => null);
+        return response.ok && body?.ok && body.result ? body.result : null;
+      } catch {
+        return null;
+      }
     },
     async upload(path, file) {
       const result = await supabase()

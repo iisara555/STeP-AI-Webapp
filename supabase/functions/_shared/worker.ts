@@ -31,6 +31,7 @@ import { modelClient, requireProviderConsent } from './ai.ts';
 import { calendarEvents, driveText, wantsCalendar } from './google.ts';
 import { imageBase64 } from './files.ts';
 import { normalizeReceipt } from './receipt.ts';
+import { receiptOcrSection, type ReceiptOcrHint } from '../../../packages/harness-core/src/receipt-ocr.ts';
 import { skillContext } from '../../../packages/harness-core/src/skill-context.ts';
 import {
   SELECTION_SYSTEM,
@@ -64,6 +65,17 @@ function resourceSnapshot(payload: {
     prepared_document: payload.prepared_document,
     documents: [...(payload.documents || [])].sort(byId),
     memories: [...(payload.memories || [])].sort(byId),
+  });
+}
+/** The OCR reading was validated by the api when the job started; anything else is ignored. */
+export function receiptOcrPrompt(value: unknown) {
+  const hint = value as Partial<ReceiptOcrHint> | null | undefined;
+  if (!hint || typeof hint.text !== 'string' || !hint.text.trim() || typeof hint.engine !== 'string')
+    return '';
+  return receiptOcrSection({
+    engine: hint.engine,
+    text: hint.text,
+    reviewLines: Number(hint.reviewLines) || 0,
   });
 }
 const receiptPrompt = `อ่านข้อความและจัดกลุ่มข้อมูลจากใบเสร็จในภาพเท่านั้น ไม่เติมสิ่งที่มองไม่เห็น
@@ -405,7 +417,7 @@ export async function processOne(env: Environment, fetcher: typeof fetch = fetch
           system: SYSTEM_RULES,
           prompt:
             job.kind === 'receipt'
-              ? receiptPrompt
+              ? receiptPrompt + receiptOcrPrompt(job.input.ocr)
               : 'ถอดข้อความทั้งหมดตามลำดับหน้าและกลุ่มข้อมูล ห้ามเติมหรือแก้ข้อความที่อ่านไม่ชัด ตอบ JSON {"text":"ข้อความที่อ่านได้","truncated":false} หากไม่สามารถถอดครบให้ truncated เป็น true',
           json: true,
           image: { mime: image.mime, data: imageBase64(new Uint8Array(await blob.arrayBuffer())) },

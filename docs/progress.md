@@ -1,5 +1,21 @@
 # Progress
 
+## 2026-11-20 · ตรวจใบเสร็จใช้ Typhoon OCR V2 0.8B ของเซิร์ฟเวอร์องค์กร
+
+- เจ้าของเลือก Typhoon OCR V2 0.8B หลัง benchmark OCR ภาษาไทยวันเดียวกัน บริการ OCR ใหม่ (`deploy/homelab/ocr`, profile `ocr`)
+  คือ OCR ในเครื่องของ Desktop: Typhoon อ่าน PaddleOCR ตรวจตัวเลข หน้าเว็บส่งไฟล์ไปที่ `/ocr/` บน origin เดียวกัน
+  nginx ตรวจ token กับ Supabase (`/auth/v1/user`) ก่อน แล้วข้อความที่อ่านได้ไปกับงาน `receipt` (`input.ocr`) เป็นตัวช่วยอ่าน
+  ภาษาไทยให้ Gemini ภาพยังเป็นหลักฐาน บรรทัด `[ตรวจ]` ต้องเป็น uncertain เว้นแต่ภาพชัด ไม่มีบริการนี้ก็อ่านแบบเดิม
+- ต้องรวม Harness PR ของ Typhoon OCR (#384) แล้วเลื่อน submodule `harness` ไปรุ่นที่มี ก่อน build image OCR จาก main
+- ต้อง deploy Edge Functions `api` และ `worker` และ build หน้าเว็บใหม่หลังรวม PR (api เดิมทิ้งฟิลด์ `ocr` เฉย ๆ จึง deploy หน้าเว็บก่อนได้)
+- ตรวจแล้ว: `npm run check` ส่วน `tsc` และ prettier ผ่าน (`check-server-types` ล้ม 127 จุดใน `server/` ที่ไม่ได้แก้
+  เพราะคลาวด์ติดตั้ง dependency ของ `server/` พร้อม root ไม่ได้ เท่ากันก่อนและหลังแก้), `npm test` 124, `npm run test:db` 29,
+  `npm run build`, e2e ใบเสร็จ desktop และ mobile 4 ตัว
+- ลองบน ik-node-01 แบบแยก (network และ container ทดลอง ไม่แตะเว็บที่ใช้งานจริง): image ทั้งสอง build ด้วย `docker compose build`
+  `nginx -t` ผ่าน, ไม่มี token ได้ 401, token ปลอมได้ 403 จาก Supabase (หน้าเว็บกลับไปอ่านแบบเดิม), GET ไปที่ `/ocr/api/ocr` ได้ 403
+  บริการ OCR อ่านใบเสร็จสังเคราะห์ 45 วินาที ไม่มีบรรทัดต้องตรวจ log ไม่มีข้อความในใบเสร็จ ต้องการที่เขียนเฉพาะ `/tmp`
+  ยังไม่ได้ลองกับบัญชีจริง (ต้อง deploy หน้าเว็บก่อน)
+
 ## 2026-11-18 · ขั้นเลือกเอกสารที่ช้าไม่ทำให้ทั้งงานหยุด (RUN_INTERRUPTED)
 
 - อาการจากการใช้งานจริงหลังย้ายเว็บ: ถามในแชตแล้วได้ "งานหยุดก่อนเสร็จ … RUN_INTERRUPTED" ทั้งที่งานยังไม่ถึงเวลาหมด

@@ -21,3 +21,26 @@ services:
     pids_limit: 64
     mem_limit: 256m
     cpus: 1
+  # Optional Thai OCR (Typhoon OCR V2 0.8B + PaddleOCR number check). Start with --profile ocr after
+  # fetch-models.sh; without it the web reads receipts with the AI alone, as before. No port is published.
+  ocr:
+    profiles: ['ocr']
+    image: step-thai-ocr:${STEP_OCR_IMAGE_TAG:-pilot}
+    build:
+      context: ../..
+      dockerfile: deploy/homelab/ocr/Dockerfile
+    environment:
+      STEP_TYPHOON_THREADS: ${STEP_OCR_THREADS:-8}
+    volumes:
+      - ${STEP_OCR_MODELS:-../../.local/ocr-models}:/opt/typhoon/models:ro
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m,uid=10001,gid=10001
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 4g
+    cpus: ${STEP_OCR_THREADS:-8}
