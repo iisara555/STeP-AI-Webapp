@@ -32,6 +32,7 @@ import {
 } from './google.ts';
 import { validFile } from './files.ts';
 import { receiptSchema } from './receipt.ts';
+import { OCR_TEXT_LIMIT } from '../../../packages/harness-core/src/receipt-ocr.ts';
 import { openrouter, trialConfigured } from './openrouter.ts';
 import { aiService, requireProviderConsent } from './ai.ts';
 import { literalSearch } from '../../../packages/harness-core/src/desktop-workflows.ts';
@@ -56,6 +57,14 @@ const start = z.object({
   googleConsent: z.boolean().default(false),
   // A document tool from the Desktop allowlist; the worker adds its drafting contract, template and references.
   documentTool: z.enum(['tor', 'memo', 'letter', 'project', 'minutes']).optional(),
+  // Receipts only: the organization's Thai OCR reading of the same file, sent with the image as a spelling aid.
+  ocr: z
+    .object({
+      engine: z.string().trim().min(1).max(80),
+      text: z.string().trim().min(1).max(OCR_TEXT_LIMIT),
+      reviewLines: z.number().int().min(0).max(1000),
+    })
+    .optional(),
 });
 export async function contextPlan(
   actor: Actor,
@@ -600,6 +609,10 @@ export async function dispatch(
         await member(actor, p.tenant, true);
         if (p.kind !== 'chat') throw new Error('AI_TRIAL_TEXT_ONLY');
       }
+      if (p.ocr) {
+        if (p.kind !== 'receipt') throw new Error('INVALID_REQUEST');
+        assertSafeText(p.ocr.text);
+      }
       if (p.kind === 'chat') {
         if (!p.session || !p.message) throw new Error('INVALID_REQUEST');
         assertSafeText(p.message);
@@ -629,6 +642,7 @@ export async function dispatch(
             aiProvider: info.provider,
             providerConsent: info.consentId,
             googleConsent: p.googleConsent,
+            ...(p.ocr ? { ocr: p.ocr } : {}),
           },
         }),
       );

@@ -43,6 +43,24 @@ filesystem แบบอ่านอย่างเดียว และแย�
 ถ้าพอร์ตชนแอปเดิม เปลี่ยน `STEP_HTTP_PORT` และใช้พอร์ตนั้นใน Tailscale Serve ด้วย
 ค่า public configuration เป็นค่าตอน build; เมื่อเปลี่ยนให้ build image ใหม่
 
+## OCR ภาษาไทยขององค์กร (ไม่บังคับ)
+
+บริการนี้คือ OCR ในเครื่องของ STeP Desktop (`harness/experiments/local-thai-ocr`) รันบนเซิร์ฟเวอร์เดียวกับหน้าเว็บ
+Typhoon OCR V2 0.8B อ่านใบเสร็จ แล้ว PaddleOCR อ่านซ้ำเพื่อเทียบตัวเลข หน้าเว็บส่งไฟล์ใบเสร็จไปที่ `/ocr/` บน origin เดียวกัน
+nginx ตรวจ token ของ Supabase ก่อนทุกคำขอ แล้วส่งข้อความที่อ่านได้ไปกับงานตรวจใบเสร็จ ให้ AI ใช้ช่วยอ่านตัวสะกดภาษาไทย
+โดยยังยึดภาพเป็นหลักฐาน บรรทัดที่ตัวเลขสองตัวอ่านไม่ตรงกันขึ้นต้นด้วย `[ตรวจ]` ถ้าไม่ได้เปิดบริการนี้ หน้าเว็บจะอ่านใบเสร็จแบบเดิม
+
+```sh
+deploy/homelab/ocr/fetch-models.sh .local/ocr-models   # ~1 GB ตรวจ SHA-256 ทุกไฟล์
+docker compose --env-file .local/homelab.env -f deploy/homelab/compose.yml --profile ocr up -d --build --wait
+```
+
+- ต้องใช้ submodule `harness` ที่มี Typhoon OCR แล้ว (`typhoon_engine.py`) image จะหยุด build ถ้ายังไม่มี
+- บริการไม่เปิดพอร์ตออกนอก Docker network เข้าได้ทางเดียวคือ nginx ของหน้าเว็บ ซึ่งไม่ส่ง token ต่อไปให้บริการ OCR
+- ใช้ CPU ตาม `STEP_OCR_THREADS` (ค่าเริ่มต้น 8) และ RAM ราว 1.5–2.5 GB ขณะอ่าน ราว 30–60 วินาทีต่อหน้า อ่านทีละไฟล์
+  คำขอที่ซ้อนได้คำตอบ "ไม่ว่าง" แล้วหน้าเว็บอ่านใบเสร็จแบบเดิม
+- ไม่เก็บไฟล์หรือ log ของเนื้อหา ไฟล์ชั่วคราวอยู่ใน `/tmp` ของ container และลบหลังอ่าน
+
 ## เปิด HTTPS เฉพาะใน tailnet
 
 ตรวจบริการเดิมก่อน เลือกพอร์ต HTTPS ที่ยังว่าง ตัวอย่างนี้ใช้ 8443 เพื่อแยกจากเว็บที่พอร์ต 443:

@@ -5,6 +5,7 @@ import { RECEIPT_BUYER, errorView } from '../../packages/harness-core/src/index.
 import type { ViewProps } from './App.tsx';
 import { Art, Busy, FreeTierNote, Modal } from './components.tsx';
 import { prepareReceipt, uploadFile } from './uploads.ts';
+import { receiptOcrHint } from '../../packages/harness-core/src/receipt-ocr.ts';
 import { ApiError, saveBlob } from './host.ts';
 const types: Record<ReceiptResult['document_type'], string> = {
   full_tax_invoice: 'ใบเสร็จรับเงิน/ใบกำกับภาษีแบบเต็มรูป',
@@ -25,9 +26,12 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
     [saved, setSaved] = useState(false),
     [warnings, setWarnings] = useState<string[]>([]),
     [history, setHistory] = useState<Run[]>([]),
-    [rotation, setRotation] = useState(0);
+    [rotation, setRotation] = useState(0),
+    [reading, setReading] = useState(false);
   const input = useRef<HTMLInputElement>(null),
     localFile = useRef<File | null>(null),
+    // The copy the AI reads (straightened, rotated); the organization's OCR reads the same copy.
+    readFile = useRef<File | null>(null),
     current = useRef(0);
   const receipts = data.documents.filter(
     (d) =>
@@ -120,6 +124,7 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
     setWarnings([]);
     setRotation(0);
     localFile.current = file;
+    readFile.current = file;
     const token = ++current.current;
     try {
       const doc = await uploadFile(host, tenant, null, 'private', file);
@@ -128,7 +133,10 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
       if (file.type.startsWith('image/')) {
         const prepared = await prepareReceipt(file);
         await uploadFile(host, tenant, null, 'private', prepared.file, doc.id);
-        if (token === current.current) setWarnings(prepared.warnings);
+        if (token === current.current) {
+          readFile.current = prepared.file;
+          setWarnings(prepared.warnings);
+        }
       }
       await refresh();
     } catch (e) {
@@ -145,6 +153,7 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
     try {
       const prepared = await prepareReceipt(localFile.current, next);
       await uploadFile(host, tenant, null, 'private', prepared.file, document.id);
+      readFile.current = prepared.file;
       setRotation(next);
       setWarnings(prepared.warnings);
       setResult(null);
@@ -162,7 +171,19 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
     setBusy(true);
     setConsent(null);
     setResult(null);
+    const token = current.current;
     try {
+      // The organization's Thai OCR reads first when the server has it; without it the AI reads the image alone.
+      let ocr = null;
+      if (readFile.current && host.readReceiptText) {
+        setReading(true);
+        try {
+          ocr = receiptOcrHint((await host.readReceiptText(readFile.current)) as never);
+        } finally {
+          setReading(false);
+        }
+        if (token !== current.current) return;
+      }
       setRun(
         await host.call<Run>('run.start', {
           tenant,
@@ -171,6 +192,7 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
           requestId: crypto.randomUUID(),
           consent: true,
           providerConsent: consent.providerConsent,
+          ...(ocr ? { ocr } : {}),
         }),
       );
     } catch (e) {
@@ -204,6 +226,7 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
     setConfirmed(false);
     setSaved(false);
     localFile.current = null;
+    readFile.current = null;
     try {
       const review = await host.call<{ review: ReceiptResult; reviewed_at: string } | null>(
         'receipt.read-review',
@@ -345,11 +368,13 @@ export function ReceiptView({ host, data, tenant, refresh, fail }: ViewProps) {
             <section className="receipt-review-section">
               <Busy
                 label={
-                  run?.status === 'queued'
-                    ? 'กำลังรอคิวตรวจใบเสร็จ'
-                    : run
-                      ? 'กำลังอ่านข้อความและจัดกลุ่มข้อมูล'
-                      : 'กำลังเตรียมภาพ'
+                  reading
+                    ? 'กำลังอ่านภาษาไทยด้วย Typhoon OCR ราว 1 นาที'
+                    : run?.status === 'queued'
+                      ? 'กำลังรอคิวตรวจใบเสร็จ'
+                      : run
+                        ? 'กำลังอ่านข้อความและจัดกลุ่มข้อมูล'
+                        : 'กำลังเตรียมภาพ'
                 }
               />
               <p className="muted">ต้นฉบับยังเก็บไว้ ผลที่อ่านได้จะให้คุณตรวจอีกครั้ง</p>

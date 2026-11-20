@@ -16,9 +16,15 @@ ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
     VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
 RUN node -e "if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(process.env.VITE_SUPABASE_URL || '') || !/^sb_publishable_[A-Za-z0-9_-]+$/.test(process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '')) throw Error('Provide a hosted Supabase URL and modern publishable key; server secrets are not accepted')" \
     && npm run build
+COPY deploy/homelab/nginx.conf deploy/homelab/nginx.conf
+# The OCR sign-in check asks this Supabase project; both values are public build configuration.
+RUN host="${VITE_SUPABASE_URL#https://}" \
+    && sed -e "s|__SUPABASE_URL__|$VITE_SUPABASE_URL|g" -e "s|__SUPABASE_HOST__|$host|g" \
+        -e "s|__SUPABASE_PUBLISHABLE_KEY__|$VITE_SUPABASE_PUBLISHABLE_KEY|g" deploy/homelab/nginx.conf > /app/nginx.conf \
+    && ! grep -q '__SUPABASE' /app/nginx.conf
 
 FROM nginxinc/nginx-unprivileged:stable-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
-COPY --chmod=0444 deploy/homelab/nginx.conf /etc/nginx/nginx.conf
+COPY --from=build --chmod=0444 /app/nginx.conf /etc/nginx/nginx.conf
 COPY --from=build --chown=101:101 /app/web/dist/ /usr/share/nginx/html/
 USER 101:101
 EXPOSE 8080
