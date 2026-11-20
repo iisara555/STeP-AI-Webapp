@@ -2,8 +2,8 @@
 # The organization's Thai OCR for the Webapp: the STeP Desktop local OCR service (Harness
 # experiments/local-thai-ocr, from the pinned `harness` submodule) with PaddleOCR and Typhoon OCR V2 0.8B
 # run by llama.cpp. Model weights are not in the image; fetch-models.sh puts them in a read-only volume.
-# Build from the repository root: docker build -f deploy/homelab/ocr/Dockerfile -t step-thai-ocr:<tag> .
-FROM python:3.12-slim-bookworm
+# Build with `docker compose ... --profile ocr build ocr` (see docs/homelab.md); about 11 minutes, 2.4 GB.
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl libgomp1 libgl1 libglib2.0-0 \

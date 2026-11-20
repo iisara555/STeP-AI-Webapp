@@ -10,7 +10,11 @@
 - ต้อง deploy Edge Functions `api` และ `worker` และ build หน้าเว็บใหม่หลังรวม PR (api เดิมทิ้งฟิลด์ `ocr` เฉย ๆ จึง deploy หน้าเว็บก่อนได้)
 - ตรวจแล้ว: `npm run check` ส่วน `tsc` และ prettier ผ่าน (`check-server-types` ล้ม 127 จุดใน `server/` ที่ไม่ได้แก้
   เพราะคลาวด์ติดตั้ง dependency ของ `server/` พร้อม root ไม่ได้ เท่ากันก่อนและหลังแก้), `npm test` 124, `npm run test:db` 29,
-  `npm run build`, e2e ใบเสร็จ desktop และ mobile 4 ตัว ยังไม่ได้ลอง nginx ตัวจริงกับบัญชีจริง
+  `npm run build`, e2e ใบเสร็จ desktop และ mobile 4 ตัว
+- ลองบน ik-node-01 แบบแยก (network และ container ทดลอง ไม่แตะเว็บที่ใช้งานจริง): image ทั้งสอง build ด้วย `docker compose build`
+  `nginx -t` ผ่าน, ไม่มี token ได้ 401, token ปลอมได้ 403 จาก Supabase (หน้าเว็บกลับไปอ่านแบบเดิม), GET ไปที่ `/ocr/api/ocr` ได้ 403
+  บริการ OCR อ่านใบเสร็จสังเคราะห์ 45 วินาที ไม่มีบรรทัดต้องตรวจ log ไม่มีข้อความในใบเสร็จ ต้องการที่เขียนเฉพาะ `/tmp`
+  ยังไม่ได้ลองกับบัญชีจริง (ต้อง deploy หน้าเว็บก่อน)
 
 ## 2026-11-18 · ขั้นเลือกเอกสารที่ช้าไม่ทำให้ทั้งงานหยุด (RUN_INTERRUPTED)
 

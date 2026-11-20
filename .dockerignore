@@ -10,6 +10,14 @@
 !deploy/homelab/
 !deploy/homelab/Dockerfile
 !deploy/homelab/nginx.conf
+!deploy/homelab/ocr/
+!deploy/homelab/ocr/Dockerfile
+# The OCR service image takes only the local OCR folder of the pinned harness submodule.
+!harness/
+!harness/experiments/
+!harness/experiments/local-thai-ocr/
+!harness/experiments/local-thai-ocr/**
+harness/experiments/local-thai-ocr/**/__pycache__/
 web/node_modules/
 web/dist/
 web/.env*

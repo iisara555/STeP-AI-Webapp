@@ -55,9 +55,10 @@ deploy/homelab/ocr/fetch-models.sh .local/ocr-models   # ~1 GB ตรวจ SHA-
 docker compose --env-file .local/homelab.env -f deploy/homelab/compose.yml --profile ocr up -d --build --wait
 ```
 
+- build ด้วย `docker compose` ตามคำสั่งด้านบน (Compose มี BuildKit ในตัว) บนเครื่องที่ไม่มี buildx คำสั่ง `docker build` ตรง ๆ จะล้มที่ `RUN --mount`
 - ต้องใช้ submodule `harness` ที่มี Typhoon OCR แล้ว (`typhoon_engine.py`) image จะหยุด build ถ้ายังไม่มี
 - บริการไม่เปิดพอร์ตออกนอก Docker network เข้าได้ทางเดียวคือ nginx ของหน้าเว็บ ซึ่งไม่ส่ง token ต่อไปให้บริการ OCR
-- ใช้ CPU ตาม `STEP_OCR_THREADS` (ค่าเริ่มต้น 8) และ RAM ราว 1.5–2.5 GB ขณะอ่าน ราว 30–60 วินาทีต่อหน้า อ่านทีละไฟล์
+- ใช้ CPU ตาม `STEP_OCR_THREADS` (ค่าเริ่มต้น 8) และ RAM ราว 1.8 GB ขณะอ่าน (ว่างราว 35 MB) ราว 45 วินาทีต่อหน้าบน ik-node-01 อ่านทีละไฟล์
   คำขอที่ซ้อนได้คำตอบ "ไม่ว่าง" แล้วหน้าเว็บอ่านใบเสร็จแบบเดิม
 - ไม่เก็บไฟล์หรือ log ของเนื้อหา ไฟล์ชั่วคราวอยู่ใน `/tmp` ของ container และลบหลังอ่าน
 
