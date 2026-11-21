@@ -41,6 +41,26 @@ const Model = z
   })
   .strict();
 
+/**
+ * A picture model on OpenRouter's Images API (POST /images), e.g. openai/gpt-image-2.5-sunburst. Staff and Desktop see
+ * only `id`; one request makes one picture.
+ */
+const ImageModel = z
+  .object({
+    id: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,62}$/),
+    label: z.string().trim().min(1).max(120),
+    upstream: z
+      .string()
+      .max(160)
+      .regex(/^[a-z0-9~][a-z0-9._-]*\/[a-z0-9._:-]+$/i),
+    /** USD per picture; used only when OpenRouter reports no cost for a request. */
+    pricePerImageUsd: Usd,
+    default: z.boolean().optional(),
+    /** Providers allowed for this model only (replaces the top-level list). */
+    providers: ProviderSlugs.optional(),
+  })
+  .strict();
+
 const Department = z
   .object({
     id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,40}$/),
@@ -55,6 +75,8 @@ const Department = z
 export const AiGatewayConfig = z
   .object({
     models: z.array(Model).min(1).max(20),
+    /** Picture models; empty (the default) turns picture creation off for the whole organization. */
+    imageModels: z.array(ImageModel).max(10).default([]),
     /** OpenRouter provider slugs allowed to serve requests (e.g. google-vertex, amazon-bedrock); empty = any ZDR one. */
     providers: ProviderSlugs.optional(),
     /**
@@ -69,6 +91,8 @@ export const AiGatewayConfig = z
         userMonthlyUsd: Usd,
         /** Requests one person may have in flight (Desktop runs a few small checks beside the answer). */
         userConcurrency: z.number().int().min(1).max(10).default(3),
+        /** Pictures one person may create a month, on top of the money cap (pictures cost far more than text). */
+        userMonthlyImages: z.number().int().min(0).max(10_000).default(20),
         /** Only for showing baht in reports. */
         thbPerUsd: z.number().positive().max(1_000).optional(),
       })
@@ -85,6 +109,11 @@ export const AiGatewayConfig = z
     for (const m of config.models)
       if (m.fallback !== undefined && (m.fallback === m.id || !ids.has(m.fallback)))
         issue(`model ${m.id}: fallback must be another model id`);
+    const imageIds = new Set(config.imageModels.map((m) => m.id));
+    if (imageIds.size !== config.imageModels.length) issue('image model ids must be unique');
+    if ([...imageIds].some((id) => ids.has(id)))
+      issue('an image model id must differ from every text model id');
+    if (config.imageModels.filter((m) => m.default).length > 1) issue('at most one default image model');
     if (config.routes.images !== undefined && !ids.has(config.routes.images))
       issue('routes.images must be a model id');
     if (new Set(config.departments.map((d) => d.id)).size !== config.departments.length)
@@ -94,6 +123,7 @@ export const AiGatewayConfig = z
   });
 export type AiGatewayConfig = z.infer<typeof AiGatewayConfig>;
 export type AiModel = AiGatewayConfig['models'][number];
+export type AiImageModel = AiGatewayConfig['imageModels'][number];
 
 /** Staff not listed under a department are counted here, under the organization-wide per-person cap. */
 export const UNASSIGNED = { id: 'unassigned', name: 'ไม่ระบุหน่วยงาน' } as const;
@@ -108,6 +138,10 @@ export function userCapUsd(config: AiGatewayConfig, email: string) {
 
 export function defaultModel(config: AiGatewayConfig) {
   return config.models.find((m) => m.default) ?? config.models[0];
+}
+
+export function defaultImageModel(config: AiGatewayConfig) {
+  return config.imageModels.find((m) => m.default) ?? config.imageModels[0];
 }
 
 /**

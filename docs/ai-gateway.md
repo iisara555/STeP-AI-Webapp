@@ -27,6 +27,12 @@ Cloud Workspace runtime ── token ──┘        ตรวจสิทธ�
   (Desktop แสดงว่าโควตาหมด ไม่ใช่ให้ลงชื่อใหม่) ค่าใช้จ่ายใช้ตัวเลข `usage.cost` ที่ OpenRouter รายงาน ถ้าไม่มีใช้ราคาในไฟล์ตั้งค่า
   stream ที่ขาดกลางทางถามค่าใช้จ่ายจริงจาก OpenRouter ภายหลัง คำขอสุดท้ายก่อนถึงเพดานอาจเกินได้เล็กน้อย
   (จำกัดด้วย `maxOutputTokens` และงานพร้อมกันต่อคน) เพดานจริงที่กันเงินหมดคือวงเงินของ key ใน OpenRouter
+- **สร้างรูป**: `imageModels` ในไฟล์ตั้งค่าคือโมเดลภาพที่องค์กรเปิด (ว่าง = ปิดการสร้างรูป) Desktop เรียก `POST /v1/images`
+  แล้ว gateway ส่งต่อไป Images API ของ OpenRouter (`POST /images`) ครั้งละ 1 รูป บังคับ `provider: { zdr: true }`
+  นับทั้งเงิน (`usage.cost` หรือ `pricePerImageUsd`) และจำนวนรูปต่อคนต่อเดือน (`budget.userMonthlyImages` ค่าเริ่มต้น 20)
+  ถ้าโมเดลภาพไม่มีผู้ให้บริการที่ผ่าน ZDR จะได้ `image_unavailable` รูปที่สร้างไม่สำเร็จ OpenRouter ไม่คิดเงิน
+  ตัวอย่างโมเดล: `{ "id": "step-image", "label": "สร้างรูป", "upstream": "openai/gpt-image-2.5-sunburst",
+"pricePerImageUsd": 0.2, "default": true }` (ราคาในไฟล์ใช้ประมาณเมื่อ OpenRouter ไม่รายงาน ตรวจราคาจริงก่อนตั้ง)
 - **รายงาน**: `<STEP_DATA_ROOT>/ai-usage/<YYYY-MM>.jsonl` (0600) บันทึกเฉพาะ ใคร หน่วยงาน โมเดล จำนวน token และเงิน
   ดูด้วย `npm run ai-gateway:report -- 2026-11` บนเครื่อง server หรือ `GET /v1/admin/usage?month=2026-11` (เฉพาะ `STEP_ADMINS`)
   พนักงานดูของตัวเองที่ `GET /v1/usage`
@@ -36,6 +42,8 @@ Cloud Workspace runtime ── token ──┘        ตรวจสิทธ�
 | GET    | `/healthz`             | liveness                                |
 | GET    | `/v1/models`           | โมเดลที่องค์กรเปิด (ตัวหลักอยู่ก่อน)    |
 | POST   | `/v1/chat/completions` | OpenAI-compatible ทั้งแบบ stream และไม่ |
+| GET    | `/v1/images/models`    | โมเดลภาพที่องค์กรเปิด                   |
+| POST   | `/v1/images`           | สร้างรูป 1 รูป (Images API)             |
 | GET    | `/v1/usage`            | ยอดใช้เดือนนี้ของตัวเอง                 |
 | GET    | `/v1/admin/usage`      | รายงานหน่วยงานและรายคน (ผู้ดูแล)        |
 
