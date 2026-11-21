@@ -11,7 +11,9 @@ import {
   UNASSIGNED,
   userCapUsd,
   defaultModel,
+  defaultImageModel,
   type AiGatewayConfig,
+  type AiImageModel,
   type AiModel,
 } from './config.ts';
 import type { InternalIdentity } from './internal-token.ts';
@@ -21,6 +23,18 @@ export const OPENROUTER_API = 'https://openrouter.ai/api/v1';
 /** Desktop sends whole conversations plus page images of scanned PDFs. */
 const BODY_LIMIT = 24 * 1024 * 1024;
 const RESPONSE_LIMIT = 8 * 1024 * 1024;
+/** One picture as base64 (a 4K PNG can pass 20 MB). */
+const IMAGE_RESPONSE_LIMIT = 48 * 1024 * 1024;
+/** Picture options a client may set on POST /v1/images; the count, format, routing and model are ours. */
+const IMAGE_OPTIONS = [
+  'size',
+  'aspect_ratio',
+  'resolution',
+  'quality',
+  'background',
+  'output_format',
+  'seed',
+] as const;
 /** Fields a client may set; everything else (provider routing, plugins, transforms, models fallback) is ours. */
 const PASS_THROUGH = [
   'messages',
@@ -258,7 +272,116 @@ export function createAiProxy(options: AiProxyOptions) {
     }
   }
 
-  function recorder(who: Who, department: string, model: AiModel) {
+  /**
+   * One picture through OpenRouter's Images API. The person's money cap still applies, plus a monthly picture count
+   * (budget.userMonthlyImages). OpenRouter bills a picture only when it is delivered, so a failure is recorded at $0.
+   */
+  async function image(req: IncomingMessage, res: ServerResponse, who: Who) {
+    const config = await settings();
+    const input = await readJson(req);
+    if (!config.imageModels.length)
+      throw new ProxyError(403, 'images_disabled', 'องค์กรยังไม่เปิดการสร้างรูป แจ้งผู้ดูแล');
+    const model =
+      input.model === undefined
+        ? defaultImageModel(config)
+        : config.imageModels.find((m) => m.id === input.model);
+    if (!model) throw new ProxyError(400, 'model_not_allowed', 'องค์กรไม่ได้เปิดโมเดลนี้');
+    if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 32_000)
+      throw new ProxyError(400, 'invalid_request', 'คำขอไม่ถูกต้อง');
+    if (input.n !== undefined && input.n !== 1)
+      throw new ProxyError(400, 'invalid_request', 'สร้างได้ครั้งละ 1 รูป');
+    const key = await openRouterKey();
+    const department = await admit(config, who);
+    const made = (await options.ledger.totals(monthOf(now()))).users.get(who.userId)?.images ?? 0;
+    if (made >= config.budget.userMonthlyImages)
+      throw new ProxyError(429, 'quota_exceeded', 'โควตาสร้างรูปของคุณเดือนนี้หมดแล้ว');
+    const body: Record<string, unknown> = { model: model.upstream, prompt: input.prompt };
+    for (const field of IMAGE_OPTIONS) if (input[field] !== undefined) body[field] = input[field];
+    body.n = 1;
+    body.response_format = 'b64_json';
+    // Zero Data Retention on every picture request too. The Images API documents `zdr` but not every model takes
+    // `data_collection`, so ZDR (which already rules out training on the prompt) is the one rule sent.
+    const providers = model.providers ?? config.providers;
+    body.provider = { zdr: true, ...(providers?.length ? { only: providers } : {}) };
+    body.user = createHash('sha256').update(`step:${who.userId}`).digest('hex').slice(0, 32);
+    const record = recorder(who, department, model);
+    active.set(who.userId, (active.get(who.userId) ?? 0) + 1);
+    const abort = new AbortController();
+    const onClose = () => {
+      if (!res.writableEnded) abort.abort();
+    };
+    res.on('close', onClose);
+    try {
+      let response: Response;
+      try {
+        response = await request(`${upstream}/images`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${key}`,
+            'content-type': 'application/json',
+            'x-title': 'STeP AI',
+          },
+          body: JSON.stringify(body),
+          redirect: 'error',
+          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(300_000)]),
+        });
+      } catch {
+        if (abort.signal.aborted) return void (await record('cancelled', NO_COST));
+        throw new ProxyError(502, 'upstream_unreachable', 'ติดต่อผู้ให้บริการ AI ไม่ได้ ลองใหม่อีกครั้ง');
+      }
+      if (!response.ok) {
+        const reason = await upstreamError(response);
+        console.error('ai upstream', response.status, reason.code, model.id);
+        await record('error', NO_COST);
+        // 404: no provider of this model meets Zero Data Retention (or the settings' provider list).
+        if (response.status === 404)
+          throw new ProxyError(
+            502,
+            'image_unavailable',
+            'ไม่มีผู้ให้บริการโมเดลภาพนี้ที่ไม่เก็บข้อมูล แจ้งผู้ดูแล',
+          );
+        throw mapUpstream(response, false);
+      }
+      let data: any;
+      try {
+        data = JSON.parse(await readLimited(response, IMAGE_RESPONSE_LIMIT));
+      } catch (error) {
+        if (error instanceof ProxyError) throw error;
+        throw new ProxyError(502, 'upstream_invalid', 'ผู้ให้บริการ AI ตอบกลับผิดรูปแบบ');
+      }
+      const picture = data?.data?.[0];
+      if (typeof picture?.b64_json !== 'string' || !picture.b64_json)
+        throw new ProxyError(502, 'upstream_invalid', 'ผู้ให้บริการ AI ตอบกลับผิดรูปแบบ');
+      const reported = data?.usage?.cost;
+      const provider = typeof reported === 'number' && Number.isFinite(reported) && reported >= 0;
+      await record('ok', {
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        costUsd: usd(provider ? reported : model.pricePerImageUsd),
+        costSource: provider ? 'provider' : 'price',
+        images: 1,
+      });
+      // Only the picture goes back: no upstream ids, providers or anything else OpenRouter added.
+      send(res, 200, {
+        created: Number.isSafeInteger(data.created) ? data.created : Math.floor(now() / 1000),
+        model: model.id,
+        data: [
+          {
+            b64_json: picture.b64_json,
+            ...(typeof picture.media_type === 'string' ? { media_type: picture.media_type } : {}),
+          },
+        ],
+      });
+    } finally {
+      res.off('close', onClose);
+      const left = (active.get(who.userId) ?? 1) - 1;
+      if (left > 0) active.set(who.userId, left);
+      else active.delete(who.userId);
+    }
+  }
+
+  function recorder(who: Who, department: string, model: AiModel | AiImageModel) {
     const base = {
       userId: who.userId,
       email: who.email,
@@ -307,6 +430,8 @@ export function createAiProxy(options: AiProxyOptions) {
       spentUsd: usd(mine?.usd ?? 0),
       capUsd: cap,
       requests: mine?.requests ?? 0,
+      images: mine?.images ?? 0,
+      imageCap: config.imageModels.length ? config.budget.userMonthlyImages : 0,
       ...(config.budget.thbPerUsd
         ? {
             thbPerUsd: config.budget.thbPerUsd,
@@ -349,6 +474,7 @@ export function createAiProxy(options: AiProxyOptions) {
           spentThb: thb(u.usd),
           capUsd: userCapUsd(config, u.email),
           requests: u.requests,
+          images: u.images,
         })),
     };
   }
@@ -373,6 +499,16 @@ export function createAiProxy(options: AiProxyOptions) {
         });
       }
       if (req.method === 'POST' && path === '/v1/chat/completions') return await chat(req, res, who);
+      if (req.method === 'GET' && path === '/v1/images/models') {
+        const config = await settings();
+        const first = defaultImageModel(config);
+        const models = first ? [first, ...config.imageModels.filter((m) => m !== first)] : [];
+        return send(res, 200, {
+          object: 'list',
+          data: models.map((m) => ({ id: m.id, name: m.label, object: 'model', owned_by: 'step' })),
+        });
+      }
+      if (req.method === 'POST' && path === '/v1/images') return await image(req, res, who);
       if (req.method === 'GET' && path === '/v1/usage')
         return send(res, 200, await usageOf(await settings(), who));
       if (req.method === 'GET' && path === '/v1/admin/usage') {
@@ -461,7 +597,17 @@ async function stream(
   );
 }
 
-type Cost = Pick<UsageEntry, 'inputTokens' | 'outputTokens' | 'cachedTokens' | 'costUsd' | 'costSource'>;
+type Cost = Pick<
+  UsageEntry,
+  'inputTokens' | 'outputTokens' | 'cachedTokens' | 'costUsd' | 'costSource' | 'images'
+>;
+const NO_COST: Cost = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cachedTokens: 0,
+  costUsd: 0,
+  costSource: 'provider',
+};
 
 function costOf(model: AiModel, usage: any): Cost {
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0);

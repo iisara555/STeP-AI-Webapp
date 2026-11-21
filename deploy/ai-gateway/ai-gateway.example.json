@@ -16,11 +16,13 @@
       "maxOutputTokens": 32000
     }
   ],
+  "imageModels": [],
   "providers": ["google-vertex", "amazon-bedrock"],
   "budget": {
     "orgMonthlyUsd": 55,
     "userMonthlyUsd": 3,
     "userConcurrency": 3,
+    "userMonthlyImages": 20,
     "thbPerUsd": 33
   },
   "departments": [
