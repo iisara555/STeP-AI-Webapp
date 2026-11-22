@@ -1,5 +1,13 @@
 # Progress
 
+## 2026-11-21 · AI ขององค์กร: สร้างรูปผ่าน gateway
+
+- เจ้าของขอให้รองรับการสร้างรูป (เช่น GPT Image) รวมถึงงานตั้งเวลาใน Desktop: gateway เพิ่ม `GET /v1/images/models` และ
+  `POST /v1/images` ส่งต่อไป Images API ของ OpenRouter ครั้งละ 1 รูป บังคับ ZDR นับเงินและจำนวนรูปต่อคน (`budget.userMonthlyImages`)
+  ค่าเริ่มต้น `imageModels` ว่าง = ปิดอยู่ ฝั่ง Desktop อยู่ใน PR ของ STeP-AI-Harness ที่ต่อจาก "AI ขององค์กร"
+- รอเจ้าของ: ยืนยันว่ารุ่น GPT Image ที่จะใช้มีผู้ให้บริการแบบ ZDR บน OpenRouter และราคาจริง แล้วเพิ่ม `imageModels` ในไฟล์ตั้งค่า
+  ทดสอบกับ OpenRouter ปลอมเท่านั้น
+
 ## 2026-11-18 · AI ขององค์กร: gateway กลางสำหรับ OpenRouter
 
 - ที่ประชุมอนุมัติซื้อเครดิต OpenRouter งบเริ่มต้น 4,000 บาท เพิ่ม `server/src/ai-proxy/` (`npm run ai-gateway`) เป็นทางเดียวที่

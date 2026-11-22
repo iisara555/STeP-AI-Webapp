@@ -18,9 +18,17 @@ export type UsageEntry = {
   /** provider = OpenRouter's own figure; price = estimated from the configured price list. */
   costSource: 'provider' | 'price';
   outcome: 'ok' | 'error' | 'cancelled';
+  /** Pictures this request created (only picture requests carry it). */
+  images?: number;
 };
 
-export type Tally = { usd: number; requests: number; inputTokens: number; outputTokens: number };
+export type Tally = {
+  usd: number;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  images: number;
+};
 export type MonthTotals = {
   org: Tally;
   users: Map<string, Tally & { email: string; department: string }>;
@@ -30,13 +38,14 @@ export type MonthTotals = {
 const BANGKOK_OFFSET_MS = 7 * 3_600_000;
 /** The billing month in Bangkok time, e.g. 2026-11. */
 export const monthOf = (ms: number) => new Date(ms + BANGKOK_OFFSET_MS).toISOString().slice(0, 7);
-const emptyTally = (): Tally => ({ usd: 0, requests: 0, inputTokens: 0, outputTokens: 0 });
+const emptyTally = (): Tally => ({ usd: 0, requests: 0, inputTokens: 0, outputTokens: 0, images: 0 });
 
 function add(tally: Tally, entry: UsageEntry) {
   tally.usd += entry.costUsd;
   tally.requests += 1;
   tally.inputTokens += entry.inputTokens;
   tally.outputTokens += entry.outputTokens;
+  tally.images += typeof entry.images === 'number' && entry.images > 0 ? entry.images : 0;
 }
 
 function apply(totals: MonthTotals, entry: UsageEntry) {

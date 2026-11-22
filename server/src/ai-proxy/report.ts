@@ -38,5 +38,5 @@ for (const [id, t] of [...totals.departments].sort((a, b) => b[1].usd - a[1].usd
 console.log('\nรายคน');
 for (const u of [...totals.users.values()].sort((a, b) => b.usd - a.usd))
   console.log(
-    `  ${u.email} (${name(u.department)}): ${money(u.usd)} / ${money(userCapUsd(config, u.email))} · ${u.requests} คำขอ`,
+    `  ${u.email} (${name(u.department)}): ${money(u.usd)} / ${money(userCapUsd(config, u.email))} · ${u.requests} คำขอ${u.images ? ` · ${u.images} รูป` : ''}`,
   );

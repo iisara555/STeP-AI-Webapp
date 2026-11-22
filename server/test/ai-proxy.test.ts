@@ -385,6 +385,8 @@ test('people see their own month; only administrators see the department and per
       spentUsd: 0.0123,
       capUsd: 5,
       requests: 1,
+      images: 0,
+      imageCap: 0,
       thbPerUsd: 33,
       spentThb: 0,
     });
@@ -402,6 +404,7 @@ test('people see their own month; only administrators see the department and per
       spentThb: 0,
       capUsd: 5,
       requests: 1,
+      images: 0,
     });
   } finally {
     await t.close();
@@ -628,4 +631,147 @@ test('installed before the key exists: AI requests wait with ai_not_ready, then 
   } finally {
     await t.close();
   }
+});
+
+const PICTURE = Buffer.from('synthetic picture bytes').toString('base64');
+const WITH_IMAGES = {
+  ...SETTINGS,
+  imageModels: [
+    {
+      id: 'step-image',
+      label: 'สร้างรูป',
+      upstream: 'openai/gpt-image-2.5-sunburst',
+      pricePerImageUsd: 0.05,
+      default: true,
+      providers: ['openai'],
+    },
+  ],
+  budget: { ...SETTINGS.budget, userMonthlyImages: 2 },
+};
+const pictureReply =
+  (cost: number | null = 0.04) =>
+  (seen: Seen, res: import('node:http').ServerResponse) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    return res.end(
+      JSON.stringify({
+        created: 1_790_000_000,
+        data: [{ b64_json: PICTURE, media_type: 'image/png' }],
+        ...(cost === null ? {} : { usage: { prompt_tokens: 12, completion_tokens: 4000, cost } }),
+        provider: 'OpenAI',
+      }),
+    );
+  };
+
+test('pictures go through the Images API with the organization key, ZDR, one picture and the STeP model name', async () => {
+  const t = await setup(pictureReply(), { settings: WITH_IMAGES });
+  try {
+    const models = (await (await t.call('/v1/images/models', 'staff')).json()) as any;
+    assert.deepEqual(
+      models.data.map((m: { id: string }) => m.id),
+      ['step-image'],
+    );
+    const response = await t.call('/ai/v1/images', 'staff', {
+      prompt: 'ต้นไม้สีเขียว',
+      aspect_ratio: '1:1',
+      n: 1,
+      provider: { zdr: false },
+      model: 'step-image',
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as any;
+    assert.deepEqual(body, {
+      created: 1_790_000_000,
+      model: 'step-image',
+      data: [{ b64_json: PICTURE, media_type: 'image/png' }],
+    });
+    const sent = t.upstream.seen[0];
+    assert.equal(sent.path, '/images');
+    assert.equal(sent.authorization, `Bearer ${KEY}`);
+    assert.equal(sent.body.model, 'openai/gpt-image-2.5-sunburst');
+    assert.equal(sent.body.n, 1);
+    assert.equal(sent.body.response_format, 'b64_json');
+    assert.equal(sent.body.aspect_ratio, '1:1');
+    assert.deepEqual(sent.body.provider, { zdr: true, only: ['openai'] });
+    assert.match(sent.body.user, /^[a-f0-9]{32}$/);
+    const totals = await t.ledger.totals(monthOf(NOW));
+    assert.equal(totals.users.get(STAFF.userId)?.usd, 0.04);
+    assert.equal(totals.users.get(STAFF.userId)?.images, 1);
+    const mine = (await (await t.call('/v1/usage', 'staff')).json()) as any;
+    assert.equal(mine.images, 1);
+    assert.equal(mine.imageCap, 2);
+  } finally {
+    await t.close();
+  }
+});
+
+test('pictures stop at the monthly picture count; an unknown cost uses the settings price', async () => {
+  const t = await setup(pictureReply(null), { settings: WITH_IMAGES });
+  try {
+    for (let i = 0; i < 2; i++)
+      assert.equal((await t.call('/v1/images', 'other', { prompt: 'ภูเขา' })).status, 200);
+    const third = await t.call('/v1/images', 'other', { prompt: 'ภูเขา' });
+    assert.equal(third.status, 429);
+    assert.equal(((await third.json()) as any).error.code, 'quota_exceeded');
+    assert.equal(t.upstream.seen.length, 2);
+    const totals = await t.ledger.totals(monthOf(NOW));
+    assert.equal(totals.users.get(OTHER.userId)?.usd, 0.1, '2 pictures at the $0.05 settings price');
+  } finally {
+    await t.close();
+  }
+});
+
+test('picture requests are refused without picture models, for another model, more than one picture or no prompt', async () => {
+  const off = await setup(pictureReply());
+  try {
+    const response = await off.call('/v1/images', 'staff', { prompt: 'ต้นไม้' });
+    assert.equal(response.status, 403);
+    assert.equal(((await response.json()) as any).error.code, 'images_disabled');
+    assert.deepEqual(((await (await off.call('/v1/images/models', 'staff')).json()) as any).data, []);
+  } finally {
+    await off.close();
+  }
+  const t = await setup(pictureReply(), { settings: WITH_IMAGES });
+  try {
+    for (const body of [
+      { prompt: 'ต้นไม้', model: 'openai/gpt-image-2' },
+      { prompt: 'ต้นไม้', model: 'step-chat' },
+      { prompt: 'ต้นไม้', n: 4 },
+      { prompt: '' },
+      {},
+    ])
+      assert.equal((await t.call('/v1/images', 'staff', body)).status, 400, JSON.stringify(body));
+    assert.equal((await t.call('/v1/images', undefined, { prompt: 'ต้นไม้' })).status, 401);
+    assert.equal(t.upstream.seen.length, 0);
+  } finally {
+    await t.close();
+  }
+});
+
+test('a picture model with no Zero Data Retention provider says so, and a failed picture costs nothing', async () => {
+  const t = await setup(
+    (_seen, res) => {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ error: { code: 404, message: 'No endpoint found for model' } }));
+    },
+    { settings: WITH_IMAGES },
+  );
+  try {
+    const response = await t.call('/v1/images', 'staff', { prompt: 'ต้นไม้' });
+    assert.equal(response.status, 502);
+    assert.equal(((await response.json()) as any).error.code, 'image_unavailable');
+    const totals = await t.ledger.totals(monthOf(NOW));
+    assert.equal(totals.users.get(STAFF.userId)?.usd, 0);
+    assert.equal(totals.users.get(STAFF.userId)?.images, 0);
+  } finally {
+    await t.close();
+  }
+});
+
+test('settings reject an image model that reuses a text model name', () => {
+  assert.throws(() =>
+    AiGatewayConfig.parse({
+      ...WITH_IMAGES,
+      imageModels: [{ ...WITH_IMAGES.imageModels[0], id: 'step-chat' }],
+    }),
+  );
 });
