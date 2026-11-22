@@ -1,0 +1,34 @@
+{
+  "models": [
+    {
+      "id": "step-chat",
+      "label": "งานทั่วไปและอ่านใบเสร็จ",
+      "upstream": "anthropic/claude-haiku-5.5",
+      "price": { "input": 0.1, "output": 0.5 },
+      "maxOutputTokens": 8192,
+      "default": true
+    },
+    {
+      "id": "step-long",
+      "label": "เอกสารทางการ เช่น TOR หนังสือราชการ",
+      "upstream": "anthropic/claude-sonnet-5.5",
+      "price": { "input": 2, "output": 10 },
+      "maxOutputTokens": 32000
+    }
+  ],
+  "providers": ["google-vertex", "amazon-bedrock"],
+  "budget": {
+    "orgMonthlyUsd": 55,
+    "userMonthlyUsd": 3,
+    "userConcurrency": 3,
+    "thbPerUsd": 33
+  },
+  "departments": [
+    {
+      "id": "example-dept",
+      "name": "หน่วยงานตัวอย่าง",
+      "monthlyUsd": 15,
+      "members": ["someone@example.org"]
+    }
+  ]
+}

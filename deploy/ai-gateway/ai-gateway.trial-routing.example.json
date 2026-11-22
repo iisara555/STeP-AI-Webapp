@@ -1,0 +1,45 @@
+{
+  "models": [
+    {
+      "id": "step-chat",
+      "label": "งานทั่วไป",
+      "upstream": "deepseek/deepseek-v4.1-flash",
+      "price": { "input": 0.051, "output": 0.203 },
+      "maxOutputTokens": 8192,
+      "default": true,
+      "providers": ["deepinfra", "novita"],
+      "quantizations": ["fp8"],
+      "fallback": "step-backup"
+    },
+    {
+      "id": "step-vision",
+      "label": "อ่านภาพและใบเสร็จ",
+      "upstream": "google/gemini-3.8-flash",
+      "price": { "input": 0.825, "output": 4.125 },
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "step-long",
+      "label": "เอกสารทางการ เช่น TOR หนังสือราชการ",
+      "upstream": "anthropic/claude-sonnet-5.5",
+      "price": { "input": 2, "output": 10 },
+      "maxOutputTokens": 32000
+    },
+    {
+      "id": "step-backup",
+      "label": "สำรองเมื่อตัวหลักขัดข้อง",
+      "upstream": "anthropic/claude-haiku-5.5",
+      "price": { "input": 0.1, "output": 0.5 },
+      "maxOutputTokens": 8192
+    }
+  ],
+  "providers": ["google-vertex", "amazon-bedrock"],
+  "routes": { "images": "step-vision" },
+  "budget": {
+    "orgMonthlyUsd": 55,
+    "userMonthlyUsd": 3,
+    "userConcurrency": 3,
+    "thbPerUsd": 33
+  },
+  "departments": []
+}

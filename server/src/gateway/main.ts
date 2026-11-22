@@ -5,7 +5,8 @@ import { resolve } from 'node:path';
 import { RuntimeManager } from '../workspace/manager.ts';
 import { processDriver } from '../workspace/process-driver.ts';
 import { fileAudit } from './audit.ts';
-import { googleIdTokenAuth } from './auth.ts';
+import { internalTokens } from '../ai-proxy/internal-token.ts';
+import { googleIdTokenAuth, type Authenticator } from './auth.ts';
 import { createGateway } from './http.ts';
 import { DEFAULT_QUOTAS, RunService } from './runs.ts';
 
@@ -36,16 +37,28 @@ const number = (name: string, fallback: number) => {
 const dataRoot = resolve(env('STEP_DATA_ROOT'));
 const invitesFile = resolve(env('STEP_INVITES_FILE'));
 const aiKey = process.env.STEP_AI_KEY;
+// With the organization AI gateway (npm run ai-gateway) each runtime gets a token in its owner's name instead of a
+// shared key, so its AI use counts against that person's and department's monthly cap.
+const internalSecret = process.env.STEP_AI_INTERNAL_SECRET;
+const tokens = internalSecret ? internalTokens(internalSecret) : undefined;
+/** Email of each signed-in user id, filled in by every authenticated request (a runtime only starts on one). */
+const emails = new Map<string, string>();
+const runtimeToken = (ownerId: string) => {
+  if (!tokens) return aiKey ? { token: aiKey } : {};
+  const email = emails.get(ownerId);
+  if (!email) throw new Error('PROVIDER_NOT_CONNECTED');
+  return { token: tokens.sign({ userId: ownerId, email }) };
+};
 
 const manager = new RuntimeManager({
   dataRoot,
   driver: processDriver(),
   maxRunning: number('STEP_MAX_RUNNING', 8),
   idleMs: number('STEP_IDLE_MINUTES', 30) * 60_000,
-  grant: () => ({
+  grant: (ownerId) => ({
     baseUrl: env('STEP_AI_BASE_URL'),
     model: env('STEP_AI_MODEL'),
-    ...(aiKey ? { token: aiKey } : {}),
+    ...runtimeToken(ownerId),
   }),
 });
 const audit = fileAudit(dataRoot);
@@ -54,19 +67,29 @@ const quotas = {
   activeRunsPerUser: number('STEP_QUOTA_ACTIVE_RUNS', DEFAULT_QUOTAS.activeRunsPerUser),
   runsPerUserPerDay: number('STEP_QUOTA_DAILY_RUNS', DEFAULT_QUOTAS.runsPerUserPerDay),
 };
+function remember(authenticate: Authenticator): Authenticator {
+  return async (authorization) => {
+    const who = await authenticate(authorization);
+    if (who) emails.set(who.userId, who.email);
+    return who;
+  };
+}
+
 const server = createGateway({
   manager,
   runs: new RunService(manager, audit, quotas),
   audit,
   quotas,
   origin: env('STEP_APP_ORIGIN'),
-  authenticate: googleIdTokenAuth({
-    clientId: env('STEP_GOOGLE_CLIENT_ID'),
-    domains: [...list(env('STEP_ALLOWED_DOMAINS'))],
-    // One email per line; read on every request so removing a line revokes access without a restart.
-    invited: async () => list(await readFile(invitesFile, 'utf8').catch(() => '')),
-    admins: list(process.env.STEP_ADMINS ?? ''),
-  }),
+  authenticate: remember(
+    googleIdTokenAuth({
+      clientId: env('STEP_GOOGLE_CLIENT_ID'),
+      domains: [...list(env('STEP_ALLOWED_DOMAINS'))],
+      // One email per line; read on every request so removing a line revokes access without a restart.
+      invited: async () => list(await readFile(invitesFile, 'utf8').catch(() => '')),
+      admins: list(process.env.STEP_ADMINS ?? ''),
+    }),
+  ),
 });
 
 const sweep = setInterval(() => void manager.sweepIdle().catch(() => {}), 60_000);
