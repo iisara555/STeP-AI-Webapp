@@ -1,5 +1,15 @@
 # Progress
 
+## 2026-11-22 · Cloud Workspace มี tool loop ฝั่ง server
+
+- เจ้าของขอให้ Webapp มี tool loop และแยก server กับ client: Cloud Workspace แยกอยู่แล้วตาม ADR 0001 (Web เป็น client,
+  Gateway + runtime เป็น server) งานนี้เปิด tool loop ของ Desktop ใน runtime ด้วย host อ่านอย่างเดียว
+  `server/src/workspace-tools.ts`: `skill`, `reference`, `files` (เฉพาะ `<ws>/files/`), `doc_outline`, `doc_section`
+  ไม่มี terminal, browser, web, การเขียนไฟล์ หรือ MCP ปิดได้ด้วย `STEP_WORKSPACE_TOOLS=0` รายละเอียดใน `server/README.md`
+- ใช้ engine ที่ pin เดิม (`desktop-v0.6.20`) เว็บ Supabase หลัก (:8443) ไม่ได้แตะ
+- รอเจ้าของ: deploy runtime ใหม่บน ik-node-01 (:8444) แล้วลองถามเรื่อง STeP ที่เคยตอบผิดเอกสาร เทียบก่อน/หลัง
+  ยังไม่ได้ทดสอบกับ OpenRouter หรือ Qwen จริง (ทดสอบกับ provider ปลอมเท่านั้น)
+
 ## 2026-11-21 · AI ขององค์กร: สร้างรูปผ่าน gateway
 
 - เจ้าของขอให้รองรับการสร้างรูป (เช่น GPT Image) รวมถึงงานตั้งเวลาใน Desktop: gateway เพิ่ม `GET /v1/images/models` และ

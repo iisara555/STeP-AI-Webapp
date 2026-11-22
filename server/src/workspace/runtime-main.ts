@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { CompatibleAdapter } from '../../../harness/desktop/electron/providers.ts';
 import { searchPublicWeb } from '../../../harness/desktop/electron/public-search.ts';
-import { createEngine } from '../engine.ts';
+import { createEngine, serverPolicy } from '../engine.ts';
 import {
   AskInput,
   ProviderGrant,
@@ -50,8 +50,13 @@ if (process.env.STEP_SYNTHETIC_PROVIDER === '1') {
 const reply = (message: RuntimeReply) => send!(message);
 const FORWARDED = new Set(['delta', 'discard', 'activity', 'status']);
 let grant: ReturnType<typeof ProviderGrant.parse> | undefined;
+// The tool loop runs here, on the server, with read-only tools (Skills, STeP documents, this Workspace's files); the
+// Web stays a client. STEP_WORKSPACE_TOOLS=0 turns it off without a deploy of new code.
+const tools = process.env.STEP_WORKSPACE_TOOLS !== '0';
 const engine = await createEngine({
   dataDir: dir,
+  policy: serverPolicy({ workspaceTools: tools }),
+  ...(tools ? { workspaceTools: { filesDir: join(dir, 'files') } } : {}),
   runtime: async () => ({
     adapter: new CompatibleAdapter(),
     context: { cwd: join(dir, 'files'), env: {}, key: grant?.token },
