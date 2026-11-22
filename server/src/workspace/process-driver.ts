@@ -28,6 +28,8 @@ export function runtimeEnv(spec: RuntimeSpec): Record<string, string> {
     NODE_ENV: 'production',
     STEP_WORKSPACE_ID: spec.workspaceId,
     STEP_WORKSPACE_DIR: spec.dir,
+    // The one switch an operator sets on the Gateway that the runtime must see: 0 turns the Workspace tool loop off.
+    ...(process.env.STEP_WORKSPACE_TOOLS === '0' ? { STEP_WORKSPACE_TOOLS: '0' } : {}),
   };
 }
 

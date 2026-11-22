@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEngine, serverPolicy, type Runtime } from '../src/engine.ts';
-import { workspaceToolsHost } from '../src/workspace-tools.ts';
+import { workspaceInstructions, workspaceToolsHost } from '../src/workspace-tools.ts';
+import { runtimeEnv } from '../src/workspace/process-driver.ts';
 
 const tool = (name: string, input: string, args?: Record<string, unknown>) =>
   '```step-tool\n' + JSON.stringify({ tool: name, input, ...(args ? { args } : {}) }) + '\n```';
@@ -174,5 +175,49 @@ test('a blocked route stops every Workspace tool', async () => {
   } finally {
     engine.close();
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("the instructions name this Workspace's own files, without names the privacy check would change", async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'step-workspace-names-'));
+  try {
+    const privacy = (text: string) =>
+      /\d{10}/.test(text)
+        ? { action: 'auto-mask', redactedText: text.replace(/\d{10}/, '[masked]') }
+        : { action: 'pass', redactedText: text };
+    assert.match(workspaceInstructions(dir, privacy), /This Workspace has no files yet\./);
+    await mkdir(join(dir, 'งบ'));
+    await mkdir(join(dir, 'งบ', 'deep'));
+    await writeFile(join(dir, 'notes.md'), 'x');
+    await writeFile(join(dir, 'งบ', 'ใบเสร็จ.csv'), 'x');
+    await writeFile(join(dir, 'งบ', 'deep', 'hidden-depth.md'), 'x');
+    await writeFile(join(dir, 'สมชาย 0812345678.txt'), 'x');
+    await writeFile(join(dir, '.secret'), 'x');
+    const text = workspaceInstructions(dir, privacy);
+    assert.match(text, /Files in this Workspace \(read them with files\): notes\.md, งบ\/ใบเสร็จ\.csv\./);
+    assert.match(text, /never say a file is missing/);
+    for (const hidden of ['0812345678', '.secret', 'hidden-depth'])
+      assert.equal(text.includes(hidden), false, hidden);
+    for (let i = 0; i < 50; i++) await writeFile(join(dir, `f${String(i).padStart(2, '0')}.md`), 'x');
+    const listed = workspaceInstructions(dir, privacy).split('read them with files): ')[1].split(', ');
+    assert.equal(listed.length, 40);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the Gateway switch STEP_WORKSPACE_TOOLS=0 reaches the runtime; nothing else is passed', () => {
+  const spec = { workspaceId: 'w1', dir: '/tmp/w1' } as any;
+  const before = process.env.STEP_WORKSPACE_TOOLS;
+  try {
+    delete process.env.STEP_WORKSPACE_TOOLS;
+    assert.equal(runtimeEnv(spec).STEP_WORKSPACE_TOOLS, undefined);
+    process.env.STEP_WORKSPACE_TOOLS = '1';
+    assert.equal(runtimeEnv(spec).STEP_WORKSPACE_TOOLS, undefined);
+    process.env.STEP_WORKSPACE_TOOLS = '0';
+    assert.equal(runtimeEnv(spec).STEP_WORKSPACE_TOOLS, '0');
+  } finally {
+    if (before === undefined) delete process.env.STEP_WORKSPACE_TOOLS;
+    else process.env.STEP_WORKSPACE_TOOLS = before;
   }
 });

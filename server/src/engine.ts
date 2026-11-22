@@ -10,7 +10,7 @@ import { searchPublicWeb } from '../../harness/desktop/electron/public-search.ts
 import type { ProviderAdapter, ProviderContext } from '../../harness/desktop/electron/providers.ts';
 import type { Connection, RunEvent } from '../../harness/desktop/src/types.ts';
 import { PUBLIC_WEB_INSTRUCTIONS, publicWebHost, type PublicWebOptions } from './public-web.ts';
-import { WORKSPACE_INSTRUCTIONS, workspaceToolsHost } from './workspace-tools.ts';
+import { workspaceInstructions, workspaceToolsHost } from './workspace-tools.ts';
 
 export const HARNESS_ROOT = resolve(import.meta.dirname, '../../harness');
 
@@ -123,7 +123,7 @@ export async function createEngine({
         }
       : workspaceTools && policy.features.toolLoop
         ? {
-            toolInstructions: () => WORKSPACE_INSTRUCTIONS,
+            toolInstructions: () => workspaceInstructions(workspaceTools.filesDir, scanText),
             tools: async (scope) =>
               workspaceToolsHost(scope, harness, {
                 privacy: (text) => scanText(text),

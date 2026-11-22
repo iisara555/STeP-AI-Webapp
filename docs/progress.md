@@ -7,8 +7,11 @@
   `server/src/workspace-tools.ts`: `skill`, `reference`, `files` (เฉพาะ `<ws>/files/`), `doc_outline`, `doc_section`
   ไม่มี terminal, browser, web, การเขียนไฟล์ หรือ MCP ปิดได้ด้วย `STEP_WORKSPACE_TOOLS=0` รายละเอียดใน `server/README.md`
 - ใช้ engine ที่ pin เดิม (`desktop-v0.6.20`) เว็บ Supabase หลัก (:8443) ไม่ได้แตะ
-- รอเจ้าของ: deploy runtime ใหม่บน ik-node-01 (:8444) แล้วลองถามเรื่อง STeP ที่เคยตอบผิดเอกสาร เทียบก่อน/หลัง
-  ยังไม่ได้ทดสอบกับ OpenRouter หรือ Qwen จริง (ทดสอบกับ provider ปลอมเท่านั้น)
+- 2026-11-22 ทดลองจริงบน :8444 กับ Qwen 3.5 4B แล้ว rollback กลับโค้ดเดิม: Ollama context 4096 ไม่พอ (ต้อง 16K),
+  Qwen ไม่เคยเรียกเครื่องมือเอง และตอบว่า "ไม่มีไฟล์แนบ" สวิตช์ `STEP_WORKSPACE_TOOLS=0` ไม่ถึง runtime
+  แก้แล้ว: Gateway ส่งสวิตช์ต่อ, คำสั่งบอกชื่อไฟล์ใน Workspace และห้ามตอบว่าไม่มีไฟล์ก่อนเรียก `files`
+- รอเจ้าของ: deploy ใหม่บน :8444 ด้วยโมเดล `qwen3.5-4b-ctx16k` แล้วถามชุดเดิมซ้ำ ยังไม่ได้ทดสอบกับ Gemini/OpenRouter
+  (ik-node-01 ไม่มี key)
 
 ## 2026-11-21 · AI ขององค์กร: สร้างรูปผ่าน gateway
 

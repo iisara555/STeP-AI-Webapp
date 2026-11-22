@@ -44,7 +44,12 @@ ADR 0001 แยก client กับ server ไว้แล้ว: Web เป็�
 - ปฏิเสธ path นอกโฟลเดอร์, symbolic link, hard link, ไฟล์ที่ไม่ใช่ข้อความ และ path ที่ `sensitivePath` ของ Desktop ป้องกัน
   ทุกผลผ่าน privacy check ก่อนส่งให้ AI และ route ที่ถูก BLOCK/ESCALATE/CLARIFY หยุดทุกเครื่องมือ
 - ไม่มี terminal, browser, web, การเขียนไฟล์, MCP หรือบัญชี จึงยังไม่ต้องมีช่องอนุมัติ การเขียนไฟล์จะมาพร้อมช่องอนุมัติในระยะ 4
-- `runtime-main.ts` เปิดให้เอง ตั้ง `STEP_WORKSPACE_TOOLS=0` ใน environment ของ runtime เพื่อปิดโดยไม่ต้องแก้โค้ด
+- `runtime-main.ts` เปิดให้เอง ตั้ง `STEP_WORKSPACE_TOOLS=0` ใน environment ของ Gateway เพื่อปิดโดยไม่ต้องแก้โค้ด
+  (Gateway ส่งต่อเฉพาะค่า `0` นี้เข้า runtime ค่าอื่นของ Gateway ไม่ถูกส่ง)
+- คำสั่งของเครื่องมือบอกชื่อไฟล์ใน Workspace ให้ AI รู้ (สูงสุด 40 ชื่อ ชั้นบนสุดกับโฟลเดอร์ย่อยหนึ่งชั้น ชื่อที่ privacy check
+  จะปิดบังไม่ถูกบอก) และห้ามตอบว่าไม่มีไฟล์ก่อนเรียก `files` เพราะ Qwen 3.5 4B เคยตอบว่า "ไม่มีไฟล์แนบ" ทั้งที่มีไฟล์
+- โมเดลผ่าน Ollama ต้องตั้ง context อย่างน้อย 16K (`num_ctx` 16384 เช่นโมเดล `qwen3.5-4b-ctx16k` บน ik-node-01)
+  ค่า 4096 ตั้งต้นไม่พอเมื่อมีคำสั่งเครื่องมือ (คำขอประมาณ 4,500 token)
 - ใช้ engine ที่ pin อยู่ (`desktop-v0.6.20`) ได้เลย ไม่ต้องขยับ pin
 
 ## Gateway (ระยะ 3a)
