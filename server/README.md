@@ -113,11 +113,30 @@ npm run gateway        # ฟังที่ 127.0.0.1:8787 ให้ reverse pro
 
 ข้อจำกัดของ 3a:
 
-- สถานะงานและ event feed อยู่ใน memory ของ Gateway: restart แล้วงานที่ค้างหายและ quota รายวันนับใหม่ ส่วนบทสนทนาในแต่ละ
-  Workspace ยังอยู่ครบ
+- สถานะงานและ event feed อยู่ใน memory ของ Gateway: restart แล้วงานที่ค้างหาย ส่วนบทสนทนาในแต่ละ Workspace ยังอยู่ครบ
+- quota จำนวนงานต่อวันเก็บใน `<STEP_DATA_ROOT>/gateway-quotas.sqlite` (0600, เก็บแค่ user id, วันที่ UTC และจำนวน ย้อนหลัง 35 วัน)
+  restart แล้วนับต่อจากเดิม ไม่เริ่มวันใหม่
+- คำเชิญอ่านจาก `STEP_INVITES_FILE` ทุกคำขอ ลบบรรทัดออกแล้วบัญชีนั้นเข้าไม่ได้ทันทีโดยไม่ต้อง restart
 - ยังไม่ได้ทดสอบกับบัญชี Google จริง และ event stream ใช้ header `Authorization` จึงต้องอ่านด้วย `fetch` ไม่ใช่ `EventSource`
 - ยังไม่มีช่องอนุมัติ เพราะ server ยังไม่มีเครื่องมือเขียนข้อมูล (tool loop ของ Workspace อ่านอย่างเดียว) จะทำพร้อมเครื่องมือเขียนในระยะ 4 ตาม ADR 0002
 - process driver ยังไม่ใช่ security boundary ระดับ host เหมือนเดิม
+
+## สำรองและกู้ข้อมูล Workspace
+
+`scripts/backup-workspace-data.mjs` สำรองทั้งโฟลเดอร์ `STEP_DATA_ROOT` (Workspace ทุกคน, quota, รายงานการใช้ AI, audit) ระหว่างที่
+Gateway ยังทำงานอยู่ได้ ไฟล์ SQLite คัดลอกด้วย online backup ของ SQLite จึงไม่ได้ไฟล์ที่เขียนค้างครึ่งทาง ไฟล์อื่นคัดลอกตรง ๆ
+ข้าม symlink และไฟล์ข้าง SQLite (`-wal`, `-shm`) ทุกไฟล์มีขนาดและ SHA-256 ใน `manifest.json` ผลลัพธ์บอกแค่จำนวน ไม่มีชื่อไฟล์หรือเนื้อหา
+ต้องใช้ Node 22.16 ขึ้นไป
+
+```bash
+node --no-warnings scripts/backup-workspace-data.mjs backup --data ~/step-gateway-data --out ~/step-gateway-backups --keep 14
+node --no-warnings scripts/backup-workspace-data.mjs verify --backup ~/step-gateway-backups/<เวลา>   # กู้ลงโฟลเดอร์ชั่วคราวแล้วตรวจทุกไฟล์
+```
+
+- โฟลเดอร์สำรองเป็น 0700 ไฟล์ 0600 และ `--out` ต้องอยู่นอก `--data`
+- เก็บ `--keep` ชุดล่าสุด (ค่าเริ่ม 14) ลบเฉพาะโฟลเดอร์ที่ชื่อเป็นเวลา `YYYYMMDDTHHMMSSZ`
+- สำรองยังไม่เข้ารหัสและอยู่บนเครื่องเดียวกัน ถ้าเครื่องเสียทั้งเครื่องข้อมูลหายด้วย ต้องย้ายไปดิสก์แยกหรือที่เก็บนอกเครื่องก่อนขยายผู้ใช้
+- คืนข้อมูล: หยุด Gateway คัดลอก `<เวลา>/data/` กลับไปเป็น `STEP_DATA_ROOT` แล้วเปิด Gateway ใหม่
 
 ## หน้าเว็บโหมด Cloud Workspace (ระยะ 3b)
 

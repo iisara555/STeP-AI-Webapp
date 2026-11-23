@@ -1,13 +1,14 @@
 // Gateway entry: npm run gateway (behind the HTTPS reverse proxy; listens on loopback by default).
 // Settings come from the environment only; the provider key never reaches a browser, a prompt or a Workspace file.
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, readFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { RuntimeManager } from '../workspace/manager.ts';
 import { processDriver } from '../workspace/process-driver.ts';
 import { fileAudit } from './audit.ts';
 import { internalTokens } from '../ai-proxy/internal-token.ts';
 import { googleIdTokenAuth, type Authenticator } from './auth.ts';
 import { createGateway } from './http.ts';
+import { QuotaStore } from './quota-store.ts';
 import { DEFAULT_QUOTAS, RunService } from './runs.ts';
 
 const env = (name: string, fallback?: string) => {
@@ -35,6 +36,9 @@ const number = (name: string, fallback: number) => {
 };
 
 const dataRoot = resolve(env('STEP_DATA_ROOT'));
+await mkdir(dataRoot, { recursive: true, mode: 0o700 });
+// Runs per user per day, kept across restarts so a restart does not hand everyone a fresh day.
+const quotaStore = new QuotaStore(join(dataRoot, 'gateway-quotas.sqlite'));
 const invitesFile = resolve(env('STEP_INVITES_FILE'));
 const aiKey = process.env.STEP_AI_KEY;
 // With the organization AI gateway (npm run ai-gateway) each runtime gets a token in its owner's name instead of a
@@ -77,7 +81,7 @@ function remember(authenticate: Authenticator): Authenticator {
 
 const server = createGateway({
   manager,
-  runs: new RunService(manager, audit, quotas),
+  runs: new RunService(manager, audit, quotas, Date.now, quotaStore),
   audit,
   quotas,
   origin: env('STEP_APP_ORIGIN'),
@@ -100,7 +104,10 @@ server.listen(port, host, () => console.log(`STeP Gateway: http://${host}:${port
 const shutdown = () => {
   clearInterval(sweep);
   server.close();
-  void manager.shutdown().finally(() => process.exit(0));
+  void manager.shutdown().finally(() => {
+    quotaStore.close();
+    process.exit(0);
+  });
 };
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
