@@ -18,7 +18,7 @@ const TOKEN = 'synthetic-token-for-tests';
  * Nothing leaves the machine. `hold` keeps a request open until released, to stand for a long job.
  */
 async function syntheticProvider() {
-  const requests: { authorization?: string; prompt: string }[] = [];
+  const requests: { authorization?: string; prompt: string; system: string }[] = [];
   let hold: Promise<void> | undefined;
   const server = createServer(async (req: IncomingMessage, res) => {
     let body = '';
@@ -27,6 +27,7 @@ async function syntheticProvider() {
     requests.push({
       authorization: req.headers.authorization,
       prompt: messages.find((m) => m.role === 'user')?.content ?? '',
+      system: messages.find((m) => m.role === 'system')?.content ?? '',
     });
     await hold;
     res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -75,11 +76,11 @@ const firstDocument = (prompt: string) =>
   /<organization_knowledge>[\s\S]*?\[([a-z0-9-]+)\]/.exec(prompt)?.[1] ?? null;
 
 /**
- * Questions the engine answers with the provider's own live web search. An OpenAI-compatible endpoint has none, so
- * through a Workspace runtime they stop with PROVIDER_CAPABILITY_UNSUPPORTED until the router proxy (ADR 0001 §7)
- * or the engine offers search for compatible providers. When that lands this list must shrink, and the test says so.
+ * Questions about current public facts. An OpenAI-compatible endpoint has no live web search; with the Workspace tool
+ * loop (2026-11-22) they no longer stop with PROVIDER_CAPABILITY_UNSUPPORTED. They reach their STeP document like the
+ * rest, and the AI is told that this Workspace cannot look current facts up, so it says so instead of guessing.
  */
-const NEEDS_PROVIDER_WEB_SEARCH = ['วันหยุดราชการปีนี้'];
+const CURRENT_PUBLIC_FACTS = ['วันหยุดราชการปีนี้'];
 
 test('the staff-question corpus reaches the right document through a Workspace runtime process', async () => {
   const { questions } = JSON.parse(
@@ -92,13 +93,9 @@ test('the staff-question corpus reaches the right document through a Workspace r
     for (const { q, doc } of questions) {
       provider.requests.length = 0;
       const result = await manager.ask('alice', w.id, { text: q });
-      if (NEEDS_PROVIDER_WEB_SEARCH.includes(q)) {
-        assert.equal(
-          result.code,
-          'PROVIDER_CAPABILITY_UNSUPPORTED',
-          `${q} no longer needs provider web search`,
-        );
-        continue;
+      if (CURRENT_PUBLIC_FACTS.includes(q)) {
+        assert.equal(result.status, 'review', `${q}: ${result.code}`);
+        assert.match(provider.requests.at(-1)!.system, /cannot look them up now/);
       }
       const found = provider.requests.length ? firstDocument(provider.requests.at(-1)!.prompt) : null;
       const ok = doc === 'none' ? found === null : [doc].flat().includes(found ?? '');
@@ -107,8 +104,11 @@ test('the staff-question corpus reaches the right document through a Workspace r
           `${q} => ${found ?? 'nothing'} [${result.status} ${result.code ?? ''}] (expected ${[doc].flat().join(' or ')})`,
         );
     }
-    const answerable = questions.length - NEEDS_PROVIDER_WEB_SEARCH.length;
-    assert.equal(misses.length, 0, `${answerable - misses.length}/${answerable}:\n${misses.join('\n')}`);
+    assert.equal(
+      misses.length,
+      0,
+      `${questions.length - misses.length}/${questions.length}:\n${misses.join('\n')}`,
+    );
   });
 });
 

@@ -6,6 +6,7 @@
 - engine มาจาก submodule `harness/` ที่ล็อกไว้ที่ `desktop-v0.6.20` (`npm run check:engine-pin` ตรวจว่าเป็น release tag)
 - `src/engine.ts` สร้าง engine ของผู้ใช้ 1 คน มีโฟลเดอร์ของตัวเอง (`<data>/users/<id>/workspace.sqlite`, สิทธิ์ 0700)
   ใช้ `serverPolicy()`: เปิด privacy check, ปิด tool loop, shell, sandbox, MCP, Copilot, Vault, autopilot และ staff Skills โดยปริยาย
+  (Cloud Workspace เปิด tool loop แบบอ่านอย่างเดียวด้วย `serverPolicy({ workspaceTools: true })` ดูหัวข้อด้านล่าง)
 - `src/register.mjs` แทน `@github/copilot-sdk` ด้วย module ที่ไม่ยอมเริ่มทำงาน เพราะ `providers.ts` import มาแบบ static
   แต่ Copilot ปิดบน server ทำให้ไม่ต้องติดตั้ง native client
 - dependencies ของ server มีแค่ 2 ตัว คือ `mdast-util-from-markdown` และ `@xmldom/xmldom` เวอร์ชันเดียวกับ Desktop
@@ -26,10 +27,30 @@
 
 ช่องว่างที่รู้แล้วของระยะ 2:
 
-- คำถามที่ engine ส่งไปค้นเว็บผ่าน provider (เช่น "วันหยุดราชการปีนี้") จบด้วย `PROVIDER_CAPABILITY_UNSUPPORTED` เพราะ endpoint
-  แบบ OpenAI-compatible ค้นเว็บไม่ได้ test จึงวัด 60/60 ข้อที่เหลือ และระบุข้อนี้ไว้ชัด รอ router proxy (ADR §7) หรือ engine
-- AI skill selection (hybrid) ของ Desktop ทำงานเฉพาะเมื่อเปิด tool loop ซึ่ง server profile ยังปิด คำขอที่ router แบบกฎหา Skill
-  ไม่เจอจึงได้คำตอบแบบ general assist แต่ยังไม่ใช้ขั้นตอนของ Skill
+- endpoint แบบ OpenAI-compatible ค้นเว็บไม่ได้ เดิมคำถามอย่าง "วันหยุดราชการปีนี้" จบด้วย `PROVIDER_CAPABILITY_UNSUPPORTED`
+  ตั้งแต่มี tool loop ของ Workspace คำถามนี้ไปถึงเอกสาร STeP ตามปกติ (test วัดครบ 61/61) และ AI ได้รับคำสั่งให้บอกว่า
+  Workspace ค้นข้อมูลปัจจุบันไม่ได้ แทนการเดา ค้นเว็บจริงยังรอ router proxy (ADR §7)
+- AI skill selection (hybrid) ของ Desktop ยังปิดบน server แต่ตั้งแต่ 2026-11-22 Cloud Workspace มี tool loop: AI เปิด Skill เองได้ด้วย
+  เครื่องมือ `skill` เมื่อ router แบบกฎหา Skill ไม่เจอ
+
+## Tool loop ของ Cloud Workspace (2026-11-22)
+
+ADR 0001 แยก client กับ server ไว้แล้ว: Web เป็นหน้าจอ ส่วน tool loop ของ Desktop รันใน runtime ของ Workspace บน server
+`src/workspace-tools.ts` เป็น tool host แบบอ่านอย่างเดียว ไม่มีอะไรที่เปลี่ยนข้อมูลหรือออกนอก server
+
+- `skill` อ่าน Skill ที่ router อนุญาต (และไฟล์ `references/`, `examples/` ของ Skill นั้น), `reference` อ่านเอกสาร STeP ที่ลงทะเบียน
+  (outline หรือทีละหัวข้อได้), `files` list/read ไฟล์ข้อความใน `<ws>/files/` ของ Workspace นี้เท่านั้น ทีละ 40,000 ตัวอักษร,
+  `doc_outline`/`doc_section` อ่าน DOCX/PDF ในโฟลเดอร์เดียวกันผ่าน document privacy
+- ปฏิเสธ path นอกโฟลเดอร์, symbolic link, hard link, ไฟล์ที่ไม่ใช่ข้อความ และ path ที่ `sensitivePath` ของ Desktop ป้องกัน
+  ทุกผลผ่าน privacy check ก่อนส่งให้ AI และ route ที่ถูก BLOCK/ESCALATE/CLARIFY หยุดทุกเครื่องมือ
+- ไม่มี terminal, browser, web, การเขียนไฟล์, MCP หรือบัญชี จึงยังไม่ต้องมีช่องอนุมัติ การเขียนไฟล์จะมาพร้อมช่องอนุมัติในระยะ 4
+- `runtime-main.ts` เปิดให้เอง ตั้ง `STEP_WORKSPACE_TOOLS=0` ใน environment ของ Gateway เพื่อปิดโดยไม่ต้องแก้โค้ด
+  (Gateway ส่งต่อเฉพาะค่า `0` นี้เข้า runtime ค่าอื่นของ Gateway ไม่ถูกส่ง)
+- คำสั่งของเครื่องมือบอกชื่อไฟล์ใน Workspace ให้ AI รู้ (สูงสุด 40 ชื่อ ชั้นบนสุดกับโฟลเดอร์ย่อยหนึ่งชั้น ชื่อที่ privacy check
+  จะปิดบังไม่ถูกบอก) และห้ามตอบว่าไม่มีไฟล์ก่อนเรียก `files` เพราะ Qwen 3.5 4B เคยตอบว่า "ไม่มีไฟล์แนบ" ทั้งที่มีไฟล์
+- โมเดลผ่าน Ollama ต้องตั้ง context อย่างน้อย 16K (`num_ctx` 16384 เช่นโมเดล `qwen3.5-4b-ctx16k` บน ik-node-01)
+  ค่า 4096 ตั้งต้นไม่พอเมื่อมีคำสั่งเครื่องมือ (คำขอประมาณ 4,500 token)
+- ใช้ engine ที่ pin อยู่ (`desktop-v0.6.20`) ได้เลย ไม่ต้องขยับ pin
 
 ## Gateway (ระยะ 3a)
 
@@ -79,7 +100,7 @@ npm run gateway        # ฟังที่ 127.0.0.1:8787 ให้ reverse pro
 - สถานะงานและ event feed อยู่ใน memory ของ Gateway: restart แล้วงานที่ค้างหายและ quota รายวันนับใหม่ ส่วนบทสนทนาในแต่ละ
   Workspace ยังอยู่ครบ
 - ยังไม่ได้ทดสอบกับบัญชี Google จริง และ event stream ใช้ header `Authorization` จึงต้องอ่านด้วย `fetch` ไม่ใช่ `EventSource`
-- ยังไม่มีช่องอนุมัติ เพราะ server ยังไม่มีเครื่องมือเขียนข้อมูลภายนอก (tool loop ปิด) จะทำพร้อมเครื่องมือในระยะ 4 ตาม ADR 0002
+- ยังไม่มีช่องอนุมัติ เพราะ server ยังไม่มีเครื่องมือเขียนข้อมูล (tool loop ของ Workspace อ่านอย่างเดียว) จะทำพร้อมเครื่องมือเขียนในระยะ 4 ตาม ADR 0002
 - process driver ยังไม่ใช่ security boundary ระดับ host เหมือนเดิม
 
 ## หน้าเว็บโหมด Cloud Workspace (ระยะ 3b)
@@ -189,7 +210,7 @@ homelab ไม่มี GPU ให้รัน engine บน homelab แล้�
 - ยังไม่บังคับนโยบายข้อมูลของ provider (`data_collection: deny`) งานนี้เป็นของ router proxy ในระยะ 4
   ระหว่างนี้ให้ถามเฉพาะคำถามที่ไม่ลับ
 - เมื่อไม่เปิด `--public-web` endpoint แบบ compatible ไม่มี web search ของ provider และคำถามที่ต้องค้นเว็บจะไม่สำเร็จ
-- tool loop เปิดเฉพาะการทดลอง CLI เมื่อเลือก `--public-web`; ยังไม่เปิดเครื่องมืออื่นหรือ Cloud Workspace
+- ใน CLI tool loop เปิดเฉพาะเมื่อเลือก `--public-web` (Cloud Workspace ใช้ tool host แบบอ่านอย่างเดียวของตัวเอง)
 - ยังไม่มี gateway, login หรือการแยกผู้ใช้ระดับ process ตอนนี้เป็น process เดียวต่อคำสั่ง
 
 ## หน้าเว็บทดลอง engine สำหรับเจ้าของ
