@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import type { AuditEntry } from '../src/gateway/audit.ts';
 import type { Authenticator, Identity } from '../src/gateway/auth.ts';
 import { createGateway } from '../src/gateway/http.ts';
+import { QuotaStore } from '../src/gateway/quota-store.ts';
 import { DEFAULT_QUOTAS, RunService, type Quotas } from '../src/gateway/runs.ts';
 import type {
   AskResult,
@@ -33,6 +34,7 @@ async function withGateway(
     audit: AuditEntry[];
   }) => Promise<void>,
   quotas: Quotas = DEFAULT_QUOTAS,
+  quotaStore?: QuotaStore,
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-gateway-'));
   const runtime = heldDriver();
@@ -41,7 +43,7 @@ async function withGateway(
   const record = (entry: AuditEntry) => void audit.push(entry);
   const server = createGateway({
     manager,
-    runs: new RunService(manager, record, quotas),
+    runs: new RunService(manager, record, quotas, Date.now, quotaStore),
     authenticate,
     audit: record,
     origin: ORIGIN,
@@ -304,6 +306,63 @@ test('quotas limit Workspaces, runs at once and runs per day for each user', asy
     },
     { workspacesPerUser: 1, activeRunsPerUser: 2, runsPerUserPerDay: 2 },
   );
+});
+
+test('runs per day stay counted after the Gateway restarts', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'step-quota-'));
+  const path = join(dir, 'gateway-quotas.sqlite');
+  const quotas = { workspacesPerUser: 1, activeRunsPerUser: 2, runsPerUserPerDay: 2 };
+  const startOne = async (call: (who: string, path: string, init?: RequestInit) => Promise<Response>) => {
+    const listed = await (await call('alice', '/api/workspaces')).json();
+    const workspace =
+      listed[0] ?? (await (await call('alice', '/api/workspaces', post({ name: 'หนึ่ง' }))).json());
+    return call('alice', `/api/workspaces/${workspace.id}/runs`, post({ text: 'ถาม' }));
+  };
+  try {
+    let store = new QuotaStore(path);
+    await withGateway(
+      async ({ call }) => {
+        assert.equal((await startOne(call)).status, 202);
+        assert.equal((await startOne(call)).status, 202);
+      },
+      quotas,
+      store,
+    );
+    store.close();
+
+    // A fresh Gateway on the same file: Alice has used today's two runs, Bob has not.
+    store = new QuotaStore(path);
+    await withGateway(
+      async ({ call }) => {
+        const again = await startOne(call);
+        assert.deepEqual([again.status, await again.json()], [429, { code: 'QUOTA_DAILY_RUNS' }]);
+        const bob = await (await call('bob', '/api/workspaces', post({ name: 'ของบ๊อบ' }))).json();
+        assert.equal(
+          (await call('bob', `/api/workspaces/${bob.id}/runs`, post({ text: 'ถาม' }))).status,
+          202,
+        );
+      },
+      quotas,
+      store,
+    );
+    store.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the quota store counts each user and day on its own and refuses at the limit', () => {
+  const store = new QuotaStore(':memory:');
+  assert.equal(store.reserve('a', '2026-11-23', 2), true);
+  assert.equal(store.reserve('a', '2026-11-23', 2), true);
+  assert.equal(store.reserve('a', '2026-11-23', 2), false);
+  assert.equal(store.used('a', '2026-11-23'), 2);
+  assert.equal(store.reserve('b', '2026-11-23', 2), true);
+  assert.equal(store.reserve('a', '2026-11-24', 2), true);
+  // Rows older than the kept window are removed when a later day is counted.
+  assert.equal(store.reserve('a', '2027-01-15', 2), true);
+  assert.equal(store.used('a', '2026-11-23'), 0);
+  store.close();
 });
 
 test('administrators see counts only; the audit trail keeps who/what/outcome without content', async () => {

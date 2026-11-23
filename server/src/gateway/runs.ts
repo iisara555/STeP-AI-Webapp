@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { AskResult, RuntimeEvent } from '../workspace/contract.ts';
 import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
+import type { QuotaStore } from './quota-store.ts';
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -95,14 +96,17 @@ export class RunService {
     private readonly audit: Audit,
     private readonly quotas: Quotas = DEFAULT_QUOTAS,
     private readonly now: () => number = Date.now,
+    /** Keeps the daily counts across restarts; without it they live in memory only. */
+    private readonly quotaStore?: QuotaStore,
   ) {}
 
   async start(actor: string, workspaceId: string, input: { text: string; sessionId?: string }): Promise<Run> {
     await this.manager.get(actor, workspaceId);
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
-    const dayKey = `${actor}:${this.day()}`;
-    if ((this.daily.get(dayKey) ?? 0) >= this.quotas.runsPerUserPerDay)
-      throw new GatewayError('QUOTA_DAILY_RUNS');
+    const day = this.day();
+    const dayKey = `${actor}:${day}`;
+    const usedToday = this.quotaStore ? this.quotaStore.used(actor, day) : (this.daily.get(dayKey) ?? 0);
+    if (usedToday >= this.quotas.runsPerUserPerDay) throw new GatewayError('QUOTA_DAILY_RUNS');
     if (input.sessionId && this.active.has(this.sessionKey(actor, workspaceId, input.sessionId)))
       throw new GatewayError('RUN_ALREADY_ACTIVE');
 
@@ -113,6 +117,13 @@ export class RunService {
     if (this.active.has(key)) throw new GatewayError('RUN_ALREADY_ACTIVE');
     // Checked again after the awaits above, so two requests at once cannot both pass the limit.
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
+    // Counted at once with the check, with no await before the run is recorded, so nothing needs giving back.
+    if (this.quotaStore) {
+      if (!this.quotaStore.reserve(actor, day, this.quotas.runsPerUserPerDay))
+        throw new GatewayError('QUOTA_DAILY_RUNS');
+    } else if ((this.daily.get(dayKey) ?? 0) >= this.quotas.runsPerUserPerDay) {
+      throw new GatewayError('QUOTA_DAILY_RUNS');
+    }
 
     let dispatched!: () => void;
     const run: OwnedRun = {
@@ -126,7 +137,7 @@ export class RunService {
     };
     this.runs.set(run.id, run);
     this.active.set(key, run.id);
-    this.daily.set(dayKey, (this.daily.get(dayKey) ?? 0) + 1);
+    if (!this.quotaStore) this.daily.set(dayKey, (this.daily.get(dayKey) ?? 0) + 1);
     this.count('started');
     feed.push('run', this.view(run));
     this.audit({ actor, action: 'run.start', workspaceId, runId: run.id, outcome: 'accepted' });
