@@ -775,3 +775,59 @@ test('settings reject an image model that reuses a text model name', () => {
     }),
   );
 });
+
+const FREE = {
+  models: [
+    {
+      id: 'step-chat',
+      label: 'งานทั่วไป (ฟรี)',
+      upstream: 'google/gemma-4-31b-it:free',
+      price: { input: 0, output: 0 },
+      default: true,
+      dataPolicy: 'free-may-train',
+    },
+  ],
+  budget: { orgMonthlyUsd: 0, userMonthlyUsd: 0 },
+};
+
+test('a free model marked free-may-train skips ZDR and the money caps, and costs nothing', async () => {
+  const t = await setup(streamReply(0), { settings: FREE });
+  try {
+    const models: any = await (await t.call('/v1/models', 'staff')).json();
+    assert.deepEqual(
+      models.data.map((m: any) => [m.id, m.data_policy]),
+      [['step-chat', 'free-may-train']],
+    );
+    const response = await t.call(
+      '/v1/chat/completions',
+      'staff',
+      ask('step-chat', { provider: { zdr: true } }),
+    );
+    assert.equal(response.status, 200, 'caps at $0 do not stop a free model');
+    assert.match(await response.text(), /\[DONE\]/);
+    const sent = t.upstream.seen[0].body;
+    assert.equal(sent.model, 'google/gemma-4-31b-it:free');
+    assert.deepEqual(sent.provider, { data_collection: 'allow' });
+    const totals = await until(
+      () => t.ledger.totals(monthOf(NOW)),
+      (v) => v.org.requests === 1,
+    );
+    assert.equal(totals.org.usd, 0);
+  } finally {
+    await t.close();
+  }
+});
+
+test('settings allow free-may-train only on a free model, and a fallback never changes the data rules', () => {
+  const paid = JSON.parse(JSON.stringify(FREE));
+  paid.models[0].upstream = 'google/gemma-4-31b-it';
+  assert.throws(() => AiGatewayConfig.parse(paid), /free-may-train/);
+  const priced = JSON.parse(JSON.stringify(FREE));
+  priced.models[0].price = { input: 0.1, output: 0 };
+  assert.throws(() => AiGatewayConfig.parse(priced), /free-may-train/);
+  const mixed = JSON.parse(JSON.stringify(SETTINGS));
+  mixed.models.push({ ...FREE.models[0], id: 'step-free', default: false });
+  mixed.models[1].fallback = 'step-free';
+  assert.throws(() => AiGatewayConfig.parse(mixed), /same dataPolicy/);
+  assert.equal(AiGatewayConfig.parse(SETTINGS).models[0].dataPolicy, 'zdr', 'ZDR stays the default');
+});

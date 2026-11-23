@@ -138,9 +138,15 @@ export function createAiProxy(options: AiProxyOptions) {
   }
 
   /** Refuses before calling OpenRouter when the person, their department or the organization is at its cap. */
-  async function admit(config: AiGatewayConfig, who: Who) {
+  async function admit(config: AiGatewayConfig, who: Who, free = false) {
     const totals = await options.ledger.totals(monthOf(now()));
     const department = departmentOf(config, who.email);
+    // A free model costs nothing, so only the in-flight limit applies (the money caps can stay at 0 meanwhile).
+    if (free) {
+      if ((active.get(who.userId) ?? 0) >= config.budget.userConcurrency)
+        throw new ProxyError(429, 'too_many_requests', 'มีงานที่กำลังทำอยู่หลายงาน รอสักครู่', 5);
+      return department?.id ?? UNASSIGNED.id;
+    }
     if (totals.org.usd >= config.budget.orgMonthlyUsd)
       throw new ProxyError(429, 'quota_exceeded', 'งบ AI ขององค์กรเดือนนี้หมดแล้ว แจ้งผู้ดูแล');
     if (department && (totals.departments.get(department.id)?.usd ?? 0) >= department.monthlyUsd)
@@ -161,11 +167,13 @@ export function createAiProxy(options: AiProxyOptions) {
     body.max_tokens = Math.max(1, Math.min(asked ?? model.maxOutputTokens, model.maxOutputTokens));
     if (body.stream === true) body.stream_options = { include_usage: true };
     body.usage = { include: true };
-    // Zero Data Retention and no training on our prompts, on every request, whatever the account settings are.
+    // Zero Data Retention and no training on our prompts, on every request, whatever the account settings are; the
+    // one exception is a free model the administrator marked free-may-train (no free model has a ZDR provider).
     const providers = model.providers ?? config.providers;
     body.provider = {
-      zdr: true,
-      data_collection: 'deny',
+      ...(model.dataPolicy === 'free-may-train'
+        ? { data_collection: 'allow' }
+        : { zdr: true, data_collection: 'deny' }),
       ...(providers?.length ? { only: providers } : {}),
       ...(model.quantizations ? { quantizations: model.quantizations } : {}),
     };
@@ -217,11 +225,11 @@ export function createAiProxy(options: AiProxyOptions) {
     if (!Array.isArray(input.messages) || !input.messages.length || input.messages.length > 1_000)
       throw new ProxyError(400, 'invalid_request', 'คำขอไม่ถูกต้อง');
     await openRouterKey();
-    const department = await admit(config, who);
     // Task-based routing: a picture or PDF sent to the default model goes to the model set for reading them.
     const imageModel = config.models.find((m) => m.id === config.routes.images);
     const first =
       imageModel && asked === defaultModel(config) && carriesAttachment(input.messages) ? imageModel : asked;
+    const department = await admit(config, who, first.dataPolicy === 'free-may-train');
     active.set(who.userId, (active.get(who.userId) ?? 0) + 1);
     const abort = new AbortController();
     const onClose = () => {
@@ -495,7 +503,14 @@ export function createAiProxy(options: AiProxyOptions) {
         const models = [first, ...config.models.filter((m) => m !== first)];
         return send(res, 200, {
           object: 'list',
-          data: models.map((m) => ({ id: m.id, name: m.label, object: 'model', owned_by: 'step' })),
+          data: models.map((m) => ({
+            id: m.id,
+            name: m.label,
+            object: 'model',
+            owned_by: 'step',
+            // Lets a client warn that this model's provider may keep prompts.
+            data_policy: m.dataPolicy,
+          })),
         });
       }
       if (req.method === 'POST' && path === '/v1/chat/completions') return await chat(req, res, who);

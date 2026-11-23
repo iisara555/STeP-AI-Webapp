@@ -38,6 +38,13 @@ const Model = z
       .optional(),
     /** Another model id tried once when this one's providers are down or overloaded (never for quota errors). */
     fallback: z.string().optional(),
+    /**
+     * `zdr` (the default): Zero Data Retention and no training, on every request. `free-may-train`: only for a free
+     * OpenRouter model (id ending in `:free`, price 0) while the organization has no credit. No free model has a ZDR
+     * provider, so the provider may keep or train on prompts; staff must be told not to send personal or internal data.
+     * Such a model costs nothing and is not counted against the money caps.
+     */
+    dataPolicy: z.enum(['zdr', 'free-may-train']).default('zdr'),
   })
   .strict();
 
@@ -109,6 +116,18 @@ export const AiGatewayConfig = z
     for (const m of config.models)
       if (m.fallback !== undefined && (m.fallback === m.id || !ids.has(m.fallback)))
         issue(`model ${m.id}: fallback must be another model id`);
+    for (const m of config.models) {
+      if (
+        m.dataPolicy === 'free-may-train' &&
+        (!m.upstream.endsWith(':free') || m.price.input || m.price.output)
+      )
+        issue(`model ${m.id}: free-may-train is only for a free (:free, price 0) model`);
+      // A fallback never changes the data rules: no ZDR request ends up at a free provider, and a free request never
+      // turns into a paid one that skipped the money caps.
+      const fallback = config.models.find((f) => f.id === m.fallback);
+      if (fallback && fallback.dataPolicy !== m.dataPolicy)
+        issue(`model ${m.id}: fallback must have the same dataPolicy`);
+    }
     const imageIds = new Set(config.imageModels.map((m) => m.id));
     if (imageIds.size !== config.imageModels.length) issue('image model ids must be unique');
     if ([...imageIds].some((id) => ids.has(id)))
