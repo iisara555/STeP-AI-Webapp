@@ -11,7 +11,7 @@ import {
   type RuntimeHealth,
   type RuntimeSpec,
 } from './contract.ts';
-import { localSearchUrl } from '../web-search/evidence.ts';
+import { localSearchUrl } from '../web-search/local-url.ts';
 
 const ENTRY = fileURLToPath(new URL('./runtime-main.ts', import.meta.url));
 const TSX = import.meta.resolve('tsx');

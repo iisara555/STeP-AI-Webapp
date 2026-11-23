@@ -7,7 +7,10 @@ import type { ProviderAdapter, ProviderContext } from '../../../harness/desktop/
 import { fetchPublic } from '../../../harness/desktop/electron/web-fetch.ts';
 import { extractWeb } from '../../../harness/desktop/electron/web-extract.ts';
 import type { Connection } from '../../../harness/desktop/src/types.ts';
+import { localSearchUrl } from './local-url.ts';
 import type { SearchAnswer, SearchResult } from './service.ts';
+
+export { localSearchUrl };
 
 export type WebEvidenceOptions = {
   /** The search front on loopback (server/src/web-search/main.ts), for example http://127.0.0.1:8890. */
@@ -21,20 +24,6 @@ export type WebEvidenceOptions = {
   fetchPage?: (url: string, signal: AbortSignal) => Promise<{ url: string; text: string }>;
   now?: () => Date;
 };
-
-/** A search front URL is accepted only on loopback over http: the front itself is never exposed. */
-export function localSearchUrl(value: string | undefined) {
-  if (!value) return undefined;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))
-      return undefined;
-    if (url.username || url.password || url.search || url.hash) return undefined;
-    return url.origin;
-  } catch {
-    return undefined;
-  }
-}
 
 /** The employee's public request inside the engine's search prompt (it ends with "Public request:\n<question>"). */
 export function publicRequest(prompt: string) {
