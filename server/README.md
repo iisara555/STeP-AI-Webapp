@@ -52,6 +52,22 @@ ADR 0001 แยก client กับ server ไว้แล้ว: Web เป็�
   ค่า 4096 ตั้งต้นไม่พอเมื่อมีคำสั่งเครื่องมือ (คำขอประมาณ 4,500 token)
 - ใช้ engine ที่ pin อยู่ (`desktop-v0.6.20`) ได้เลย ไม่ต้องขยับ pin
 
+## ค้นเว็บด้วย SearXNG ขององค์กร (2026-11-23)
+
+provider แบบ OpenAI-compatible (เช่น Qwen บน ik-node-01) ค้นเว็บเองไม่ได้ `src/web-search/` จึงให้ runtime ค้นผ่าน SearXNG
+ของเราเอง วิธีติดตั้งและปิดอยู่ใน [`docs/web-search.md`](../docs/web-search.md)
+
+- `service.ts` (`npm run web-search`) ตัวกลางบน 127.0.0.1:8890 ที่ทุก runtime ใช้ร่วมกัน: cache 6 ชั่วโมง, ห่างกันอย่างน้อย 2 วินาที
+  และไม่เกิน 20 ครั้งต่อนาที (รอนานกว่า 15 วินาทีตอบ `WEB_SEARCH_BUSY`), เว็บ `go.th`/`ac.th`/`or.th`/`cmu.ac.th` ขึ้นก่อน
+  ถ้าไม่มีเว็บทางการเลยค้นซ้ำด้วย `site:go.th` อีกครั้ง ไม่บันทึกข้อความคำถาม
+- `evidence.ts` ตอบคำขอค้นเว็บของ engine แทน provider: อ่าน 2 หน้าแรกผ่าน `fetchPublic` ของ Desktop (DNS-pinned) แล้วตัดเฉพาะ
+  บรรทัดที่ตรงกับคำถาม ไม่เกิน 6,000 ตัวอักษร ส่งเข้า `<web_evidence>` ตามเดิม คำขออื่นส่งถึง provider ตามปกติ
+- engine เป็นผู้ตัดสินว่าคำถามไหนต้องค้น (`needsPublicWebSearch`, route `GENERAL`, ไม่ตรงเอกสาร STeP, privacy ผ่าน) คำถามแบบนี้
+  ตอบโดยไม่เปิด tool loop เพราะ engine ค้นเองเฉพาะเมื่อ AI ไม่ได้คุมเครื่องมือ และ Qwen ไม่เรียกเครื่องมือเอง คำถามอื่นใช้ tool loop เหมือนเดิม
+- เปิดด้วย `STEP_WEB_SEARCH_URL=http://127.0.0.1:8890` ใน environment ของ Gateway (รับเฉพาะ loopback, Gateway ส่งต่อเข้า runtime)
+  ไม่ตั้ง = ไม่ค้นเว็บเหมือนเดิม ทดลองแบบไม่ต้อง login ได้ด้วย
+  `npm run engine:ask -- --workspace-tools --web-search http://127.0.0.1:8890 "คำถาม"`
+
 ## Gateway (ระยะ 3a)
 
 `src/gateway/` เป็นทางเข้าเดียวของ Browser สู่ Cloud Workspace ตาม ADR 0001 §3 Browser ไม่เห็น port ของ runtime, IPC,

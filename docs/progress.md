@@ -1,5 +1,14 @@
 # Progress
 
+## 2026-11-23 · ค้นเว็บด้วย SearXNG ขององค์กรใน Cloud Workspace
+
+- เจ้าของขอให้ติดตั้ง SearXNG บน ik-node-01 และต่อเข้าเว็บทดลอง :8444: `server/src/web-search/` มีตัวกลางที่ทุก runtime ใช้ร่วมกัน
+  (cache, เว้นช่วง, เว็บทางการขึ้นก่อน) และ adapter ที่ตอบคำขอค้นเว็บของ engine แทน provider รายละเอียดใน
+  [`docs/web-search.md`](web-search.md) และ `server/README.md`
+- คำถามข้อเท็จจริงปัจจุบัน (วันหยุดราชการ, อัตราแลกเปลี่ยน, อากาศ) ค้นก่อนแล้วตอบจาก `<web_evidence>` โดยไม่เปิด tool loop
+  คำถามอื่นใช้ tool loop เหมือนเดิม ไม่ตั้ง `STEP_WEB_SEARCH_URL` = ไม่ค้นเว็บเหมือนเดิม เว็บ Supabase หลัก (:8443) ไม่ได้แตะ
+- ต่อจาก PR tool loop (`claude/workspace-tool-loop`) ที่ยังไม่ merge ใช้ engine ที่ pin เดิม (`desktop-v0.6.20`)
+
 ## 2026-11-22 · Cloud Workspace มี tool loop ฝั่ง server
 
 - เจ้าของขอให้ Webapp มี tool loop และแยก server กับ client: Cloud Workspace แยกอยู่แล้วตาม ADR 0001 (Web เป็น client,

@@ -1,0 +1,22 @@
+# Copy to settings.yml, set secret_key (openssl rand -hex 32), chmod 600. Never commit the real file.
+use_default_settings: true
+general:
+  instance_name: 'step-search'
+  enable_metrics: false
+search:
+  safe_search: 1
+  autocomplete: ''
+  default_lang: 'th'
+  formats:
+    - html
+    - json
+server:
+  secret_key: 'CHANGE_ME'
+  # Only the front on this machine calls SearXNG, and it paces itself; the bot limiter would need Valkey.
+  limiter: false
+  image_proxy: false
+  public_instance: false
+  method: 'GET'
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 8.0

@@ -11,6 +11,7 @@ import {
   type RuntimeHealth,
   type RuntimeSpec,
 } from './contract.ts';
+import { localSearchUrl } from '../web-search/evidence.ts';
 
 const ENTRY = fileURLToPath(new URL('./runtime-main.ts', import.meta.url));
 const TSX = import.meta.resolve('tsx');
@@ -30,6 +31,10 @@ export function runtimeEnv(spec: RuntimeSpec): Record<string, string> {
     STEP_WORKSPACE_DIR: spec.dir,
     // The one switch an operator sets on the Gateway that the runtime must see: 0 turns the Workspace tool loop off.
     ...(process.env.STEP_WORKSPACE_TOOLS === '0' ? { STEP_WORKSPACE_TOOLS: '0' } : {}),
+    // The organization's search front, only when it is a loopback address (docs/web-search.md).
+    ...(localSearchUrl(process.env.STEP_WEB_SEARCH_URL)
+      ? { STEP_WEB_SEARCH_URL: localSearchUrl(process.env.STEP_WEB_SEARCH_URL)! }
+      : {}),
   };
 }
 
