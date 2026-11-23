@@ -1,0 +1,46 @@
+# Organization web search for Cloud Workspace runtimes (docs/web-search.md). Loopback only, never public.
+# Copy this folder to the server (for example ~/step-web-search), create searxng/settings.yml from the example
+# (chmod 600, owned by the user below), set STEP_REPO in .env, then `docker compose up -d`.
+name: step-web-search
+services:
+  searxng:
+    # searxng/searxng 2026.11.21-c6ee3e9fd. Pin by digest; update on purpose, not by pulling :latest.
+    image: searxng/searxng@sha256:fc1d81d7e9d04d3c8b3e23c7162feddf5c3d6aecd32e67a56eaabcb8d8747f79
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:8888:8080'
+    volumes:
+      - ./searxng:/etc/searxng
+    environment:
+      SEARXNG_BASE_URL: http://127.0.0.1:8888/
+    # The image runs as root by default; as the host owner, settings.yml stays 0600 and no capabilities are needed.
+    user: '1000:1000'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    tmpfs:
+      - /var/cache/searxng:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options: { max-size: '1m', max-file: '3' }
+
+  # The shared front: one cache and one pace for every runtime, official domains first (server/src/web-search).
+  front:
+    image: node:24-alpine
+    restart: unless-stopped
+    network_mode: host
+    user: '1000:1000'
+    working_dir: /app
+    command: ['node', '--import', 'tsx', 'server/src/web-search/main.ts']
+    volumes:
+      - ${STEP_REPO:?set STEP_REPO to the Webapp checkout}:/app:ro
+    environment:
+      STEP_SEARXNG_URL: http://127.0.0.1:8888
+      STEP_WEB_SEARCH_PORT: '8890'
+    depends_on: [searxng]
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    logging:
+      driver: json-file
+      options: { max-size: '1m', max-file: '3' }

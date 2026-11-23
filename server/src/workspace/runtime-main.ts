@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { CompatibleAdapter } from '../../../harness/desktop/electron/providers.ts';
 import { searchPublicWeb } from '../../../harness/desktop/electron/public-search.ts';
+import { needsPublicWebSearch } from '../../../harness/src/modules/router/public-information.js';
+import { localSearchUrl, runWebFirst, searchingAdapter } from '../web-search/evidence.ts';
 import { createEngine, serverPolicy } from '../engine.ts';
 import {
   AskInput,
@@ -53,12 +55,19 @@ let grant: ReturnType<typeof ProviderGrant.parse> | undefined;
 // The tool loop runs here, on the server, with read-only tools (Skills, STeP documents, this Workspace's files); the
 // Web stays a client. STEP_WORKSPACE_TOOLS=0 turns it off without a deploy of new code.
 const tools = process.env.STEP_WORKSPACE_TOOLS !== '0';
+// The organization's own web search on this machine (docs/web-search.md); unset means no web search, as before.
+const webSearchUrl = localSearchUrl(process.env.STEP_WEB_SEARCH_URL);
 const engine = await createEngine({
   dataDir: dir,
   policy: serverPolicy({ workspaceTools: tools }),
   ...(tools ? { workspaceTools: { filesDir: join(dir, 'files') } } : {}),
   runtime: async () => ({
-    adapter: new CompatibleAdapter(),
+    adapter: webSearchUrl
+      ? searchingAdapter(new CompatibleAdapter(), {
+          url: webSearchUrl,
+          proxyUrl: engine.policy.network?.proxyUrl,
+        })
+      : new CompatibleAdapter(),
     context: { cwd: join(dir, 'files'), env: {}, key: grant?.token },
   }),
   publicSearch: async (query, signal) =>
@@ -124,7 +133,10 @@ const methods: Record<string, (params: unknown) => unknown> = {
     const id = sessionId ?? engine.store.create('central', 'cc').id;
     if (!engine.store.get('session', id)) throw new Error('CONVERSATION_NOT_FOUND');
     try {
-      await engine.work.run(id, text, '', true, undefined, 'chat');
+      const run = () => engine.work.run(id, text, '', true, undefined, 'chat');
+      // A current public question (this year's holidays, today's rates) is searched first and answered from the
+      // evidence; the engine still checks route, authority and privacy before it searches.
+      await (webSearchUrl && !syntheticBaseUrl && needsPublicWebSearch(text) ? runWebFirst(run) : run());
     } finally {
       await writeIndex();
     }

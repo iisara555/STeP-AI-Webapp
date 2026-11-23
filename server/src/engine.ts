@@ -11,6 +11,7 @@ import type { ProviderAdapter, ProviderContext } from '../../harness/desktop/ele
 import type { Connection, RunEvent } from '../../harness/desktop/src/types.ts';
 import { PUBLIC_WEB_INSTRUCTIONS, publicWebHost, type PublicWebOptions } from './public-web.ts';
 import { workspaceInstructions, workspaceToolsHost } from './workspace-tools.ts';
+import { inWebFirstRun } from './web-search/evidence.ts';
 
 export const HARNESS_ROOT = resolve(import.meta.dirname, '../../harness');
 
@@ -114,7 +115,8 @@ export async function createEngine({
     catalog: skillCatalog.createSkillCatalog(root),
     documentMetadata: routing.loadDocumentContextMetadata,
     documentCatalog: routing.loadDocumentCatalog,
-    toolLoop: () => Boolean((publicWeb || workspaceTools) && policy.features.toolLoop),
+    // A run marked web-first (a current public question with the organization's search) answers without tools.
+    toolLoop: () => Boolean((publicWeb || workspaceTools) && policy.features.toolLoop && !inWebFirstRun()),
     ...(publicWeb && policy.features.toolLoop
       ? {
           toolInstructions: () => PUBLIC_WEB_INSTRUCTIONS,
