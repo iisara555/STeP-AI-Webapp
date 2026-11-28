@@ -106,6 +106,19 @@ export class RuntimeManager {
     return this.view(await readRecord(this.dataRoot, actor, workspaceId));
   }
 
+  /** The owner's own Workspace files folder (what the runtime's read-only file tools see), for the Gateway's uploads. */
+  async filesDir(actor: string, workspaceId: string): Promise<string> {
+    const record = await readRecord(this.dataRoot, actor, workspaceId);
+    return workspacePaths(this.dataRoot, record.ownerId, record.id).filesDir;
+  }
+
+  /** Every files folder of this user, for the storage limit across all of their Workspaces. */
+  async allFilesDirs(actor: string): Promise<string[]> {
+    return (await listRecords(this.dataRoot, actor)).map(
+      (record) => workspacePaths(this.dataRoot, record.ownerId, record.id).filesDir,
+    );
+  }
+
   /** Starts the runtime, or resumes it from its folder after a stop, idle stop or crash. */
   async start(actor: string, workspaceId: string): Promise<Workspace> {
     const record = await readRecord(this.dataRoot, actor, workspaceId);

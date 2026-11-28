@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AuditEntry } from '../src/gateway/audit.ts';
 import type { Authenticator, Identity } from '../src/gateway/auth.ts';
 import { createGateway } from '../src/gateway/http.ts';
+import { FileStore, safeFileName, type FileLimits } from '../src/gateway/files.ts';
 import { QuotaStore } from '../src/gateway/quota-store.ts';
 import { skillLibrary, type SkillLibrary } from '../src/gateway/skills.ts';
 import { DEFAULT_QUOTAS, RunService, type Quotas } from '../src/gateway/runs.ts';
@@ -33,10 +34,12 @@ async function withGateway(
     call: (who: string, path: string, init?: RequestInit) => Promise<Response>;
     runtime: ReturnType<typeof heldDriver>;
     audit: AuditEntry[];
+    dataRoot: string;
   }) => Promise<void>,
   quotas: Quotas = DEFAULT_QUOTAS,
   quotaStore?: QuotaStore,
   skills?: SkillLibrary,
+  fileLimits?: FileLimits,
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-gateway-'));
   const runtime = heldDriver();
@@ -52,6 +55,7 @@ async function withGateway(
     quotas,
     heartbeatMs: 60_000,
     skills,
+    files: fileLimits ? new FileStore(manager, fileLimits) : undefined,
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -65,7 +69,7 @@ async function withGateway(
       },
     });
   try {
-    await fn({ url, call, runtime, audit });
+    await fn({ url, call, runtime, audit, dataRoot });
   } finally {
     server.closeAllConnections();
     await new Promise((done) => server.close(done));
@@ -433,6 +437,97 @@ test('without a Skill library the Gateway lists none and refuses a named Skill',
     );
     assert.equal(refused.status, 404);
   });
+});
+
+test('documents are kept in the owner’s Workspace files folder, safely named, capped and private', async () => {
+  await withGateway(
+    async ({ call, audit, dataRoot }) => {
+      const ws = (await (await call('alice', '/api/workspaces', post({ name: 'งาน' }))).json()).id;
+      const files = `/api/workspaces/${ws}/files`;
+      const upload = (who: string, name: string, body: string | Uint8Array<ArrayBuffer>) =>
+        call(who, `${files}?name=${encodeURIComponent(name)}`, {
+          method: 'POST',
+          body,
+          headers: { 'content-type': 'application/octet-stream' },
+        });
+
+      const saved = await upload('alice', 'ระเบียบการลา.md', 'ลาพักร้อนได้ 10 วันต่อปี');
+      assert.equal(saved.status, 201);
+      assert.deepEqual((await saved.json()).name, 'ระเบียบการลา.md');
+      // Unsafe names are made safe; a name in use gets a number instead of replacing the file.
+      assert.equal(
+        (await (await upload('alice', '../../etc/passwd.txt', 'x')).json()).name,
+        '_._etc_passwd.txt',
+      );
+      assert.equal(
+        (await (await upload('alice', 'ระเบียบการลา.md', 'ฉบับใหม่')).json()).name,
+        'ระเบียบการลา (2).md',
+      );
+
+      const listed = await (await call('alice', files)).json();
+      assert.deepEqual(
+        listed.map((f: { name: string }) => f.name).sort(),
+        ['_._etc_passwd.txt', 'ระเบียบการลา (2).md', 'ระเบียบการลา.md'].sort(),
+      );
+      // The file is where the runtime's read-only tools look.
+      const filesDir = join(dataRoot, 'users', 'alice', 'workspaces', ws, 'files');
+      assert.equal(await readFile(join(filesDir, 'ระเบียบการลา.md'), 'utf8'), 'ลาพักร้อนได้ 10 วันต่อปี');
+
+      const download = await call('alice', `${files}/${encodeURIComponent('ระเบียบการลา.md')}`);
+      assert.equal(download.status, 200);
+      assert.equal(await download.text(), 'ลาพักร้อนได้ 10 วันต่อปี');
+      assert.match(download.headers.get('content-disposition') ?? '', /^attachment; filename\*=UTF-8''/);
+      assert.equal(download.headers.get('x-content-type-options'), 'nosniff');
+
+      // Another person cannot see, read, add to or delete from this Workspace.
+      assert.equal((await call('bob', files)).status, 404);
+      assert.equal((await call('bob', `${files}/${encodeURIComponent('ระเบียบการลา.md')}`)).status, 404);
+      assert.equal((await upload('bob', 'x.txt', 'x')).status, 404);
+      // Links, hidden files and paths are never served.
+      await symlink('/etc/hostname', join(filesDir, 'link.txt'));
+      await writeFile(join(filesDir, '.hidden.txt'), 'x');
+      for (const name of ['link.txt', '.hidden.txt', '..%2F..%2Fworkspace.json', '%E0%A4%A'])
+        assert.equal((await call('alice', `${files}/${name}`)).status, 404, name);
+      assert.ok(
+        !(await (await call('alice', files)).json()).some(
+          (f: { name: string }) => f.name === 'link.txt' || f.name.startsWith('.'),
+        ),
+      );
+
+      assert.equal((await upload('alice', 'program.exe', 'x')).status, 415);
+      assert.equal((await upload('alice', 'empty.txt', '')).status, 400);
+      assert.equal((await upload('alice', 'big.txt', 'x'.repeat(2_000))).status, 413);
+      assert.equal((await upload('alice', 'fits.txt', 'x'.repeat(900))).status, 201);
+      // The person's total is 4 KB here; the next file would pass it.
+      assert.equal((await upload('alice', 'more.txt', 'x'.repeat(900))).status, 201);
+      assert.equal((await upload('alice', 'full.txt', 'x'.repeat(900))).status, 507);
+
+      assert.equal(
+        (await call('alice', `${files}/${encodeURIComponent('ระเบียบการลา.md')}`, { method: 'DELETE' }))
+          .status,
+        204,
+      );
+      assert.equal((await call('alice', `${files}/${encodeURIComponent('ระเบียบการลา.md')}`)).status, 404);
+
+      const fileEntries = audit.filter((entry) => entry.action.startsWith('file.'));
+      assert.ok(fileEntries.length >= 5);
+      assert.ok(!JSON.stringify(audit).includes('ระเบียบ'), 'the audit holds no file names');
+    },
+    DEFAULT_QUOTAS,
+    undefined,
+    undefined,
+    { fileBytes: 1_000, userBytes: 2_700 },
+  );
+});
+
+test('safe file names keep Thai text and drop separators, control characters and leading dots', () => {
+  assert.equal(safeFileName('บันทึก ข้อความ.docx'), 'บันทึก ข้อความ.docx');
+  assert.equal(safeFileName('a/b\\c.pdf'), 'a_b_c.pdf');
+  assert.equal(safeFileName('..hidden.md'), 'hidden.md');
+  assert.equal(safeFileName('x\u0000y\u202e.txt'), 'xy.txt');
+  assert.equal(safeFileName('...'), 'file');
+  assert.ok(safeFileName('ก'.repeat(300) + '.pdf').endsWith('.pdf'));
+  assert.ok(safeFileName('ก'.repeat(300) + '.pdf').length <= 120);
 });
 
 test('administrators see counts only; the audit trail keeps who/what/outcome without content', async () => {

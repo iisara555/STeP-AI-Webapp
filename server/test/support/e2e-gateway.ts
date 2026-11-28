@@ -8,6 +8,7 @@ import type { Authenticator } from '../../src/gateway/auth.ts';
 import { createGateway } from '../../src/gateway/http.ts';
 import { RunService } from '../../src/gateway/runs.ts';
 import { skillLibrary } from '../../src/gateway/skills.ts';
+import { FileStore } from '../../src/gateway/files.ts';
 import type {
   AskResult,
   ConversationMessage,
@@ -102,4 +103,5 @@ createGateway({
   audit,
   origin: ORIGIN,
   skills: skillLibrary(),
+  files: new FileStore(manager),
 }).listen(E2E_GATEWAY_PORT, '127.0.0.1');
