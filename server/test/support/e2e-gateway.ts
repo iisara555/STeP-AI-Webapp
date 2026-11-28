@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import type { Authenticator } from '../../src/gateway/auth.ts';
 import { createGateway } from '../../src/gateway/http.ts';
 import { RunService } from '../../src/gateway/runs.ts';
+import { skillLibrary } from '../../src/gateway/skills.ts';
 import type {
   AskResult,
   ConversationMessage,
@@ -93,7 +94,12 @@ const authenticate: Authenticator = async (header) => {
     : null;
 };
 const audit = () => {};
-createGateway({ manager, runs: new RunService(manager, audit), authenticate, audit, origin: ORIGIN }).listen(
-  E2E_GATEWAY_PORT,
-  '127.0.0.1',
-);
+// The organization's Skills from the pinned harness, as in production.
+createGateway({
+  manager,
+  runs: new RunService(manager, audit),
+  authenticate,
+  audit,
+  origin: ORIGIN,
+  skills: skillLibrary(),
+}).listen(E2E_GATEWAY_PORT, '127.0.0.1');

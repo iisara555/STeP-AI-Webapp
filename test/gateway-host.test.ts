@@ -6,10 +6,17 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ChatMessage, Conversation, Run, Snapshot } from '../packages/harness-core/src/contracts.ts';
+import type {
+  ChatMessage,
+  Conversation,
+  Run,
+  Skill,
+  Snapshot,
+} from '../packages/harness-core/src/contracts.ts';
 import type { Authenticator } from '../server/src/gateway/auth.ts';
 import { createGateway } from '../server/src/gateway/http.ts';
 import { RunService } from '../server/src/gateway/runs.ts';
+import type { SkillLibrary, SkillView } from '../server/src/gateway/skills.ts';
 import { RuntimeManager } from '../server/src/workspace/manager.ts';
 import { heldDriver } from '../server/test/support/held-driver.ts';
 import { CLOUD_TENANT, credentialClaims, gatewayHost } from '../web/src/gateway.ts';
@@ -20,6 +27,7 @@ async function withGateway(
     runtime: ReturnType<typeof heldDriver>;
     host: (who?: string, onUnauthorized?: () => void) => ReturnType<typeof gatewayHost>;
   }) => Promise<void>,
+  skills?: SkillLibrary,
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-web-gateway-'));
   const runtime = heldDriver();
@@ -27,7 +35,13 @@ async function withGateway(
   const authenticate: Authenticator = async (header) =>
     header === 'Bearer alice' ? { userId: 'alice', email: 'alice@step.example', admin: false } : null;
   const audit = () => {};
-  const server = createGateway({ manager, runs: new RunService(manager, audit), authenticate, audit });
+  const server = createGateway({
+    manager,
+    runs: new RunService(manager, audit),
+    authenticate,
+    audit,
+    skills,
+  });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
@@ -197,6 +211,49 @@ test('a run can be cancelled from the chat, and missing features say so instead 
     await assert.rejects(() => host.call('session.read', { id: '../../etc' }), { code: 'ACCESS_DENIED' });
     await assert.rejects(() => host.call('run.read', { id: 'run_unknown' }), { code: 'ACCESS_DENIED' });
   });
+});
+
+test('the Skills page reads the organization Skills and a chosen Skill goes with the run', async () => {
+  const hr: SkillView = {
+    id: 'hr-policy-lookup',
+    skill_key: 'hr-policy-lookup',
+    title: 'ถามสิทธิและระเบียบงานบุคคล',
+    description: 'สิทธิการลาและระเบียบงานบุคคล',
+    instructions: '---\nname: hr-policy-lookup\n---\nตอบจากระเบียบที่อนุมัติแล้ว',
+    metadata: { owner: 'ga', triggers: ['ลา'] },
+    source_version: 'harness synthetic',
+  };
+  const library: SkillLibrary = {
+    list: async () => [{ ...hr, instructions: '' }],
+    read: async (key) => (key === hr.skill_key ? hr : undefined),
+    usable: async (key) => key === hr.skill_key,
+  };
+  await withGateway(async ({ host: make, runtime }) => {
+    const host = make();
+    const snapshot = await host.call<Snapshot>('snapshot');
+    assert.deepEqual(
+      snapshot.skills.map((s) => [s.skill_key, s.instructions]),
+      [['hr-policy-lookup', '']],
+    );
+    const detail = await host.call<Skill>('skill.read', { key: 'hr-policy-lookup' });
+    assert.match(detail.instructions, /ระเบียบ/);
+    await assert.rejects(() => host.call('skill.read', { key: 'step-router' }), { code: 'SKILL_NOT_FOUND' });
+
+    const task = await host.call<Conversation>('session.create', { workspace: null, title: 'ลา' });
+    const run = await host.call<Run>('run.start', {
+      session: task.id,
+      message: 'ลาพักร้อนได้กี่วัน',
+      skill: 'hr-policy-lookup',
+      providerConsent: 'x',
+    });
+    await until(async () => (runtime.asks.length ? true : undefined));
+    assert.equal(runtime.asks[0].skill, 'hr-policy-lookup');
+    runtime.answer(task.id.split('.')[1], 'สิบวันต่อปี');
+    await until(async () => {
+      const current = await host.call<Run>('run.read', { id: run.id });
+      return current.status === 'running' ? undefined : current;
+    });
+  }, library);
 });
 
 test('a credential the Gateway refuses signs the tab out', async () => {

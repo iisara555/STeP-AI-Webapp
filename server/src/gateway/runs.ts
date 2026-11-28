@@ -100,7 +100,11 @@ export class RunService {
     private readonly quotaStore?: QuotaStore,
   ) {}
 
-  async start(actor: string, workspaceId: string, input: { text: string; sessionId?: string }): Promise<Run> {
+  async start(
+    actor: string,
+    workspaceId: string,
+    input: { text: string; sessionId?: string; skill?: string },
+  ): Promise<Run> {
     await this.manager.get(actor, workspaceId);
     if (this.activeCount(actor) >= this.quotas.activeRunsPerUser) throw new GatewayError('QUOTA_ACTIVE_RUNS');
     const day = this.day();
@@ -143,13 +147,15 @@ export class RunService {
     this.audit({ actor, action: 'run.start', workspaceId, runId: run.id, outcome: 'accepted' });
 
     // Deliberately not awaited: the run outlives the request that started it.
-    void this.manager.ask(actor, workspaceId, { text: input.text, sessionId }, dispatched).then(
-      (result) => this.finish(run, feed, result),
-      (error) => {
-        dispatched();
-        this.finish(run, feed, undefined, codeOf(error));
-      },
-    );
+    void this.manager
+      .ask(actor, workspaceId, { text: input.text, sessionId, skill: input.skill }, dispatched)
+      .then(
+        (result) => this.finish(run, feed, result),
+        (error) => {
+          dispatched();
+          this.finish(run, feed, undefined, codeOf(error));
+        },
+      );
     return this.view(run);
   }
 

@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   Conversation,
   Run,
+  Skill,
   Snapshot,
   SourceRef,
   Workspace,
@@ -22,10 +23,10 @@ export function gatewayConfig(): GatewayConfig | null {
 }
 
 /**
- * Pages the Gateway can serve today. Memory, documents, receipts, Skills, forms and Google come with the server's
- * tool host (ADR 0001 phases 4–5); until then they are hidden rather than shown broken.
+ * Pages the Gateway can serve today. Memory, documents, receipts, forms and Google come with the server's tool host
+ * (ADR 0001 phases 4–5); until then they are hidden rather than shown broken.
  */
-export const GATEWAY_PAGES: ReadonlySet<Page> = new Set(['chat', 'history', 'help']);
+export const GATEWAY_PAGES: ReadonlySet<Page> = new Set(['chat', 'history', 'help', 'skills']);
 
 export const pageAvailable = (page: Page) => !gatewayConfig() || GATEWAY_PAGES.has(page);
 
@@ -270,7 +271,10 @@ export function gatewayHost(options: GatewayHostOptions): Host {
 
   async function snapshot(): Promise<Snapshot> {
     const me = await whoAmI();
-    const list = await request<GatewayWorkspace[]>('GET', '/api/workspaces');
+    const [list, skills] = await Promise.all([
+      request<GatewayWorkspace[]>('GET', '/api/workspaces'),
+      request<Skill[]>('GET', '/api/skills'),
+    ]);
     const home = list[0]?.id;
     const sessions: Conversation[] = [];
     for (const ws of list) {
@@ -322,7 +326,7 @@ export function gatewayHost(options: GatewayHostOptions): Host {
       sessions,
       memories: [],
       documents: [],
-      skills: [],
+      skills,
       profiles: [],
     };
   }
@@ -432,11 +436,14 @@ export function gatewayHost(options: GatewayHostOptions): Host {
             const run = await request<GatewayRun>('POST', `/api/workspaces/${workspaceId}/runs`, {
               text: String(input.message ?? ''),
               sessionId,
+              ...(typeof input.skill === 'string' && input.skill ? { skill: input.skill } : {}),
             });
             runWorkspace.set(run.id, workspaceId);
             follow(workspaceId);
             return toRun(run);
           }
+          case 'skill.read':
+            return request<Skill>('GET', `/api/skills/${encodeURIComponent(String(input.key ?? ''))}`);
           case 'run.read': {
             const id = String(input.id);
             const workspaceId = runWorkspace.get(id);

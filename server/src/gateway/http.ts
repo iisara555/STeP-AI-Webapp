@@ -8,6 +8,7 @@ import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
 import type { Authenticator, Identity } from './auth.ts';
 import { codeOf, DEFAULT_QUOTAS, GatewayError, type Quotas, type RunService } from './runs.ts';
+import type { SkillLibrary } from './skills.ts';
 
 export type GatewayOptions = {
   manager: RuntimeManager;
@@ -19,6 +20,8 @@ export type GatewayOptions = {
   quotas?: Quotas;
   heartbeatMs?: number;
   now?: () => number;
+  /** The organization's Skills; without it the Skills routes answer an empty list and runs cannot name one. */
+  skills?: SkillLibrary;
 };
 
 const BODY_LIMIT = 64 * 1024;
@@ -34,6 +37,7 @@ const STATUS: Record<string, number> = {
   WORKSPACE_NOT_FOUND: 404,
   RUN_NOT_FOUND: 404,
   CONVERSATION_NOT_FOUND: 404,
+  SKILL_NOT_FOUND: 404,
   RUN_ALREADY_ACTIVE: 409,
   RUN_NOT_ACTIVE: 409,
   RUNTIME_NOT_RUNNING: 409,
@@ -55,7 +59,7 @@ const WS = '(ws_[0-9a-f]{32})';
 const RUN = '(run_[0-9a-f]{32})';
 
 export function createGateway(options: GatewayOptions) {
-  const { manager, runs, authenticate, audit, origin } = options;
+  const { manager, runs, authenticate, audit, origin, skills } = options;
   const quotas = options.quotas ?? DEFAULT_QUOTAS;
   const heartbeatMs = options.heartbeatMs ?? 15_000;
   const now = options.now ?? Date.now;
@@ -64,6 +68,17 @@ export function createGateway(options: GatewayOptions) {
   const routes: Route[] = [
     ['GET', /^\/api\/me$/, async ({ who }) => who],
     ['GET', /^\/api\/workspaces$/, async ({ who }) => manager.list(who.userId)],
+    // The same list for every invited person: organization Skills only, no one's data.
+    ['GET', /^\/api\/skills$/, async () => (skills ? skills.list() : [])],
+    [
+      'GET',
+      /^\/api\/skills\/([a-z0-9][a-z0-9-]{0,80})$/,
+      async ({ params }) => {
+        const skill = await skills?.read(params[0]);
+        if (!skill) throw new GatewayError('SKILL_NOT_FOUND');
+        return skill;
+      },
+    ],
     [
       'POST',
       /^\/api\/workspaces$/,
@@ -148,6 +163,7 @@ export function createGateway(options: GatewayOptions) {
       new RegExp(`^/api/workspaces/${WS}/runs$`),
       async ({ req, res, who, params }) => {
         const input = parseBody(AskInput, await readJson(req));
+        if (input.skill && !(await skills?.usable(input.skill))) throw new GatewayError('SKILL_NOT_FOUND');
         res.statusCode = 202;
         return runs.start(who.userId, params[0], input);
       },

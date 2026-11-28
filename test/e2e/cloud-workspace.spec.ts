@@ -33,17 +33,18 @@ test('the same screens run on the Gateway: the answer streams, survives a reload
   // Only what the Gateway serves is offered.
   const tools = page.getByRole('navigation', { name: 'เครื่องมือ' });
   await expect(tools.getByRole('button', { name: /^ค้นงานเก่า/ })).toBeVisible();
-  for (const hidden of [
-    'ความจำ',
-    'เอกสาร',
-    'ตรวจใบเสร็จ',
-    'ศูนย์รวม Skill',
-    'เครื่องมือร่างเอกสาร',
-    'สื่อภายใน',
-  ])
+  for (const hidden of ['ความจำ', 'เอกสาร', 'ตรวจใบเสร็จ', 'เครื่องมือร่างเอกสาร', 'สื่อภายใน'])
     await expect(tools.getByRole('button', { name: new RegExp('^' + hidden) })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'การตั้งค่า', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'เลือกเอกสาร' })).toHaveCount(0);
+
+  // The organization's Skills come from the Gateway, with their details.
+  await tools.getByRole('button', { name: /^ศูนย์รวม Skill/ }).click();
+  await expect(page.getByRole('heading', { name: 'ถามสิทธิและระเบียบงานบุคคล' })).toBeVisible();
+  await page.getByRole('button', { name: 'รายละเอียด ถามสิทธิและระเบียบงานบุคคล' }).click();
+  await expect(page.getByRole('dialog').getByText('อ่านคำแนะนำ Skill')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'ปิด', exact: true }).last().click();
+  await page.goto(APP + '/');
 
   await page.getByRole('textbox', { name: 'ข้อความถึง AI' }).fill(QUESTION);
   await page.getByRole('button', { name: 'ส่งข้อความ' }).click();
