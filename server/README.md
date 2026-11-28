@@ -86,22 +86,23 @@ Docker socket หรือ SQLite
 - `GET /api/admin/health` สำหรับผู้ดูแลตาม `STEP_ADMINS`: นับ runtime และงานรายวัน ไม่มีชื่อ เจ้าของ หรือเนื้อหา และผู้ดูแลก็ยังเปิด
   Workspace ของคนอื่นไม่ได้
 
-| Method | Path                                                  | ทำอะไร                                                      |
-| ------ | ----------------------------------------------------- | ----------------------------------------------------------- |
-| GET    | `/healthz`                                            | liveness ไม่ต้อง login                                      |
-| GET    | `/api/me`                                             | ตัวตนที่ Gateway เห็น                                       |
-| GET    | `/api/workspaces`                                     | Workspace ของตัวเอง                                         |
-| POST   | `/api/workspaces`                                     | สร้าง `{ name }`                                            |
-| GET    | `/api/workspaces/:ws`                                 | สถานะ                                                       |
-| POST   | `/api/workspaces/:ws/start` · `/stop`                 | เปิด/หยุด runtime (ข้อมูลอยู่ครบ)                           |
-| GET    | `/api/workspaces/:ws/conversations`                   | บทสนทนา (Workspace ที่หยุดอยู่อ่านจากดัชนี ไม่ปลุก runtime) |
-| POST   | `/api/workspaces/:ws/conversations`                   | สร้างบทสนทนาเปล่า                                           |
-| GET    | `/api/workspaces/:ws/conversations/:session/messages` | ข้อความในบทสนทนา                                            |
-| POST   | `/api/workspaces/:ws/runs`                            | เริ่มงาน `{ text, sessionId? }` ได้ 202 ทันที               |
-| GET    | `/api/workspaces/:ws/runs` · `/runs/:run`             | สถานะงาน                                                    |
-| POST   | `/api/workspaces/:ws/runs/:run/cancel`                | ยกเลิก                                                      |
-| GET    | `/api/workspaces/:ws/events`                          | SSE: `run`, `delta`, `discard`, `activity`                  |
-| GET    | `/api/admin/health`                                   | ตัวเลขสำหรับผู้ดูแล                                         |
+| Method | Path                                                  | ทำอะไร                                                                                  |
+| ------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| GET    | `/healthz`                                            | liveness ไม่ต้อง login                                                                  |
+| GET    | `/api/me`                                             | ตัวตนที่ Gateway เห็น                                                                   |
+| GET    | `/api/workspaces`                                     | Workspace ของตัวเอง                                                                     |
+| POST   | `/api/workspaces`                                     | สร้าง `{ name }`                                                                        |
+| GET    | `/api/workspaces/:ws`                                 | สถานะ                                                                                   |
+| POST   | `/api/workspaces/:ws/start` · `/stop`                 | เปิด/หยุด runtime (ข้อมูลอยู่ครบ)                                                       |
+| GET    | `/api/workspaces/:ws/conversations`                   | บทสนทนา (Workspace ที่หยุดอยู่อ่านจากดัชนี ไม่ปลุก runtime)                             |
+| POST   | `/api/workspaces/:ws/conversations`                   | สร้างบทสนทนาเปล่า                                                                       |
+| GET    | `/api/workspaces/:ws/conversations/:session/messages` | ข้อความในบทสนทนา                                                                        |
+| POST   | `/api/workspaces/:ws/runs`                            | เริ่มงาน `{ text, sessionId? }` ได้ 202 ทันที                                           |
+| GET    | `/api/workspaces/:ws/runs` · `/runs/:run`             | สถานะงาน                                                                                |
+| POST   | `/api/workspaces/:ws/runs/:run/cancel`                | ยกเลิก                                                                                  |
+| GET    | `/api/workspaces/:ws/events`                          | SSE: `run`, `delta`, `discard`, `activity`                                              |
+| GET    | `/api/skills` · `/api/skills/:key`                    | Skill ขององค์กรจาก harness ที่ pin (ไม่รวม draft/retired และ Skill ของผู้ดูแล/นักพัฒนา) |
+| GET    | `/api/admin/health`                                   | ตัวเลขสำหรับผู้ดูแล                                                                     |
 
 ```bash
 STEP_DATA_ROOT=/srv/step/data \
@@ -152,7 +153,7 @@ VITE_GOOGLE_CLIENT_ID=….apps.googleusercontent.com   # client id เดีย�
   `run.read` มีข้อความที่กำลัง stream เหมือนเดิม คำสั่งอื่นตอบ `CLOUD_NOT_AVAILABLE`
 - Workspace แรกของผู้ใช้เก็บงานของหน้าแรก (สร้างให้เมื่อเริ่มงานแรก ชื่อ "งานของฉัน") Workspace อื่นอยู่ในตัวเลือก workspace เดิม
   ทุกงานเป็นส่วนตัว และไม่มีปุ่มแชร์
-- เมนูที่แสดง: แชต, ค้นงานเก่า, คู่มือ ส่วนความจำ เอกสาร ใบเสร็จ Skill แบบฟอร์ม สื่อภายใน และการตั้งค่า ถูกซ่อน และในแชตไม่มีปุ่ม
+- เมนูที่แสดง: แชต, ค้นงานเก่า, คู่มือ และศูนย์รวม Skill ส่วนความจำ เอกสาร ใบเสร็จ แบบฟอร์ม สื่อภายใน และการตั้งค่า ถูกซ่อน และในแชตไม่มีปุ่ม
   เลือกเอกสาร ใช้ความจำ บันทึกความจำ หรือใช้เป็นร่าง จนกว่า server จะรองรับ (ระยะ 4–5)
 - Login: ปุ่ม Google Identity Services ให้ ID token ที่ Gateway ตรวจ เก็บไว้ใน `sessionStorage` ของแท็บเท่านั้น หมดอายุราวหนึ่งชั่วโมง
   แล้วต้องลงชื่อใหม่ (Google อาจทำให้เองโดยไม่ต้องกด)

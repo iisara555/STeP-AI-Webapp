@@ -29,6 +29,8 @@ export function heldDriver() {
   };
   const listeners = new Set<(event: RuntimeEvent) => void>();
   const cancels: string[] = [];
+  /** Every question the runtime received, as the Manager sent it. */
+  const asks: Record<string, unknown>[] = [];
   let next = 0;
   const driver: RuntimeDriver = {
     async start() {
@@ -46,6 +48,7 @@ export function heldDriver() {
             return { sessionId };
           }
           if (method === 'ask') {
+            asks.push({ ...params });
             conversations.get(params.sessionId)!.push({ role: 'user', text: params.text });
             const ready = early.get(params.sessionId);
             early.delete(params.sessionId);
@@ -74,6 +77,7 @@ export function heldDriver() {
   return {
     driver,
     cancels,
+    asks,
     say(sessionId: string, text: string) {
       for (const listener of listeners) listener({ sessionId, type: 'delta', text });
     },

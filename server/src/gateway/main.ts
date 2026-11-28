@@ -10,6 +10,7 @@ import { googleIdTokenAuth, type Authenticator } from './auth.ts';
 import { createGateway } from './http.ts';
 import { QuotaStore } from './quota-store.ts';
 import { DEFAULT_QUOTAS, RunService } from './runs.ts';
+import { skillLibrary } from './skills.ts';
 
 const env = (name: string, fallback?: string) => {
   const value = process.env[name] ?? fallback;
@@ -85,6 +86,7 @@ const server = createGateway({
   audit,
   quotas,
   origin: env('STEP_APP_ORIGIN'),
+  skills: skillLibrary(),
   authenticate: remember(
     googleIdTokenAuth({
       clientId: env('STEP_GOOGLE_CLIENT_ID'),

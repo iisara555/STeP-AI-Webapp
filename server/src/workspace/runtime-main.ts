@@ -129,11 +129,11 @@ const methods: Record<string, (params: unknown) => unknown> = {
   },
   async ask(params): Promise<AskResult> {
     if (!grant) throw new Error('PROVIDER_NOT_CONNECTED');
-    const { text, sessionId } = AskInput.parse(params);
+    const { text, sessionId, skill } = AskInput.parse(params);
     const id = sessionId ?? engine.store.create('central', 'cc').id;
     if (!engine.store.get('session', id)) throw new Error('CONVERSATION_NOT_FOUND');
     try {
-      const run = () => engine.work.run(id, text, '', true, undefined, 'chat');
+      const run = () => engine.work.run(id, text, '', true, skill, 'chat');
       // A current public question (this year's holidays, today's rates) is searched first and answered from the
       // evidence; the engine still checks route, authority and privacy before it searches.
       await (webSearchUrl && !syntheticBaseUrl && needsPublicWebSearch(text) ? runWebFirst(run) : run());

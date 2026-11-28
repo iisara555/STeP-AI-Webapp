@@ -59,6 +59,11 @@ export const AskInput = z.object({
   text: z.string().trim().min(1).max(20_000),
   /** Continue this conversation of the Workspace; a new one is created when absent. */
   sessionId: z.string().min(1).max(200).optional(),
+  /** A Skill the person picked; the Gateway checks it is one staff may use before the run starts. */
+  skill: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]{0,80}$/)
+    .optional(),
 });
 export type AskInput = z.input<typeof AskInput>;
 

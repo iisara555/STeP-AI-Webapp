@@ -8,6 +8,7 @@ import type { AuditEntry } from '../src/gateway/audit.ts';
 import type { Authenticator, Identity } from '../src/gateway/auth.ts';
 import { createGateway } from '../src/gateway/http.ts';
 import { QuotaStore } from '../src/gateway/quota-store.ts';
+import { skillLibrary, type SkillLibrary } from '../src/gateway/skills.ts';
 import { DEFAULT_QUOTAS, RunService, type Quotas } from '../src/gateway/runs.ts';
 import type {
   AskResult,
@@ -35,6 +36,7 @@ async function withGateway(
   }) => Promise<void>,
   quotas: Quotas = DEFAULT_QUOTAS,
   quotaStore?: QuotaStore,
+  skills?: SkillLibrary,
 ) {
   const dataRoot = await mkdtemp(join(tmpdir(), 'step-gateway-'));
   const runtime = heldDriver();
@@ -49,6 +51,7 @@ async function withGateway(
     origin: ORIGIN,
     quotas,
     heartbeatMs: 60_000,
+    skills,
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -363,6 +366,73 @@ test('the quota store counts each user and day on its own and refuses at the lim
   assert.equal(store.reserve('a', '2027-01-15', 2), true);
   assert.equal(store.used('a', '2026-11-23'), 0);
   store.close();
+});
+
+test('the Skills page lists the pinned harness Skills staff may use, and a run can name one', async () => {
+  const library = skillLibrary();
+  const listed = await library.list();
+  const keys = listed.map((skill) => skill.skill_key);
+  assert.ok(keys.includes('hr-policy-lookup'));
+  assert.ok(listed.length >= 40, 'the pilot Skills of the pinned harness');
+  for (const skill of listed) {
+    assert.equal(skill.instructions, '', 'the list leaves instructions out');
+    assert.ok(!['ai-admin', 'developer'].includes(String(skill.metadata.owner)), skill.skill_key);
+    assert.notEqual(skill.metadata.stage, 'draft', skill.skill_key);
+    assert.ok(!('paths' in skill.metadata), 'no harness paths reach the browser');
+  }
+  // A draft Skill of this pin (needs Desktop's browser anyway): neither listed nor readable.
+  assert.ok(!keys.includes('browser-form-assistant'));
+  assert.equal(await library.read('browser-form-assistant'), undefined);
+
+  await withGateway(
+    async ({ call }) => {
+      const list = await (await call('alice', '/api/skills')).json();
+      assert.equal(list.length, listed.length);
+      const one = await (await call('alice', '/api/skills/hr-policy-lookup')).json();
+      assert.match(one.instructions, /^---/);
+      assert.equal((await call('alice', '/api/skills/not-a-skill')).status, 404);
+      assert.equal((await call('alice', '/api/skills/..%2Fsecret')).status, 404);
+    },
+    DEFAULT_QUOTAS,
+    undefined,
+    library,
+  );
+
+  await withGateway(
+    async ({ call, runtime }) => {
+      const workspace = await (await call('alice', '/api/workspaces', post({ name: 'งาน' }))).json();
+      const runs = `/api/workspaces/${workspace.id}/runs`;
+      for (const skill of ['not-a-skill', 'browser-form-assistant', 'step-router']) {
+        const refused = await call('alice', runs, post({ text: 'ช่วยหน่อย', skill }));
+        assert.deepEqual([refused.status, await refused.json()], [404, { code: 'SKILL_NOT_FOUND' }], skill);
+      }
+      assert.equal(
+        (await call('alice', runs, post({ text: 'ลาได้กี่วัน', skill: 'hr-policy-lookup' }))).status,
+        202,
+      );
+      await until(async () => (runtime.asks.length ? true : undefined));
+      assert.equal(runtime.asks[0].skill, 'hr-policy-lookup');
+      assert.equal((await call('alice', runs, post({ text: 'อีกเรื่อง' }))).status, 202);
+      await until(async () => (runtime.asks.length === 2 ? true : undefined));
+      assert.equal(runtime.asks[1].skill, undefined);
+    },
+    DEFAULT_QUOTAS,
+    undefined,
+    library,
+  );
+});
+
+test('without a Skill library the Gateway lists none and refuses a named Skill', async () => {
+  await withGateway(async ({ call }) => {
+    assert.deepEqual(await (await call('alice', '/api/skills')).json(), []);
+    const workspace = await (await call('alice', '/api/workspaces', post({ name: 'งาน' }))).json();
+    const refused = await call(
+      'alice',
+      `/api/workspaces/${workspace.id}/runs`,
+      post({ text: 'x', skill: 'hr-policy-lookup' }),
+    );
+    assert.equal(refused.status, 404);
+  });
 });
 
 test('administrators see counts only; the audit trail keeps who/what/outcome without content', async () => {
