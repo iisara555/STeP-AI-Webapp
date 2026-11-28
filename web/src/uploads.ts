@@ -1,6 +1,7 @@
 import type { DocumentRecord, Visibility } from '../../packages/harness-core/src/contracts.ts';
 import type { Host } from './host.ts';
 import { extractText } from './extract.ts';
+import { cloudMode } from './gateway.ts';
 const mimeTypes: Record<string, string> = {
   pdf: 'application/pdf',
   png: 'image/png',
@@ -28,7 +29,8 @@ export async function uploadFile(
   parent?: string,
 ) {
   const normalized = normalizeFile(file);
-  const text = await extractText(normalized);
+  // Cloud Workspace reads the stored file itself; the browser extracts text only for the Supabase index.
+  const text = cloudMode() ? '' : await extractText(normalized);
   const doc = await host.call<DocumentRecord>('document.create', {
     tenant,
     workspace,

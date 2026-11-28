@@ -15,6 +15,9 @@ import type { ViewProps } from './App.tsx';
 import { Busy, Empty, FreeTierNote, Modal, Visibility, bytes, Segmented } from './components.tsx';
 import { saveBlob } from './host.ts';
 import { uploadFile } from './uploads.ts';
+import { cloudMode } from './gateway.ts';
+/** Cloud Workspace keeps files in the person's Workspace, where the AI reads them when asked; no Drive or indexing. */
+const cloud = cloudMode();
 export function Documents({ host, data, tenant, workspace, refresh, fail }: ViewProps) {
   const [filter, setFilter] = useState<'private' | 'workspace'>('private'),
     [search, setSearch] = useState(''),
@@ -38,7 +41,7 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
     try {
       await uploadFile(host, tenant, filter === 'workspace' ? workspace?.id || null : null, filter, file);
       await refresh();
-      setNotice('เก็บไฟล์แล้ว · ยังไม่ได้ส่งให้ AI');
+      setNotice(cloud ? 'เก็บไฟล์แล้ว · ถามถึงไฟล์นี้ในแชตได้เลย' : 'เก็บไฟล์แล้ว · ยังไม่ได้ส่งให้ AI');
     } catch (e) {
       fail(e);
     } finally {
@@ -136,13 +139,19 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
       <div className="page-heading">
         <div>
           <h1>เอกสาร</h1>
-          <p>เก็บไฟล์ส่วนตัว หรือเลือกแชร์เฉพาะใน workspace</p>
+          <p>
+            {cloud
+              ? 'ไฟล์ส่วนตัวที่ AI อ่านได้เมื่อคุณถามถึง'
+              : 'เก็บไฟล์ส่วนตัว หรือเลือกแชร์เฉพาะใน workspace'}
+          </p>
         </div>
         <div className="inline-actions">
-          <button disabled={busy} onClick={() => void chooseDrive()}>
-            <Link2 size={17} />
-            เลือกจาก Google Drive
-          </button>
+          {!cloud && (
+            <button disabled={busy} onClick={() => void chooseDrive()}>
+              <Link2 size={17} />
+              เลือกจาก Google Drive
+            </button>
+          )}
           <button className="primary" disabled={busy} onClick={() => fileInput.current?.click()}>
             <Upload size={17} />
             อัปโหลดไฟล์
@@ -160,15 +169,17 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
         }}
       />
       <div className="filter-bar">
-        <Segmented
-          label="เอกสารที่แสดง"
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: 'private', label: 'ส่วนตัว' },
-            { value: 'workspace', label: 'แชร์ใน workspace', disabled: !workspace },
-          ]}
-        />
+        {!cloud && (
+          <Segmented
+            label="เอกสารที่แสดง"
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: 'private', label: 'ส่วนตัว' },
+              { value: 'workspace', label: 'แชร์ใน workspace', disabled: !workspace },
+            ]}
+          />
+        )}
         <label className="search">
           <Search size={16} />
           <input
@@ -210,18 +221,20 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
             <div className="inline-actions">
               {d.source_kind === 'upload' && d.status === 'ready' && (
                 <>
-                  <button
-                    disabled={busy || data.ai?.textOnly}
-                    onClick={() =>
-                      setConsent({
-                        ...d,
-                        providerName: data.ai?.displayName || 'Google Gemini API',
-                        providerConsent: data.ai?.consentId,
-                      })
-                    }
-                  >
-                    เตรียมให้ AI ค้น
-                  </button>
+                  {!cloud && (
+                    <button
+                      disabled={busy || data.ai?.textOnly}
+                      onClick={() =>
+                        setConsent({
+                          ...d,
+                          providerName: data.ai?.displayName || 'Google Gemini API',
+                          providerConsent: data.ai?.consentId,
+                        })
+                      }
+                    >
+                      เตรียมให้ AI ค้น
+                    </button>
+                  )}
                   <button
                     aria-label={'ดาวน์โหลด ' + d.name}
                     onClick={() =>
@@ -248,7 +261,11 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
         <Empty
           art="workspace"
           title="เริ่มเก็บเอกสารที่ใช้ทำงาน"
-          detail="รองรับ PDF รูปภาพ Word Excel PowerPoint และไฟล์ข้อความ ไม่เกิน 10 MB ต่อไฟล์"
+          detail={
+            cloud
+              ? 'PDF Word และไฟล์ข้อความ AI อ่านได้ทันที ไม่เกิน 25 MB ต่อไฟล์'
+              : 'รองรับ PDF รูปภาพ Word Excel PowerPoint และไฟล์ข้อความ ไม่เกิน 10 MB ต่อไฟล์'
+          }
         >
           <button onClick={() => fileInput.current?.click()}>
             <Plus size={17} />
@@ -256,17 +273,21 @@ export function Documents({ host, data, tenant, workspace, refresh, fail }: View
           </button>
         </Empty>
       )}
-      <div className="info-card">
-        <Link2 size={19} />
-        <p>
-          ไฟล์จาก Google Drive ใช้สิทธิ์บัญชีของคุณ ไม่คัดลอกทั้ง Drive
-          และไม่เปิดให้สมาชิกคนอื่นอ่านผ่านบัญชีคุณ
-        </p>
-      </div>
+      {!cloud && (
+        <div className="info-card">
+          <Link2 size={19} />
+          <p>
+            ไฟล์จาก Google Drive ใช้สิทธิ์บัญชีของคุณ ไม่คัดลอกทั้ง Drive
+            และไม่เปิดให้สมาชิกคนอื่นอ่านผ่านบัญชีคุณ
+          </p>
+        </div>
+      )}
       {deleting && (
         <Modal title="ลบเอกสาร" onClose={() => setDeleting(null)}>
           <p>
-            ลบ “{deleting.name}” และข้อมูลที่เตรียมไว้สำหรับค้นหาออกจาก STeP{' '}
+            {cloud
+              ? `ลบ “${deleting.name}” ออกจาก Workspace ของคุณ`
+              : `ลบ “${deleting.name}” และข้อมูลที่เตรียมไว้สำหรับค้นหาออกจาก STeP `}
             {deleting.source_kind === 'drive' && 'ต้นฉบับใน Google Drive จะยังอยู่'}
           </p>
           <footer>

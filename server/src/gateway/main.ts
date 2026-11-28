@@ -11,6 +11,7 @@ import { createGateway } from './http.ts';
 import { QuotaStore } from './quota-store.ts';
 import { DEFAULT_QUOTAS, RunService } from './runs.ts';
 import { skillLibrary } from './skills.ts';
+import { DEFAULT_FILE_LIMITS, FileStore } from './files.ts';
 
 const env = (name: string, fallback?: string) => {
   const value = process.env[name] ?? fallback;
@@ -87,6 +88,11 @@ const server = createGateway({
   quotas,
   origin: env('STEP_APP_ORIGIN'),
   skills: skillLibrary(),
+  // Per-file and per-person limits in MB; documents live in each Workspace's files folder.
+  files: new FileStore(manager, {
+    fileBytes: number('STEP_FILE_MAX_MB', DEFAULT_FILE_LIMITS.fileBytes / 1048576) * 1048576,
+    userBytes: number('STEP_STORAGE_PER_USER_MB', DEFAULT_FILE_LIMITS.userBytes / 1048576) * 1048576,
+  }),
   authenticate: remember(
     googleIdTokenAuth({
       clientId: env('STEP_GOOGLE_CLIENT_ID'),

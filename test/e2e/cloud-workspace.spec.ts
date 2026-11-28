@@ -33,7 +33,7 @@ test('the same screens run on the Gateway: the answer streams, survives a reload
   // Only what the Gateway serves is offered.
   const tools = page.getByRole('navigation', { name: 'เครื่องมือ' });
   await expect(tools.getByRole('button', { name: /^ค้นงานเก่า/ })).toBeVisible();
-  for (const hidden of ['ความจำ', 'เอกสาร', 'ตรวจใบเสร็จ', 'เครื่องมือร่างเอกสาร', 'สื่อภายใน'])
+  for (const hidden of ['ความจำ', 'ตรวจใบเสร็จ', 'เครื่องมือร่างเอกสาร', 'สื่อภายใน'])
     await expect(tools.getByRole('button', { name: new RegExp('^' + hidden) })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'การตั้งค่า', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'เลือกเอกสาร' })).toHaveCount(0);
@@ -44,6 +44,18 @@ test('the same screens run on the Gateway: the answer streams, survives a reload
   await page.getByRole('button', { name: 'รายละเอียด ถามสิทธิและระเบียบงานบุคคล' }).click();
   await expect(page.getByRole('dialog').getByText('อ่านคำแนะนำ Skill')).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'ปิด', exact: true }).last().click();
+
+  // A document is kept in the person's Workspace and listed; Drive and indexing are not offered.
+  await tools.getByRole('button', { name: /^เอกสาร/ }).click();
+  await expect(page.getByRole('button', { name: 'เลือกจาก Google Drive' })).toHaveCount(0);
+  await page.getByLabel('เลือกไฟล์อัปโหลด').setInputFiles({
+    name: 'ช่องทางติดต่อ.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('ติดต่อฝ่ายบุคคลทางอีเมล (ข้อมูลสังเคราะห์)'),
+  });
+  await expect(page.getByRole('status').getByText('ถามถึงไฟล์นี้ในแชตได้เลย')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'ช่องทางติดต่อ.md' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'เตรียมให้ AI ค้น' })).toHaveCount(0);
   await page.goto(APP + '/');
 
   await page.getByRole('textbox', { name: 'ข้อความถึง AI' }).fill(QUESTION);

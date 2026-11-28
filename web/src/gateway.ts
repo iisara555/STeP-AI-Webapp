@@ -3,6 +3,7 @@
 import type {
   ChatMessage,
   Conversation,
+  DocumentRecord,
   Run,
   Skill,
   Snapshot,
@@ -23,10 +24,10 @@ export function gatewayConfig(): GatewayConfig | null {
 }
 
 /**
- * Pages the Gateway can serve today. Memory, documents, receipts, forms and Google come with the server's tool host
+ * Pages the Gateway can serve today. Memory, receipts, forms and Google come with the server's tool host
  * (ADR 0001 phases 4–5); until then they are hidden rather than shown broken.
  */
-export const GATEWAY_PAGES: ReadonlySet<Page> = new Set(['chat', 'history', 'help', 'skills']);
+export const GATEWAY_PAGES: ReadonlySet<Page> = new Set(['chat', 'history', 'help', 'skills', 'documents']);
 
 export const pageAvailable = (page: Page) => !gatewayConfig() || GATEWAY_PAGES.has(page);
 
@@ -90,6 +91,7 @@ type GatewayRun = {
   startedAt: string;
 };
 type Finished = { answer?: string; sources: string[] };
+type GatewayFile = { name: string; bytes: number; modifiedAt: string; mime: string };
 
 export type GatewayHostOptions = GatewayConfig & {
   /** The current Google ID token, or null when the tab has none. */
@@ -130,6 +132,8 @@ export function gatewayHost(options: GatewayHostOptions): Host {
   const partial = new Map<string, string>();
   const finished = new Map<string, Finished>();
   const streams = new Map<string, AbortController>();
+  /** Uploads begun with document.create: provisional path → where it goes, then the file as saved. */
+  const pendingUploads = new Map<string, { workspaceId: string; name: string; saved?: DocumentRecord }>();
   /** The signed-in employee, as the Gateway sees them; the chat lets only a run's owner stop it. */
   let identity: Promise<{ userId: string; email: string; admin: boolean }> | undefined;
   const whoAmI = () => {
@@ -142,7 +146,13 @@ export function gatewayHost(options: GatewayHostOptions): Host {
     return identity;
   };
 
-  async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  /** One authenticated call; a refused credential signs the tab out, other refusals become the Gateway's code. */
+  async function gatewayFetch(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: { json: unknown } | { file: Blob },
+    timeoutMs = 25_000,
+  ): Promise<Response> {
     const token = options.credential();
     if (!token) throw new ApiError('UNAUTHENTICATED');
     let response: Response;
@@ -151,22 +161,61 @@ export function gatewayHost(options: GatewayHostOptions): Host {
         method,
         headers: {
           Authorization: 'Bearer ' + token,
-          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          ...(body && 'json' in body ? { 'Content-Type': 'application/json' } : {}),
+          ...(body && 'file' in body ? { 'Content-Type': 'application/octet-stream' } : {}),
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: !body ? undefined : 'json' in body ? JSON.stringify(body.json) : body.file,
         cache: 'no-store',
-        signal: AbortSignal.timeout(25_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       throw new ApiError('NETWORK_ERROR');
     }
-    const result = await response.json().catch(() => ({ code: 'SERVER_ERROR' }));
     if (response.status === 401) {
       options.onUnauthorized?.();
       throw new ApiError('UNAUTHENTICATED');
     }
-    if (!response.ok) throw new ApiError(typeof result.code === 'string' ? result.code : 'SERVER_ERROR');
-    return result as T;
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({ code: 'SERVER_ERROR' }));
+      throw new ApiError(typeof result.code === 'string' ? result.code : 'SERVER_ERROR');
+    }
+    return response;
+  }
+
+  async function request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+    const response = await gatewayFetch(method, path, body === undefined ? undefined : { json: body });
+    if (response.status === 204) return undefined as T;
+    return (await response.json().catch(() => {
+      throw new ApiError('SERVER_ERROR');
+    })) as T;
+  }
+
+  /** The home Workspace's files as the Documents page lists them; ids and paths are `<workspace>/<file name>`. */
+  function documentRecord(workspaceId: string, userId: string, file: GatewayFile): DocumentRecord {
+    const id = `${workspaceId}/${encodeURIComponent(file.name)}`;
+    return {
+      id,
+      tenant_id: CLOUD_TENANT,
+      owner_id: userId,
+      workspace_id: null,
+      visibility: 'private',
+      name: file.name,
+      mime: file.mime.split(';')[0],
+      bytes: file.bytes,
+      source_kind: 'upload',
+      drive_file_id: null,
+      object_path: id,
+      status: 'ready',
+      error_code: null,
+      created_at: file.modifiedAt,
+    };
+  }
+
+  /** `<workspace>/<encoded name>` back to its parts, refusing anything else. */
+  function splitDocument(value: unknown) {
+    const match = /^(ws_[0-9a-f]{32})\/([^/]+)$/.exec(String(value ?? ''));
+    if (!match) throw new ApiError('ACCESS_DENIED');
+    return { workspaceId: match[1], encoded: match[2] };
   }
 
   /** Follows one Workspace's events while it has a run this tab is watching, resuming after a dropped connection. */
@@ -325,7 +374,11 @@ export function gatewayHost(options: GatewayHostOptions): Host {
         })),
       sessions,
       memories: [],
-      documents: [],
+      documents: home
+        ? (await request<GatewayFile[]>('GET', `/api/workspaces/${home}/files`)).map((file) =>
+            documentRecord(home, me.userId, file),
+          )
+        : [],
       skills,
       profiles: [],
     };
@@ -350,11 +403,23 @@ export function gatewayHost(options: GatewayHostOptions): Host {
       identity = undefined;
       clearCredential();
     },
-    async upload() {
-      throw new ApiError('CLOUD_NOT_AVAILABLE');
+    async upload(path: string, file: File) {
+      const pending = pendingUploads.get(path);
+      if (!pending) throw new ApiError('ACCESS_DENIED');
+      const response = await gatewayFetch(
+        'POST',
+        `/api/workspaces/${pending.workspaceId}/files?name=${encodeURIComponent(pending.name)}`,
+        { file },
+        120_000,
+      );
+      const me = await whoAmI();
+      pending.saved = documentRecord(pending.workspaceId, me.userId, (await response.json()) as GatewayFile);
     },
-    async download() {
-      throw new ApiError('CLOUD_NOT_AVAILABLE');
+    async download(path: string) {
+      const { workspaceId, encoded } = splitDocument(path);
+      return (
+        await gatewayFetch('GET', `/api/workspaces/${workspaceId}/files/${encoded}`, undefined, 120_000)
+      ).blob();
     },
     async call<T>(action: string, input: Record<string, unknown> = {}): Promise<T> {
       const result = await (async (): Promise<unknown> => {
@@ -441,6 +506,42 @@ export function gatewayHost(options: GatewayHostOptions): Host {
             runWorkspace.set(run.id, workspaceId);
             follow(workspaceId);
             return toRun(run);
+          }
+          case 'document.create': {
+            // Nothing is stored until the file itself arrives (upload); the Gateway names it safely then.
+            const workspaceId = await homeWorkspace();
+            const path = `pending:${crypto.randomUUID()}`;
+            const name = String(input.name ?? '').slice(0, 400);
+            pendingUploads.set(path, { workspaceId, name });
+            const me = await whoAmI();
+            return {
+              ...documentRecord(workspaceId, me.userId, {
+                name,
+                bytes: Number(input.bytes) || 0,
+                modifiedAt: new Date().toISOString(),
+                mime: String(input.mime ?? ''),
+              }),
+              id: path,
+              object_path: path,
+              status: 'uploading',
+            } satisfies DocumentRecord;
+          }
+          case 'document.commit': {
+            const saved = pendingUploads.get(String(input.id))?.saved;
+            if (!saved) throw new ApiError('UPLOAD_FAILED');
+            pendingUploads.delete(String(input.id));
+            return saved;
+          }
+          case 'document.delete': {
+            const id = String(input.id ?? '');
+            const pending = pendingUploads.get(id);
+            if (pending) {
+              pendingUploads.delete(id);
+              if (!pending.saved) return { ok: true };
+            }
+            const { workspaceId, encoded } = splitDocument(pending?.saved?.id ?? id);
+            await request('DELETE', `/api/workspaces/${workspaceId}/files/${encoded}`);
+            return { ok: true };
           }
           case 'skill.read':
             return request<Skill>('GET', `/api/skills/${encodeURIComponent(String(input.key ?? ''))}`);

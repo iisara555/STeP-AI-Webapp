@@ -8,6 +8,7 @@ import type { RuntimeManager } from '../workspace/manager.ts';
 import type { Audit } from './audit.ts';
 import type { Authenticator, Identity } from './auth.ts';
 import { codeOf, DEFAULT_QUOTAS, GatewayError, type Quotas, type RunService } from './runs.ts';
+import type { FileStore } from './files.ts';
 import type { SkillLibrary } from './skills.ts';
 
 export type GatewayOptions = {
@@ -22,6 +23,8 @@ export type GatewayOptions = {
   now?: () => number;
   /** The organization's Skills; without it the Skills routes answer an empty list and runs cannot name one. */
   skills?: SkillLibrary;
+  /** People's own documents in their Workspaces; without it the file routes answer NOT_FOUND. */
+  files?: FileStore;
 };
 
 const BODY_LIMIT = 64 * 1024;
@@ -38,6 +41,12 @@ const STATUS: Record<string, number> = {
   RUN_NOT_FOUND: 404,
   CONVERSATION_NOT_FOUND: 404,
   SKILL_NOT_FOUND: 404,
+  FILE_NOT_FOUND: 404,
+  FILE_EMPTY: 400,
+  FILE_NAME_TAKEN: 409,
+  FILE_TOO_LARGE: 413,
+  FILE_UNSUPPORTED: 415,
+  STORAGE_FULL: 507,
   RUN_ALREADY_ACTIVE: 409,
   RUN_NOT_ACTIVE: 409,
   RUNTIME_NOT_RUNNING: 409,
@@ -59,7 +68,18 @@ const WS = '(ws_[0-9a-f]{32})';
 const RUN = '(run_[0-9a-f]{32})';
 
 export function createGateway(options: GatewayOptions) {
-  const { manager, runs, authenticate, audit, origin, skills } = options;
+  const { manager, runs, authenticate, audit, origin, skills, files } = options;
+  const fileStore = () => {
+    if (!files) throw new GatewayError('NOT_FOUND');
+    return files;
+  };
+  const fileName = (raw: string) => {
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      throw new GatewayError('FILE_NOT_FOUND');
+    }
+  };
   const quotas = options.quotas ?? DEFAULT_QUOTAS;
   const heartbeatMs = options.heartbeatMs ?? 15_000;
   const now = options.now ?? Date.now;
@@ -155,6 +175,52 @@ export function createGateway(options: GatewayOptions) {
     ],
     [
       'GET',
+      new RegExp(`^/api/workspaces/${WS}/files$`),
+      async ({ who, params }) => (files ? files.list(who.userId, params[0]) : []),
+    ],
+    [
+      'POST',
+      new RegExp(`^/api/workspaces/${WS}/files$`),
+      async ({ req, res, who, params }) => {
+        const name = new URL(req.url ?? '/', 'http://gateway').searchParams.get('name') ?? '';
+        if (!name || name.length > 400) throw new GatewayError('INVALID_INPUT');
+        const saved = await fileStore().save(who.userId, params[0], name, req);
+        // Who and where only: the audit never holds a file name or content.
+        audit({ actor: who.userId, action: 'file.upload', workspaceId: params[0], outcome: 'saved' });
+        res.statusCode = 201;
+        return saved;
+      },
+    ],
+    [
+      'GET',
+      new RegExp(`^/api/workspaces/${WS}/files/([^/]+)$`),
+      async ({ res, who, params }) => {
+        const name = fileName(params[1]);
+        const file = await fileStore().open(who.userId, params[0], name);
+        res.writeHead(200, {
+          'Content-Type': file.mime,
+          'Content-Length': String(file.bytes),
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'private, no-store',
+        });
+        file.stream.pipe(res);
+        await new Promise((done) => res.on('close', done));
+        return undefined;
+      },
+    ],
+    [
+      'DELETE',
+      new RegExp(`^/api/workspaces/${WS}/files/([^/]+)$`),
+      async ({ res, who, params }) => {
+        await fileStore().remove(who.userId, params[0], fileName(params[1]));
+        audit({ actor: who.userId, action: 'file.delete', workspaceId: params[0], outcome: 'deleted' });
+        res.statusCode = 204;
+        return undefined;
+      },
+    ],
+    [
+      'GET',
       new RegExp(`^/api/workspaces/${WS}/runs$`),
       async ({ who, params }) => runs.list(who.userId, params[0]),
     ],
@@ -208,7 +274,7 @@ export function createGateway(options: GatewayOptions) {
         res.setHeader('Vary', 'Origin');
       }
       if (req.method === 'OPTIONS') {
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE');
         res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Last-Event-ID');
         res.setHeader('Access-Control-Max-Age', '600');
         return send(res, 204);
@@ -223,6 +289,8 @@ export function createGateway(options: GatewayOptions) {
         const match = req.method === method ? pattern.exec(url.pathname) : null;
         if (!match) continue;
         const result = await handler({ req, res, who, params: match.slice(1) });
+        // A download has already been written.
+        if (res.headersSent) return;
         return send(res, res.statusCode, result);
       }
       throw new GatewayError('NOT_FOUND');

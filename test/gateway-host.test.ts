@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import type {
   ChatMessage,
   Conversation,
+  DocumentRecord,
   Run,
   Skill,
   Snapshot,
@@ -17,6 +18,8 @@ import type { Authenticator } from '../server/src/gateway/auth.ts';
 import { createGateway } from '../server/src/gateway/http.ts';
 import { RunService } from '../server/src/gateway/runs.ts';
 import type { SkillLibrary, SkillView } from '../server/src/gateway/skills.ts';
+import { FileStore } from '../server/src/gateway/files.ts';
+import { uploadFile } from '../web/src/uploads.ts';
 import { RuntimeManager } from '../server/src/workspace/manager.ts';
 import { heldDriver } from '../server/test/support/held-driver.ts';
 import { CLOUD_TENANT, credentialClaims, gatewayHost } from '../web/src/gateway.ts';
@@ -41,6 +44,7 @@ async function withGateway(
     authenticate,
     audit,
     skills,
+    files: new FileStore(manager),
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -200,13 +204,7 @@ test('a run can be cancelled from the chat, and missing features say so instead 
     });
     assert.deepEqual([ended.status, ended.error_code], ['cancelled', 'CANCELLED']);
 
-    for (const action of [
-      'memory.save',
-      'document.create',
-      'receipt.history',
-      'google.state',
-      'session.draft',
-    ])
+    for (const action of ['memory.save', 'receipt.history', 'google.state', 'session.draft'])
       await assert.rejects(() => host.call(action, {}), { code: 'CLOUD_NOT_AVAILABLE' }, action);
     await assert.rejects(() => host.call('session.read', { id: '../../etc' }), { code: 'ACCESS_DENIED' });
     await assert.rejects(() => host.call('run.read', { id: 'run_unknown' }), { code: 'ACCESS_DENIED' });
@@ -254,6 +252,31 @@ test('the Skills page reads the organization Skills and a chosen Skill goes with
       return current.status === 'running' ? undefined : current;
     });
   }, library);
+});
+
+test('the Documents page keeps files in the home Workspace: upload, list, download and delete', async () => {
+  await withGateway(async ({ host: make }) => {
+    const host = make();
+    const file = new File(['ลาพักร้อนได้ 10 วันต่อปี'], 'ระเบียบ/การลา.md', { type: 'text/markdown' });
+    const saved = await uploadFile(host, CLOUD_TENANT, null, 'private', file);
+    assert.equal(saved.name, 'ระเบียบ_การลา.md', 'the Gateway names the file safely');
+    assert.equal(saved.status, 'ready');
+
+    const listed = (await host.call<Snapshot>('snapshot')).documents;
+    assert.deepEqual(
+      listed.map((d: DocumentRecord) => [d.name, d.owner_id, d.visibility, d.status]),
+      [['ระเบียบ_การลา.md', 'alice', 'private', 'ready']],
+    );
+    assert.equal(await (await host.download(listed[0].object_path!)).text(), 'ลาพักร้อนได้ 10 วันต่อปี');
+    await assert.rejects(() => host.download('../../etc/passwd'), { code: 'ACCESS_DENIED' });
+
+    await host.call('document.delete', { id: listed[0].id });
+    assert.deepEqual((await host.call<Snapshot>('snapshot')).documents, []);
+    await assert.rejects(
+      () => uploadFile(host, CLOUD_TENANT, null, 'private', new File(['MZ'], 'tool.exe')),
+      /FILE_UNSUPPORTED/,
+    );
+  });
 });
 
 test('a credential the Gateway refuses signs the tab out', async () => {
